@@ -4,14 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Shifty — 飲食店向け AI シフト自動作成 SaaS</title>
-  <meta name="description" content="飲食店オーナーのシフト作成を、AI が 5 分で完了。希望収集→AI生成→確定通知まで一気通貫。月¥3,000〜、14日間無料トライアル。デモはログイン不要で即体験可能。" />
+  <meta name="description" content="飲食店オーナーのシフト作成を、AI が 5 分で完了。希望収集→AI生成→通知文生成まで一気通貫。スタッフ 8 名までは永久無料、9 名以上は月¥1,980。デモはログイン不要で即体験可能。" />
   <meta name="keywords" content="飲食店,シフト管理,AI,シフト作成,自動化,SaaS,飲DX,Shifty" />
   <meta name="author" content="飲DX" />
   <link rel="canonical" href="__SITE_URL__/" />
 
   <!-- Open Graph -->
   <meta property="og:title" content="Shifty — 飲食店のシフト作成、AIで5分。" />
-  <meta property="og:description" content="希望収集→AI生成→通知文ワンタップ生成まで一気通貫。月¥3,000〜・14日間無料・デモ即体験。" />
+  <meta property="og:description" content="希望収集→AI生成→通知文ワンタップ生成まで一気通貫。スタッフ 8 名まで永久無料・Pro 月¥1,980。デモ即体験。" />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="__SITE_URL__/" />
   <meta property="og:image" content="__SITE_URL__/og.png" />
@@ -23,7 +23,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Shifty — 飲食店のシフト作成、AIで5分。" />
-  <meta name="twitter:description" content="希望収集→AI生成→通知文ワンタップ生成まで一気通貫。月¥3,000〜・14日間無料。" />
+  <meta name="twitter:description" content="希望収集→AI生成→通知文ワンタップ生成まで一気通貫。スタッフ 8 名まで永久無料・Pro 月¥1,980。" />
   <meta name="twitter:image" content="__SITE_URL__/og.png" />
 
   <!-- JSON-LD: SoftwareApplication -->
@@ -39,9 +39,9 @@
     "offers": {
       "@type": "AggregateOffer",
       "priceCurrency": "JPY",
-      "lowPrice": "3000",
-      "highPrice": "10000",
-      "offerCount": "3"
+      "lowPrice": "0",
+      "highPrice": "1980",
+      "offerCount": 2
     },
     "publisher": {
       "@type": "Organization",
@@ -134,7 +134,7 @@
       </nav>
       <div class="flex items-center gap-2">
         <a href="/app" class="hidden sm:inline-block text-sm text-slate-600 hover:text-brand-600 px-3 py-1.5">ログイン</a>
-        <a href="#contact" data-plan="standard" class="plan-cta text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 py-2 font-semibold">14日間 無料で試す</a>
+        <a href="#contact" data-plan="free" class="plan-cta-free text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2 font-semibold">無料で始める</a>
       </div>
     </div>
   </header>
@@ -154,15 +154,15 @@
         <a href="/demo" onclick="if(window.gtag)gtag('event','demo_click');" class="bg-white hover:bg-slate-50 text-brand-600 border-2 border-brand-600 rounded-lg px-8 py-4 text-lg font-semibold shadow-lg">
           🎮 今すぐデモを触る（登録不要）
         </a>
-        <a href="#contact" data-plan="standard" onclick="if(window.gtag)gtag('event','trial_cta_hero');" class="plan-cta bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-8 py-4 text-lg font-semibold shadow-lg shadow-brand-600/30">
-          14日間 無料で試す →
+        <a href="#contact" data-plan="free" onclick="if(window.gtag)gtag('event','signup_free_hero');" class="plan-cta-free bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-8 py-4 text-lg font-semibold shadow-lg shadow-emerald-600/30">
+          無料で始める →
         </a>
       </div>
       <div class="mt-4">
         <a href="#how" class="text-brand-600 hover:underline px-4 py-2 text-sm">使い方を見る</a>
       </div>
       <div class="mt-8 text-xs text-slate-500">
-        デモはログイン不要・即体験 / トライアルはクレカ不要・期間内に解約手続きなしでも自動課金されません
+        スタッフ <strong>8 名まで永久無料</strong> / クレジットカード登録不要 / 1 営業日でセットアップ
       </div>
     </div>
 
@@ -447,73 +447,79 @@
   <section id="pricing" class="py-20">
     <div class="max-w-5xl mx-auto px-4">
       <h2 class="text-2xl md:text-4xl font-bold text-center mb-4">シンプルな料金プラン</h2>
-      <p class="text-center text-slate-600 mb-12">スタッフ数に応じて最適なプランを選べます。<br><span class="text-emerald-600 font-semibold">14 日間 完全無料 / クレジットカード不要</span></p>
+      <p class="text-center text-slate-600 mb-12">小規模店なら<span class="font-bold text-emerald-600">永久無料</span>。<br><span class="text-sm">本気で AI シフトを使いたい大規模店だけ Pro へ。</span></p>
 
-      <div class="grid md:grid-cols-3 gap-6">
-        <!-- Starter -->
-        <div class="bg-white rounded-xl p-6 border border-slate-200">
-          <div class="text-sm text-slate-500 mb-1">小規模店向け</div>
-          <h3 class="text-xl font-bold mb-2">Starter</h3>
+      <div class="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+        <!-- Free -->
+        <div class="bg-white rounded-xl p-6 border-2 border-emerald-500 shadow-lg shadow-emerald-500/10 relative md:order-1">
+          <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-xs font-bold px-3 py-1 rounded-full">永久無料</div>
+          <div class="text-sm text-emerald-600 font-semibold mb-1">小規模店向け</div>
+          <h3 class="text-xl font-bold mb-2">Free</h3>
           <div class="mb-4">
-            <span class="text-3xl font-bold">¥3,000</span>
-            <span class="text-sm text-slate-600">/月</span>
+            <span class="text-3xl font-bold">¥0</span>
+            <span class="text-sm text-slate-600">/月（永久）</span>
           </div>
-          <div class="text-sm text-slate-600 mb-5">スタッフ 5 名まで</div>
+          <div class="text-sm text-slate-600 mb-5">スタッフ <strong>8 名まで</strong></div>
           <ul class="space-y-2 text-sm mb-6">
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>AI シフト自動生成</li>
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>モバイル希望収集</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>確定 → LINE 通知</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>複数週管理</li>
+            <li class="flex gap-2"><span class="text-emerald-600">✓</span>LINE 通知文ワンタップ生成</li>
+            <li class="flex gap-2"><span class="text-emerald-600">✓</span>複数週管理・テンプレート</li>
+            <li class="flex gap-2"><span class="text-emerald-600">✓</span>過去週分析・月間ランキング</li>
+            <li class="flex gap-2"><span class="text-emerald-600">✓</span>ドラッグ&ドロップ手動編集</li>
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>CSV エクスポート</li>
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>メールサポート</li>
           </ul>
-          <a href="#contact" data-plan="starter" class="plan-cta block text-center w-full bg-slate-100 hover:bg-slate-200 rounded-lg py-3 font-semibold">無料で試す</a>
-        </div>
-
-        <!-- Standard -->
-        <div class="bg-white rounded-xl p-6 border-2 border-brand-600 shadow-xl shadow-brand-600/20 relative">
-          <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-brand-600 text-white text-xs font-bold px-3 py-1 rounded-full">人気</div>
-          <div class="text-sm text-brand-600 font-semibold mb-1">中規模店向け</div>
-          <h3 class="text-xl font-bold mb-2">Standard</h3>
-          <div class="mb-4">
-            <span class="text-3xl font-bold">¥6,000</span>
-            <span class="text-sm text-slate-600">/月</span>
-          </div>
-          <div class="text-sm text-slate-600 mb-5">スタッフ 15 名まで</div>
-          <ul class="space-y-2 text-sm mb-6">
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>Starter の全機能</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>テンプレート保存・読込</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>過去週分析・月間ランキング</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>ドラッグ&ドロップ手動編集</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>労務ルールカスタマイズ</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>優先メールサポート</li>
-          </ul>
-          <a href="#contact" data-plan="standard" class="plan-cta block text-center w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 font-semibold">無料で試す</a>
+          <a href="#contact" data-plan="free" class="plan-cta-free block text-center w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg py-3 font-semibold">無料で始める</a>
+          <p class="text-[11px] text-slate-500 mt-2 text-center">クレカ登録不要・1 営業日以内にセットアップ</p>
         </div>
 
         <!-- Pro -->
-        <div class="bg-white rounded-xl p-6 border border-slate-200">
-          <div class="text-sm text-slate-500 mb-1">大規模店向け</div>
+        <div class="bg-white rounded-xl p-6 border-2 border-brand-600 shadow-xl shadow-brand-600/20 relative md:order-2">
+          <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-brand-600 text-white text-xs font-bold px-3 py-1 rounded-full">中〜大規模向け</div>
+          <div class="text-sm text-brand-600 font-semibold mb-1">本格運用</div>
           <h3 class="text-xl font-bold mb-2">Pro</h3>
           <div class="mb-4">
-            <span class="text-3xl font-bold">¥10,000</span>
-            <span class="text-sm text-slate-600">/月</span>
+            <span class="text-3xl font-bold">¥1,980</span>
+            <span class="text-sm text-slate-600">/月（税込）</span>
           </div>
-          <div class="text-sm text-slate-600 mb-5">スタッフ 30 名まで</div>
+          <div class="text-sm text-slate-600 mb-5">スタッフ <strong>無制限</strong></div>
           <ul class="space-y-2 text-sm mb-6">
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>Standard の全機能</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>カスタムドメイン対応</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>自動バックアップ</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>API アクセス（給与ソフト連携）</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>初期セットアップ無償サポート</li>
-            <li class="flex gap-2"><span class="text-emerald-600">✓</span>電話サポート</li>
+            <li class="flex gap-2"><span class="text-brand-600 font-bold">★</span><span class="font-semibold">Free の全機能 +</span></li>
+            <li class="flex gap-2"><span class="text-brand-600">✓</span>スタッフ無制限</li>
+            <li class="flex gap-2"><span class="text-brand-600">✓</span>複数店舗対応</li>
+            <li class="flex gap-2"><span class="text-brand-600">✓</span>労務ルール詳細カスタマイズ</li>
+            <li class="flex gap-2"><span class="text-brand-600">✓</span>API アクセス（給与ソフト連携）</li>
+            <li class="flex gap-2"><span class="text-brand-600">✓</span>自動バックアップ・スナップショット</li>
+            <li class="flex gap-2"><span class="text-brand-600">✓</span>初期セットアップ無償サポート</li>
+            <li class="flex gap-2"><span class="text-brand-600">✓</span>優先メール + 電話サポート</li>
           </ul>
-          <a href="#contact" data-plan="pro" class="plan-cta block text-center w-full bg-slate-100 hover:bg-slate-200 rounded-lg py-3 font-semibold">無料で試す</a>
+          <a href="#contact" data-plan="pro" class="plan-cta block text-center w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 font-semibold">14 日間 無料で試す</a>
+          <p class="text-[11px] text-slate-500 mt-2 text-center">クレカ未登録なら 14 日後に自動終了</p>
+        </div>
+
+        <!-- Enterprise -->
+        <div class="bg-white rounded-xl p-6 border border-slate-200 md:order-3">
+          <div class="text-sm text-slate-500 mb-1">複数法人・チェーン</div>
+          <h3 class="text-xl font-bold mb-2">Enterprise</h3>
+          <div class="mb-4">
+            <span class="text-3xl font-bold">要相談</span>
+          </div>
+          <div class="text-sm text-slate-600 mb-5">10 店舗以上 / 法人本部</div>
+          <ul class="space-y-2 text-sm mb-6">
+            <li class="flex gap-2"><span class="text-slate-600">✓</span>Pro の全機能</li>
+            <li class="flex gap-2"><span class="text-slate-600">✓</span>SSO / Active Directory 連携</li>
+            <li class="flex gap-2"><span class="text-slate-600">✓</span>SLA 99.9%</li>
+            <li class="flex gap-2"><span class="text-slate-600">✓</span>カスタム機能開発</li>
+            <li class="flex gap-2"><span class="text-slate-600">✓</span>専任サポート担当</li>
+            <li class="flex gap-2"><span class="text-slate-600">✓</span>導入トレーニング</li>
+          </ul>
+          <a href="#contact" class="block text-center w-full bg-slate-100 hover:bg-slate-200 rounded-lg py-3 font-semibold">お問合せ</a>
         </div>
       </div>
 
-      <div class="mt-8 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
-        💡 <strong>VOIXA バンドル割引</strong>: 飲DX の電話 AI サービス「VOIXA」を併用中の方は、Shifty 月額から <strong>¥1,500 OFF</strong>。
+      <div class="mt-8 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-900 max-w-3xl mx-auto">
+        💡 <strong>料金が安すぎませんか？</strong> AI シフト作成は本来高機能なツールですが、「個人飲食店も気軽に DX 化してほしい」という飲DX の方針で Free から提供しています。継続課金が必要なのは「スタッフ 9 名以上」「複数店舗」「API 連携」など本気で運用される方のみです。
       </div>
     </div>
   </section>
@@ -579,11 +585,18 @@
               <td class="p-4 text-center">○</td>
             </tr>
             <tr class="border-t">
-              <td class="p-4 font-medium">月額（中規模）</td>
-              <td class="p-4 text-center text-brand-600 font-bold">¥6,000</td>
+              <td class="p-4 font-medium">月額（小規模 8名以下）</td>
+              <td class="p-4 text-center text-emerald-600 font-bold">¥0</td>
               <td class="p-4 text-center">¥0(機能制限)〜</td>
               <td class="p-4 text-center">¥0(個人)</td>
               <td class="p-4 text-center">¥0</td>
+            </tr>
+            <tr class="border-t">
+              <td class="p-4 font-medium">月額（中〜大規模）</td>
+              <td class="p-4 text-center text-brand-600 font-bold">¥1,980</td>
+              <td class="p-4 text-center">¥1,000〜/店</td>
+              <td class="p-4 text-center">¥980〜/店</td>
+              <td class="p-4 text-center">¥4,500〜</td>
             </tr>
           </tbody>
         </table>
@@ -597,8 +610,16 @@
     <div class="max-w-3xl mx-auto px-4">
       <h2 class="text-2xl md:text-4xl font-bold text-center mb-12">よくある質問</h2>
       <div class="space-y-3">
+        <details class="bg-white border border-slate-200 rounded-xl p-5 group" open>
+          <summary class="font-semibold cursor-pointer flex justify-between items-center">本当に Free プランは永久無料ですか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
+          <p class="text-slate-600 text-sm mt-3">はい。スタッフ 8 名以下の小規模店なら、AI シフト生成・希望収集・通知文・分析など主要機能をすべて永久に無料でご利用いただけます。クレジットカード登録も不要です。「個人飲食店こそ DX で楽になってほしい」という飲DX の方針です。Pro プラン（¥1,980/月）が必要なのは、9 名以上 / 複数店舗 / API 連携を本気で運用される方のみ。</p>
+        </details>
         <details class="bg-white border border-slate-200 rounded-xl p-5 group">
-          <summary class="font-semibold cursor-pointer flex justify-between items-center">14日無料トライアル後、自動で課金されますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
+          <summary class="font-semibold cursor-pointer flex justify-between items-center">スタッフが 9 名になったら自動で課金されますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
+          <p class="text-slate-600 text-sm mt-3">いいえ、勝手には課金されません。Free プランでスタッフを 9 名以上登録しようとすると、画面でお知らせが出るだけです。ご自身で「Pro にアップグレードする」を選択していただいた場合のみ課金が始まります。突然請求が来ることはありません。</p>
+        </details>
+        <details class="bg-white border border-slate-200 rounded-xl p-5 group">
+          <summary class="font-semibold cursor-pointer flex justify-between items-center">14 日無料トライアル後、自動で課金されますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 text-sm mt-3">いいえ、自動課金されません。トライアル開始時にクレジットカードの登録は<strong>不要</strong>で、14 日後にカード登録がなければ自動的に終了します。継続される場合のみ、ご自身でお手続きいただきます。</p>
         </details>
         <details class="bg-white border border-slate-200 rounded-xl p-5 group">
@@ -615,7 +636,7 @@
         </details>
         <details class="bg-white border border-slate-200 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">VOIXA（電話 AI）と何が違うんですか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
-          <p class="text-slate-600 text-sm mt-3">VOIXA は「予約電話の自動応答」、Shifty は「シフト作成の自動化」です。両方とも飲食店オーナーの工数削減を目的にしていますが、解決する業務が異なります。両方契約いただくと、Shifty の月額から ¥1,500 OFF させていただきます。</p>
+          <p class="text-slate-600 text-sm mt-3">VOIXA は「予約電話の自動応答」、Shifty は「シフト作成の自動化」です。両方とも飲食店オーナーの工数削減を目的にしていますが、解決する業務が異なります。Shifty の Free プランは VOIXA を契約していなくても使えます。</p>
         </details>
         <details class="bg-white border border-slate-200 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">データの安全性は？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
@@ -632,8 +653,8 @@
   <!-- Final CTA / Contact -->
   <section id="contact" class="py-20 gradient-bg text-white">
     <div class="max-w-3xl mx-auto px-4 text-center">
-      <h2 class="text-2xl md:text-4xl font-bold mb-4">まずは 14 日間、無料で試してみませんか？</h2>
-      <p class="text-white/90 mb-8">クレジットカード不要 / 14 日後の自動課金なし（カード未登録なら自動終了）/ 1 営業日以内にセットアップご案内</p>
+      <h2 class="text-2xl md:text-4xl font-bold mb-4">まずは無料で使ってみませんか？</h2>
+      <p class="text-white/90 mb-8">スタッフ 8 名まで永久無料 / クレジットカード登録不要 / 1 営業日以内にセットアップご案内</p>
 
       <form id="inquiryForm" class="bg-white text-slate-900 rounded-2xl p-6 md:p-8 text-left space-y-4 max-w-xl mx-auto">
         <div>
@@ -772,19 +793,42 @@
       }
     });
 
-    // Plan CTA → 店舗情報を取得してから Stripe Checkout
-    function showSignupModal(plan, originalCtaEl) {
+    // ===== サインアップモーダル =====
+    // Free プラン: 店舗情報 → /api/inquiry でセットアップ依頼メール
+    // Pro プラン:  店舗情報 → Stripe Checkout (クレカ任意・14日トライアル)
+    function showSignupModal(plan) {
+      const isFree = plan === 'free';
+      const planLabel = isFree ? 'Free（永久無料・スタッフ 8 名まで）' : 'Pro（¥1,980/月・無制限）';
       const overlay = document.createElement('div');
-      overlay.className = 'fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4';
+      overlay.className = 'fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto';
       overlay.innerHTML = `
-        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 my-8">
           <div class="flex justify-between items-start">
             <div>
-              <h3 class="font-bold text-lg">無料トライアル登録</h3>
-              <p class="text-xs text-slate-500 mt-1">14 日間・クレカ不要・自動課金なし</p>
+              <h3 class="font-bold text-xl">${isFree ? '無料アカウント登録' : '14 日間 無料トライアル登録'}</h3>
+              <p class="text-xs text-slate-500 mt-1">${planLabel}</p>
             </div>
-            <button id="su-close" class="text-slate-400 hover:text-slate-600 text-xl leading-none" aria-label="閉じる">×</button>
+            <button id="su-close" class="text-slate-400 hover:text-slate-600 text-2xl leading-none px-2" aria-label="閉じる">×</button>
           </div>
+
+          <!-- これからの流れ -->
+          <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1.5">
+            <div class="font-semibold text-slate-700">📋 これからの流れ</div>
+            ${isFree ? `
+              <div>① このフォームに 3 項目入力（30 秒）</div>
+              <div>② 飲DX から 1 営業日以内にセットアップ案内メール</div>
+              <div>③ あなた専用の URL でログイン → スタッフ追加 → AI シフト生成</div>
+              <div class="text-emerald-700 font-semibold pt-1">⚪ クレジットカード入力は<strong>一切不要</strong>です</div>
+            ` : `
+              <div>① このフォームに 3 項目入力（30 秒）</div>
+              <div>② 次の画面（Stripe）で「<strong>カード入力をスキップ</strong>」を選択（任意）</div>
+              <div>③ 確認メールが届きます</div>
+              <div>④ 飲DX から 1 営業日以内にセットアップ案内メール</div>
+              <div>⑤ 14 日間カード未登録のまま全機能を試せます</div>
+              <div class="text-amber-700 font-semibold pt-1">⚠ クレカ未登録なら 14 日後に自動で終了 → 課金されません</div>
+            `}
+          </div>
+
           <div class="space-y-3 text-sm">
             <label class="block">
               <span class="text-slate-700 font-medium">店舗名 <span class="text-red-500">*</span></span>
@@ -805,20 +849,37 @@
                 placeholder="contact@example.com">
               <span class="text-xs text-slate-500 mt-1 block">セットアップ手順の送付先になります</span>
             </label>
+            ${!isFree ? `
+              <label class="block">
+                <span class="text-slate-700 font-medium">スタッフ数（おおよそ）</span>
+                <select id="su-staff" class="mt-1 w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                  <option value="">選択してください</option>
+                  <option value="9-15">9〜15 名</option>
+                  <option value="16-30">16〜30 名</option>
+                  <option value="31+">31 名以上</option>
+                </select>
+              </label>
+            ` : ''}
           </div>
+
           <button id="su-submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 text-sm font-semibold disabled:opacity-50">
-            次へ：決済画面へ進む（${plan === 'starter' ? 'Starter ¥3,000' : plan === 'pro' ? 'Pro ¥10,000' : 'Standard ¥6,000'}/月）
+            ${isFree ? '🎉 無料アカウント登録を申し込む' : '次へ進む（クレカ入力は次の画面でスキップできます）'}
           </button>
           <p id="su-error" class="text-xs text-red-600 hidden"></p>
-          <p class="text-[11px] text-slate-500 text-center">
-            この情報は決済セッションに添付され、サポートチームがお店ごとのセットアップを準備するために使用します。
-          </p>
+          ${isFree
+            ? '<p class="text-[11px] text-slate-500 text-center">いつでも解約可能・違約金なし。途中で必要になれば Pro へアップグレードもできます。</p>'
+            : '<p class="text-[11px] text-slate-500 text-center">「カード未登録のままトライアル満了 = 自動終了」となるため、決して勝手に課金されません。</p>'
+          }
         </div>
       `;
       document.body.appendChild(overlay);
       const close = () => overlay.remove();
       overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
       overlay.querySelector('#su-close').onclick = close;
+      // ESC で閉じる
+      const escHandler = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); } };
+      document.addEventListener('keydown', escHandler);
+
       const restaurant = overlay.querySelector('#su-restaurant');
       const contact = overlay.querySelector('#su-contact');
       const email = overlay.querySelector('#su-email');
@@ -835,41 +896,84 @@
           errEl.classList.remove('hidden');
           return;
         }
-        if (!e2.includes('@')) {
+        if (!e2.includes('@') || !e2.includes('.')) {
           errEl.textContent = 'メールアドレスの形式が正しくありません';
           errEl.classList.remove('hidden');
           return;
         }
         const btn = overlay.querySelector('#su-submit');
-        btn.disabled = true; btn.textContent = '読込中…';
+        btn.disabled = true; btn.textContent = '送信中…';
         try {
+          if (isFree) {
+            // Free プラン: inquiry エンドポイントに送信
+            const resp = await fetch('/api/inquiry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                restaurantName: r, contactName: c, email: e2,
+                staffCount: '8名以下（Free）', message: '【Free プラン申込】LP プラン CTA より',
+              }),
+            });
+            if (!resp.ok) throw new Error('failed');
+            // 成功画面に置き換え
+            overlay.querySelector('.bg-white').innerHTML = `
+              <div class="text-center py-6 px-4 space-y-4">
+                <div class="text-5xl">🎉</div>
+                <h3 class="font-bold text-xl">登録ありがとうございます</h3>
+                <p class="text-sm text-slate-600">
+                  飲DX から <strong>1 営業日以内</strong>に <code>support@in-dx.jp</code> よりセットアップ手順をお送りします。
+                </p>
+                <p class="text-xs text-slate-500">届いていない場合は迷惑メールフォルダもご確認ください。</p>
+                <div class="pt-2 space-y-2">
+                  <a href="/demo" class="block bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-2.5 text-sm font-semibold">
+                    🎮 待っている間に機能を試す（デモ環境）
+                  </a>
+                  <button id="su-done" class="block w-full text-xs text-slate-500 hover:text-slate-700">閉じる</button>
+                </div>
+              </div>
+            `;
+            overlay.querySelector('#su-done').onclick = close;
+            return;
+          }
+          // Pro プラン: Stripe Checkout
+          const sc = overlay.querySelector('#su-staff');
           const resp = await fetch('/api/checkout/session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ plan, restaurantName: r, contactName: c, email: e2 }),
+            body: JSON.stringify({
+              plan: 'pro',
+              restaurantName: r, contactName: c, email: e2,
+              staffCount: sc ? sc.value : '',
+            }),
           });
           const j = await resp.json();
-          if (j.url) {
-            location.href = j.url;
-            return;
-          }
-          errEl.textContent = '決済セッションの作成に失敗しました。問合せフォームをご利用ください。';
+          if (j.url) { location.href = j.url; return; }
+          errEl.textContent = '登録セッションの作成に失敗しました。お手数ですが下のフォームからご連絡ください。';
           errEl.classList.remove('hidden');
-          btn.disabled = false; btn.textContent = '次へ：決済画面へ進む';
+          btn.disabled = false;
+          btn.textContent = '次へ進む（クレカ入力は次の画面でスキップできます）';
         } catch (e) {
-          errEl.textContent = '通信に失敗しました。問合せフォームをご利用ください。';
+          errEl.textContent = '通信に失敗しました。お手数ですが下のフォームからご連絡ください。';
           errEl.classList.remove('hidden');
-          btn.disabled = false; btn.textContent = '次へ：決済画面へ進む';
+          btn.disabled = false;
+          btn.textContent = isFree ? '🎉 無料アカウント登録を申し込む' : '次へ進む（クレカ入力は次の画面でスキップできます）';
         }
       };
     }
 
+    // Pro プラン CTA (Stripe 経由)
     document.querySelectorAll('.plan-cta').forEach(el => {
       el.addEventListener('click', async (e) => {
-        const plan = el.getAttribute('data-plan');
-        if (!plan) return;
         e.preventDefault();
-        showSignupModal(plan, el);
+        showSignupModal('pro');
+      });
+    });
+
+    // Free プラン CTA (inquiry 経由)
+    document.querySelectorAll('.plan-cta-free').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        e.preventDefault();
+        showSignupModal('free');
       });
     });
   </script>

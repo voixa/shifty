@@ -736,9 +736,8 @@ def api_list_staff_messages():
 # ============================================================
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+# Free + Pro モデルへ移行 (旧 starter/standard は archived)
 STRIPE_PRICES = {
-    "starter":  os.environ.get("STRIPE_PRICE_STARTER",  ""),
-    "standard": os.environ.get("STRIPE_PRICE_STANDARD", ""),
     "pro":      os.environ.get("STRIPE_PRICE_PRO",      ""),
 }
 
@@ -793,8 +792,14 @@ def api_checkout_session():
                     "end_behavior": {"missing_payment_method": "cancel"}
                 },
             },
-            # クレカ未入力でもサインアップ可。LP の「クレカ不要・自動課金なし」と整合
+            # クレカ未入力でもサインアップ可
             "payment_method_collection": "if_required",
+            # 怖くない誘導文言 (Stripe Checkout 画面に表示される)
+            "custom_text": {
+                "submit": {
+                    "message": "💡 14 日間の無料トライアル中はカード未登録のまま使えます。期間中は自動課金されません。"
+                },
+            },
             "success_url": site + "/app?welcome=1",
             "cancel_url": site + "/#pricing",
             "metadata": {
