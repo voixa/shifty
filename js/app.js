@@ -31,10 +31,10 @@ function el(tag, attrs = {}, children = []) {
 function fmtYen(n) { return "¥" + Math.round(n).toLocaleString(); }
 function fmtPct(r) { return Math.round(r * 100) + "%"; }
 function persist() { saveState(state).catch(() => {}); }
-function toast(msg, type = "") {
-  const t = el("div", { class: `toast-item ${type}` }, msg);
+function toast(msg, type = "", duration = 3500) {
+  const t = el("div", { class: `toast-item ${type}`, role: "alert", "aria-live": "polite" }, msg);
   $("#toast").appendChild(t);
-  setTimeout(() => t.remove(), 3500);
+  setTimeout(() => t.remove(), duration);
 }
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
@@ -225,6 +225,36 @@ function viewDashboard() {
     el("div", { class: "text-sm text-slate-500" }, state.meta.currentWeekStart + " 〜"),
   ]));
 
+  // 初回オーナー向け: 完全に空の状態のみ表示するヒーロー empty state
+  if (state.staff.length === 0 && !window.__SHIFTY_DEMO_MODE__) {
+    const hero = el("div", { class: "bg-gradient-to-br from-brand-50 to-amber-50 border border-brand-200 rounded-xl p-6 text-center space-y-4" });
+    hero.appendChild(el("div", { class: "text-4xl" }, "👋"));
+    hero.appendChild(el("h3", { class: "font-bold text-lg" }, "Shifty へようこそ"));
+    hero.appendChild(el("p", { class: "text-sm text-slate-600 max-w-md mx-auto" },
+      "まずスタッフを登録するか、サンプルデータで動作を体験してください。"));
+    hero.appendChild(el("div", { class: "flex flex-col sm:flex-row gap-2 justify-center pt-2" }, [
+      el("button", {
+        class: "bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-2.5 text-sm font-semibold",
+        onclick: async () => {
+          if (!confirm("サンプルデータ（10名スタッフ・希望サンプル付き）を投入しますか？")) return;
+          state = await resetState({ withSample: true });
+          render();
+          toast("サンプルデータを投入しました。「シフト編成」タブで AI 自動生成を試せます", "success");
+        }
+      }, "🎯 サンプルデータで試す（10名）"),
+      el("button", {
+        class: "bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-5 py-2.5 text-sm font-semibold",
+        onclick: () => { setTab("staff"); setTimeout(() => openStaffEdit(), 200); }
+      }, "👥 スタッフを追加 →"),
+      el("button", {
+        class: "bg-white border border-slate-300 hover:bg-slate-50 rounded-lg px-5 py-2.5 text-sm font-semibold",
+        onclick: () => { setTab("staff"); setTimeout(() => importCsvDialog(), 200); }
+      }, "📥 CSV 取込"),
+    ]));
+    wrap.appendChild(hero);
+    return wrap;
+  }
+
   const assignments = curAssignments();
   const metrics = assignments.length
     ? calcMetrics(
@@ -379,7 +409,10 @@ function renderMonthlyHoursRanking() {
     el("div", { class: "text-xs text-slate-500" }, `${ranked.length} 名出勤`),
   ]));
   if (!ranked.length) {
-    card.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" }, "今月のデータはまだありません"));
+    const empty = el("div", { class: "text-sm text-slate-500 text-center py-6 space-y-2" });
+    empty.innerHTML = "今月の確定済シフトはまだありません<br>" +
+      '<span class="text-xs">シフトを確定するとここに月間ランキングが表示されます</span>';
+    card.appendChild(empty);
     return card;
   }
   const max = ranked[0].hours;
@@ -870,30 +903,82 @@ function openStaffEdit(s = null) {
 }
 
 function importCsvDialog() {
+  const positionIds = state.meta.positions.map(p => p.id).join("/");
+  const sampleCsv =
+    "名前,本職ID,時給,週最低,週最大,固定休(0-6スペース区切り),スキル\n" +
+    "山田 太郎,hall,1100,10,28,0,3\n" +
+    "佐藤 花子,kitchen,1300,30,40,2,5\n" +
+    "鈴木 一郎,cashier,1050,8,20,5 6,3\n";
+
   const body = el("div", { class: "p-6 space-y-3" });
-  body.innerHTML = `
-    <h3 class="font-bold text-lg">CSV取込</h3>
-    <p class="text-sm text-slate-600">列: 名前,本職ID,時給,週最低,週最大,固定休(0-6スペース区切り),スキル<br>
-    本職IDは設定タブで定義したID（例: hall, kitchen, cashier, manager）</p>
-    <textarea id="csvText" class="w-full border rounded-md px-3 py-2 text-sm font-mono h-40" placeholder="例: 山田太郎,hall,1100,10,28,0,3"></textarea>`;
-  body.appendChild(el("div", { class: "flex justify-end gap-2" }, [
-    el("button", { class: "px-3 py-1.5 text-sm", onclick: closeModal }, "キャンセル"),
-    el("button", { class: "px-4 py-1.5 text-sm bg-brand-600 text-white rounded-md", onclick: () => {
-      const txt = $("#csvText").value.trim();
-      if (!txt) return;
-      const rows = txt.split(/\n/).map(r => r.split(",").map(x => x.trim())).filter(r => r.length >= 5);
-      let added = 0;
-      for (const r of rows) {
-        const off = r[5] ? r[5].split(/[\s\/]+/).map(Number).filter(n => !isNaN(n)) : [];
-        state.staff.push({
-          id: uid("s_"), name: r[0], position: r[1] || state.meta.positions[0]?.id, canCover: [],
-          hourlyWage: Number(r[2]) || 1100, minHoursPerWeek: Number(r[3]) || 10, maxHoursPerWeek: Number(r[4]) || 28,
-          fixedDayOff: off, skill: Number(r[6]) || 3, notes: "",
-        });
-        added++;
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "CSV 取込"));
+  body.appendChild(el("div", { class: "bg-slate-50 border border-slate-200 rounded p-3 text-xs space-y-1" }, [
+    el("div", { class: "font-semibold" }, "📋 列の順序"),
+    el("div", { class: "font-mono text-[11px]" }, "名前,本職ID,時給,週最低,週最大,固定休,スキル"),
+    el("div", {}, `本職ID は: ${positionIds}（設定タブで追加可）`),
+    el("div", {}, "固定休は曜日番号 (0=日 〜 6=土) をスペース区切り。例: 「2 5」= 火・金"),
+    el("div", {}, "スキルは 1〜5（5が最も熟練）"),
+  ]));
+  body.appendChild(el("div", { class: "flex items-center justify-between" }, [
+    el("label", { class: "text-sm font-semibold", for: "csvText" }, "CSV 内容"),
+    el("button", {
+      class: "text-xs text-emerald-600 hover:underline",
+      onclick: () => {
+        const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), sampleCsv], { type: "text/csv" });
+        const a = el("a", { href: URL.createObjectURL(blob), download: "shifty_staff_sample.csv" });
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        toast("サンプル CSV をダウンロードしました", "success");
       }
-      persist(); closeModal(); render(); toast(`${added}名 取り込みました`, "success");
-    } }, "取込"),
+    }, "⬇ サンプル CSV をダウンロード"),
+  ]));
+  body.appendChild(el("textarea", {
+    id: "csvText",
+    class: "w-full border rounded-md px-3 py-2 text-sm font-mono h-40",
+    placeholder: sampleCsv,
+    "aria-label": "CSV 内容",
+  }));
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-semibold",
+      onclick: () => {
+        const txt = $("#csvText").value.trim();
+        if (!txt) { toast("CSV を入力してください", "error"); return; }
+        // ヘッダ行をスキップ
+        const lines = txt.split(/\r?\n/).filter(l => l.trim());
+        const dataLines = lines[0].includes("名前") || lines[0].includes("本職ID") ? lines.slice(1) : lines;
+        const rows = dataLines.map(r => r.split(",").map(x => x.trim())).filter(r => r.length >= 5);
+        if (rows.length === 0) { toast("有効な行がありません", "error"); return; }
+        const errors = [];
+        let added = 0;
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i];
+          if (!r[0]) { errors.push(`${i+1}行目: 名前が空`); continue; }
+          const posId = r[1] || state.meta.positions[0]?.id;
+          if (!state.meta.positions.find(p => p.id === posId)) {
+            errors.push(`${i+1}行目: 不明な本職ID 「${posId}」`); continue;
+          }
+          const off = r[5] ? r[5].split(/[\s\/、]+/).map(Number).filter(n => !isNaN(n) && n >= 0 && n <= 6) : [];
+          state.staff.push({
+            id: uid("s_"), name: r[0], position: posId, canCover: [],
+            hourlyWage: Number(r[2]) || 1100,
+            minHoursPerWeek: Number(r[3]) || 10,
+            maxHoursPerWeek: Number(r[4]) || 28,
+            fixedDayOff: off,
+            skill: Math.min(5, Math.max(1, Number(r[6]) || 3)),
+            notes: "", email: "",
+          });
+          added++;
+        }
+        persist(); closeModal(); render();
+        if (errors.length === 0) {
+          toast(`${added}名 取り込みました`, "success");
+        } else {
+          toast(`${added}名 取込・${errors.length}件エラー: ${errors.slice(0,2).join(" / ")}`, errors.length === rows.length ? "error" : "info");
+        }
+      }
+    }, "取込"),
   ]));
   modal(body);
 }
@@ -1681,9 +1766,12 @@ function copyFromPreviousWeek() {
 }
 
 function autoGenerate() {
-  if (state.staff.length === 0) { toast("スタッフがいません", "error"); return; }
+  if (state.staff.length === 0) {
+    toast("スタッフが登録されていません。スタッフタブで追加するか、ダッシュボードの「🎯 サンプルで試す」をご利用ください", "error", 6000);
+    return;
+  }
   if (curStatus() === "published") { toast("確定済の週は再生成できません。先に「下書きに戻す」してください。", "error"); return; }
-  if (curSlots().length === 0) { toast("シフト枠がありません。設定タブで必要人数を定義してください。", "error"); return; }
+  if (curSlots().length === 0) { toast("シフト枠がありません。設定タブの「必要人数」で定義してください。", "error"); return; }
   toast("AI最適化を実行中...");
   setTimeout(() => {
     const result = generateShift({
@@ -1710,8 +1798,14 @@ function viewExport() {
   wrap.appendChild(el("h2", { class: "text-xl font-bold" }, "エクスポート"));
 
   if (!curAssignments().length) {
-    wrap.appendChild(el("div", { class: "bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900" },
-      "シフトが未生成です。「シフト編成」タブで自動生成してください。"));
+    const empty = el("div", { class: "bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 space-y-3" });
+    empty.appendChild(el("div", { class: "font-semibold" }, "シフトがまだ生成されていません"));
+    empty.appendChild(el("div", {}, "「📅 シフト編成」タブで「🤖 AI 自動生成」ボタンを押すと、登録済みスタッフ・希望からシフトが自動作成されます。"));
+    empty.appendChild(el("button", {
+      class: "bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-4 py-2 text-sm font-semibold",
+      onclick: () => { setTab("schedule"); setTimeout(autoGenerate, 300); },
+    }, "🤖 今すぐ AI 自動生成 →"));
+    wrap.appendChild(empty);
     return wrap;
   }
 
