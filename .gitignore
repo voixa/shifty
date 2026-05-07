@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+shifty.db
+shifty.db-journal
+.env
+.DS_Store
+venv/
+.venv/
+node_modules/
+.idea/
+.vscode/
+.claude/

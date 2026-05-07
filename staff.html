@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>シフト希望入力</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#4f46e5" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { brand: { 50:'#eef2ff',100:'#e0e7ff',500:'#6366f1',600:'#4f46e5',700:'#4338ca' } },
+        fontFamily: { sans: ['"Hiragino Sans"','"Yu Gothic"','Meiryo','system-ui','sans-serif'] } } }
+    }
+  </script>
+</head>
+<body class="bg-slate-100 text-slate-900 min-h-screen">
+  <div id="app" class="max-w-md mx-auto p-4 pb-32"></div>
+  <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 space-y-2"></div>
+  <script src="js/api.js"></script>
+  <script src="js/staff-portal.js"></script>
+</body>
+</html>

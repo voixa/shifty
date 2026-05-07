@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>プライバシーポリシー — Shifty</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='white' font-family='system-ui,sans-serif' font-weight='700'%3ES%3C/text%3E%3C/svg%3E">
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <header class="bg-white border-b border-slate-200">
+    <div class="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold" style="background:#4f46e5">S</div>
+        <span class="font-bold">Shifty</span>
+      </a>
+      <a href="/" class="text-sm text-slate-500 hover:text-slate-900">← トップへ</a>
+    </div>
+  </header>
+  <main class="max-w-3xl mx-auto px-4 py-12 prose prose-slate max-w-none">
+    <h1 class="text-3xl font-bold mb-8">プライバシーポリシー</h1>
+    <div class="bg-white rounded-xl border border-slate-200 p-8 space-y-6 text-sm leading-relaxed">
+
+      <p>飲DX（以下「当社」）は、提供するシフト管理サービス「Shifty」（以下「本サービス」）における利用者の個人情報の取扱いについて、以下のとおりプライバシーポリシーを定めます。</p>
+
+      <h2 class="text-lg font-bold mt-6">1. 取得する情報</h2>
+      <ul class="list-disc pl-6 space-y-1">
+        <li><strong>店舗オーナー情報</strong>: 店舗名、氏名、メールアドレス、電話番号、住所</li>
+        <li><strong>スタッフ情報</strong>: 氏名、時給、勤務時間、勤務希望、固定休</li>
+        <li><strong>業務情報</strong>: シフト編成内容、人件費、勤怠記録</li>
+        <li><strong>技術情報</strong>: IPアドレス、ブラウザ情報、Cookie、アクセスログ</li>
+        <li><strong>決済情報</strong>: クレジットカード情報は当社では保持せず、Stripe 社が PCI DSS 準拠の環境で管理します</li>
+      </ul>
+
+      <h2 class="text-lg font-bold mt-6">2. 利用目的</h2>
+      <ul class="list-disc pl-6 space-y-1">
+        <li>本サービスの提供・維持・改善</li>
+        <li>利用料金の請求・収納</li>
+        <li>サポート・お問い合わせへの対応</li>
+        <li>サービスに関する重要なお知らせの送信</li>
+        <li>新機能・キャンペーン情報の案内（オプトアウト可能）</li>
+        <li>法令遵守・不正利用の防止</li>
+      </ul>
+
+      <h2 class="text-lg font-bold mt-6">3. 第三者提供</h2>
+      <p>当社は、利用者の同意なく個人情報を第三者に提供しません。ただし以下の場合を除きます：</p>
+      <ul class="list-disc pl-6 space-y-1">
+        <li>法令に基づく場合</li>
+        <li>人の生命、身体または財産の保護のために必要な場合</li>
+        <li>業務委託先への提供（守秘義務契約締結のうえ）</li>
+      </ul>
+
+      <h2 class="text-lg font-bold mt-6">4. 業務委託先</h2>
+      <p>本サービスは以下の業務委託先のクラウドインフラを利用します：</p>
+      <ul class="list-disc pl-6 space-y-1">
+        <li><strong>Google Cloud Platform</strong>（Cloud Run / Firestore / Secret Manager）— インフラ・データ保管</li>
+        <li><strong>Stripe, Inc.</strong> — 決済処理</li>
+        <li><strong>Google Workspace</strong> — 業務メール</li>
+      </ul>
+
+      <h2 class="text-lg font-bold mt-6">5. データ保管・セキュリティ</h2>
+      <ul class="list-disc pl-6 space-y-1">
+        <li>すべての通信は HTTPS で暗号化</li>
+        <li>データベース（Firestore）は Google Cloud により暗号化保管</li>
+        <li>パスワードは bcrypt によるハッシュ化保管（平文では一切保持しません）</li>
+        <li>セッショントークンは HTTP Only Cookie で保護</li>
+        <li>Content Security Policy 等のセキュリティヘッダを実装</li>
+      </ul>
+
+      <h2 class="text-lg font-bold mt-6">6. データ保持期間</h2>
+      <p>解約後 30 日間データを保持し、その後完全削除します。利用者からの削除請求があった場合は、法令で保持が義務付けられている情報を除き、速やかに削除します。</p>
+
+      <h2 class="text-lg font-bold mt-6">7. Cookie の利用</h2>
+      <p>本サービスは利便性向上のためセッション Cookie を利用します。広告目的の Cookie は使用していません。</p>
+
+      <h2 class="text-lg font-bold mt-6">8. 開示・訂正・削除請求</h2>
+      <p>個人情報の開示、訂正、削除、利用停止のご請求は <a href="mailto:support@in-dx.jp" class="text-brand-600 underline" style="color:#4f46e5">support@in-dx.jp</a> までご連絡ください。本人確認の上、合理的な期間内に対応します。</p>
+
+      <h2 class="text-lg font-bold mt-6">9. 改定</h2>
+      <p>本ポリシーは法令の変更・サービス改善等に応じて改定する場合があります。重要な変更については本サービス上で告知します。</p>
+
+      <h2 class="text-lg font-bold mt-6">10. お問い合わせ</h2>
+      <p>
+        飲DX<br>
+        〒150-0043 東京都渋谷区道玄坂1丁目10番8号 渋谷道玄坂東急ビル2F-C<br>
+        メール: <a href="mailto:support@in-dx.jp" class="text-brand-600 underline" style="color:#4f46e5">support@in-dx.jp</a>
+      </p>
+
+      <p class="text-xs text-slate-500 mt-8">制定: 2026年5月4日</p>
+    </div>
+  </main>
+</body>
+</html>

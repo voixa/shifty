@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ヘルプセンター — Shifty</title>
+  <meta name="description" content="Shifty の使い方、よくある質問、トラブルシューティング、初期セットアップガイド。" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='white' font-family='system-ui,sans-serif' font-weight='700'%3ES%3C/text%3E%3C/svg%3E" />
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { brand: { 50:'#eef2ff',100:'#e0e7ff',500:'#6366f1',600:'#4f46e5',700:'#4338ca' } } } }
+    }
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+
+  <header class="bg-white border-b border-slate-200">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="/" class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold" style="background:#4f46e5">S</div>
+        <span class="font-bold text-lg">Shifty <span class="text-sm text-slate-400 font-normal">/ ヘルプ</span></span>
+      </a>
+      <nav class="flex items-center gap-3 text-sm">
+        <a href="/" class="text-slate-600 hover:text-brand-600">トップ</a>
+        <a href="/app" class="text-slate-600 hover:text-brand-600">管理画面</a>
+        <a href="/demo" class="bg-brand-600 hover:bg-brand-700 text-white rounded-md px-3 py-1.5 font-semibold">デモ</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="bg-gradient-to-br from-brand-600 to-violet-600 text-white">
+    <div class="max-w-5xl mx-auto px-4 py-12 text-center">
+      <h1 class="text-3xl md:text-4xl font-bold mb-3">どうしましたか? 何かお手伝いできることは？</h1>
+      <p class="text-white/90 mb-6">使い方・トラブルシューティング・よくある質問</p>
+      <div class="max-w-xl mx-auto">
+        <input id="searchBox" type="search" placeholder="🔍 検索（例: スタッフ追加、希望提出、シフト確定）"
+          class="w-full border-0 rounded-lg px-5 py-3 text-slate-900 shadow-lg" />
+      </div>
+    </div>
+  </section>
+
+  <main class="max-w-5xl mx-auto px-4 py-10 grid md:grid-cols-3 gap-6">
+
+    <!-- Sidebar -->
+    <aside class="md:col-span-1 space-y-2 text-sm">
+      <div class="font-bold text-slate-700 mb-2">目次</div>
+      <a href="#getting-started" class="block py-1.5 px-3 rounded hover:bg-slate-200">🚀 はじめての方へ</a>
+      <a href="#staff" class="block py-1.5 px-3 rounded hover:bg-slate-200">👥 スタッフ管理</a>
+      <a href="#preferences" class="block py-1.5 px-3 rounded hover:bg-slate-200">📝 希望収集</a>
+      <a href="#schedule" class="block py-1.5 px-3 rounded hover:bg-slate-200">📅 シフト編成</a>
+      <a href="#publish" class="block py-1.5 px-3 rounded hover:bg-slate-200">✅ シフト確定・通知</a>
+      <a href="#mobile" class="block py-1.5 px-3 rounded hover:bg-slate-200">📱 スタッフポータル</a>
+      <a href="#settings" class="block py-1.5 px-3 rounded hover:bg-slate-200">⚙️ 詳細設定</a>
+      <a href="#trouble" class="block py-1.5 px-3 rounded hover:bg-slate-200">🛠 トラブルシューティング</a>
+      <a href="#faq" class="block py-1.5 px-3 rounded hover:bg-slate-200">❓ よくある質問</a>
+      <a href="#contact" class="block py-1.5 px-3 rounded hover:bg-slate-200">✉️ お問合せ</a>
+      <div class="mt-4 p-3 bg-amber-50 border border-amber-200 rounded text-xs">
+        💡 ヒント: <kbd class="bg-white px-1.5 py-0.5 rounded border text-[10px]">Ctrl</kbd> + <kbd class="bg-white px-1.5 py-0.5 rounded border text-[10px]">F</kbd> でページ内検索もできます
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <article class="md:col-span-2 space-y-6 text-sm leading-relaxed">
+
+      <!-- Getting Started -->
+      <section id="getting-started" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+        <h2 class="text-xl font-bold">🚀 はじめての方へ</h2>
+        <p>初回セットアップから初めてのシフト発表まで <strong>30 分</strong>。手順は 5 ステップです。</p>
+
+        <ol class="space-y-3 list-decimal list-inside">
+          <li>
+            <strong>初回セットアップ</strong> — トップページの「14日間 無料で試す」から登録、または
+            <a href="/app" class="text-brand-600 underline">管理画面</a> で初回オーナーパスワードを設定。
+          </li>
+          <li>
+            <strong>店舗設定</strong> — 設定タブで店舗名・週予算・営業セッション（ランチ/ディナー等）・必要人数マトリクスを入力。
+          </li>
+          <li>
+            <strong>スタッフ登録</strong> — スタッフタブで CSV 取込 or 手動追加。本職・時給・週時間・固定休を設定。
+          </li>
+          <li>
+            <strong>希望収集</strong> — 「🔗 全員のリンク」ボタン → クリップボードにコピー → LINE グループに貼付。スタッフはスマホで希望入力。
+          </li>
+          <li>
+            <strong>AI 生成 → 確定 → 通知</strong> — シフト編成タブで「🤖 AI 自動生成」→ 結果確認 → 「✓ 確定する」→ LINE 通知文を一斉送信。
+          </li>
+        </ol>
+
+        <div class="bg-emerald-50 border border-emerald-200 rounded-md p-3">
+          🎮 <strong>まずは触ってみたい方へ</strong>: <a href="/demo" class="text-brand-600 font-semibold underline">/demo</a> でログイン不要のデモ環境がご利用できます（10名スタッフ・サンプルシフト入り）。
+        </div>
+      </section>
+
+      <!-- Staff -->
+      <section id="staff" class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+        <h2 class="text-xl font-bold">👥 スタッフ管理</h2>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">CSV で一括登録するには？</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            スタッフタブ → 「📥 CSV取込」ボタン。各列の意味:<br>
+            <code class="bg-slate-100 px-2 py-1 rounded text-xs">名前,本職ID,時給,週最低,週最大,固定休(0-6),スキル(1-5)</code>
+            <br>例: <code class="bg-slate-100 px-2 py-1 rounded text-xs">山田太郎,hall,1100,10,28,0 6,3</code>（日曜と土曜が固定休）
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">兼任ポジションの設定方法</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            スタッフ編集モーダル → 「兼任可能ポジション」セクションでチェック。AI 生成時、本職に空きがあれば本職優先、無ければ兼任で配置されます。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">スキル値の使い方</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            1〜5 でスキルレベルを設定。AI スコアに「スキル」要素として反映されます（既定重み 10%）。新人=1、ベテラン=5。
+          </div>
+        </details>
+      </section>
+
+      <!-- Preferences -->
+      <section id="preferences" class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+        <h2 class="text-xl font-bold">📝 希望収集</h2>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">希望提出リンクの配り方</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            希望収集タブの「💬 LINE用 全員リンク生成」 → クリップボードにコピー → LINE グループに貼付。各スタッフは自分の URL をタップして希望入力。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">「希望」「必須」「不可」の違い</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            <ul class="space-y-1 list-disc list-inside">
+              <li><strong>希望</strong>: 入れたら入りたい（スコア +85〜100）</li>
+              <li><strong>必須</strong>: 絶対入りたい（スコア +100、AI が最優先で入れる）</li>
+              <li><strong>不可</strong>: 入りたくない（スコア 0、AI は避ける）</li>
+            </ul>
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">未提出スタッフの催促</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            ダッシュボードに未提出スタッフが赤バッジで表示されます。「全員リンク生成」を再実行して再送信できます。
+          </div>
+        </details>
+      </section>
+
+      <!-- Schedule -->
+      <section id="schedule" class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+        <h2 class="text-xl font-bold">📅 シフト編成</h2>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">AI 生成の判断基準は？</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            7 つのハード制約（必ず守る）と 5 つのソフト制約（スコアで最適化）で生成しています。詳細は
+            <a href="/docs/algorithm.md" class="text-brand-600 underline" target="_blank">アルゴリズム仕様書</a>。
+            自動テストで違反ゼロを保証: <a href="/tests/algorithm.test.html" class="text-brand-600 underline" target="_blank">テストページ</a>。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">スタッフを手動で入れ替えたい</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            シフト編成タブで、入れ替えたいスタッフをドラッグ → もう一方にドロップ。同ポジション間は即入替、異ポジション間は確認ダイアログが出ます。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">急な欠勤対応（代打推薦）</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            該当アサインをクリック → 「🆘 欠勤想定 → 代打推薦」ボタン → AI が条件を満たすスタッフ 5 名をスコア順に表示 → 「入替」をクリックで完了。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">「先週からコピー」「テンプレ保存」の使い方</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            <strong>先週からコピー</strong>: 前週のシフトをそのまま今週に複製（曜日合わせ）。<br>
+            <strong>テンプレ保存</strong>: 「通常週」「夏休みシフト」等の名前で保存、後で別の週に適用可能。
+          </div>
+        </details>
+      </section>
+
+      <!-- Publish -->
+      <section id="publish" class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+        <h2 class="text-xl font-bold">✅ シフト確定・通知</h2>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">確定するとどうなる？</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            ・週の状態が「下書き」→「確定済」に変わります<br>
+            ・スタッフがポータル URL を開くと、希望入力UIではなく確定シフトの閲覧UIに切り替わります<br>
+            ・LINE 通知文が自動生成されるので、コピーしてLINEに貼り付けて配信できます
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">確定後に変更したい場合</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            「下書きに戻す」ボタンで一度下書き状態に戻し、編集後再確定。スタッフは閲覧モードから希望入力モードに一時戻りますが、データは保持されます。
+          </div>
+        </details>
+      </section>
+
+      <!-- Mobile portal -->
+      <section id="mobile" class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+        <h2 class="text-xl font-bold">📱 スタッフポータル</h2>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">スタッフ側の使い方</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            店長から LINE で送られてきた URL をスマホで開く → そのまま希望入力 or 確定シフト確認。アプリインストール・登録不要。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">URLを失くしたら？</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            店長に連絡 → 管理画面で「🔗 リンク」ボタンを再実行で同じ URL が再表示されます（トークンは保存済み）。
+          </div>
+        </details>
+      </section>
+
+      <!-- Settings -->
+      <section id="settings" class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+        <h2 class="text-xl font-bold">⚙️ 詳細設定</h2>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">必要人数マトリクスとは？</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            曜日 × 時間帯 × ポジション の表で「何人必要か」を定義。AI はこのマトリクスを満たすようにシフトを組みます。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">労務ルールの設定</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            設定タブ「6. 労務ルール」で週/日上限・連勤・最低休日を設定。AI 生成時に絶対守られます（ハード制約）。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">アルゴリズム重み調整</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            設定タブ「7. アルゴリズム重み調整」で 5 要素（希望充足・ポジション・公平性・コスト・スキル）の重みを店舗ごとに調整可能。スライダーで 0〜100 の値を変更し、自動正規化されます。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">バックアップ・復元</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            設定タブ「8. データバックアップ」→「📥 JSONでダウンロード」で全データをエクスポート。「📤 JSONから復元」で別環境への移行・障害復旧に使えます。週次のダウンロード推奨。
+          </div>
+        </details>
+      </section>
+
+      <!-- Troubleshooting -->
+      <section id="trouble" class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+        <h2 class="text-xl font-bold">🛠 トラブルシューティング</h2>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">画面のスタイルが崩れている / レイアウトが変</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            ブラウザのキャッシュが古い可能性があります。<br>
+            1. <strong>シークレットウィンドウ</strong> (Ctrl+Shift+N) で開く → これで動けばキャッシュ問題確定<br>
+            2. 通常ウィンドウなら DevTools (F12) → Application → Storage → 「Clear site data」 → リロード
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">AI 生成のカバー率が低い</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            考えられる原因:<br>
+            ・必要人数 > スタッフキャパシティ（労務ルール上限で詰まる）<br>
+            ・固定休日が重なって候補不足<br>
+            ・希望が「不可」だらけで配置先がない<br>
+            対処: 設定タブで必要人数マトリクスを下方修正、またはスタッフ追加。
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">スタッフが希望URLを開けない</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            ・URL がコピー切れていないか確認（最後まで全文選択でコピー）<br>
+            ・「リンク」ボタンを再実行 → 既存と同じ URL が再生成されます<br>
+            ・トークン削除を実行した場合は新規発行が必要
+          </div>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">パスワードを忘れた</summary>
+          <div class="mt-2 pl-4 border-l-2 border-slate-200">
+            メールで <a href="mailto:support@in-dx.jp" class="text-brand-600 underline">support@in-dx.jp</a> までご連絡ください。本人確認の上、サーバ側でリセットさせていただきます。
+          </div>
+        </details>
+      </section>
+
+      <!-- FAQ -->
+      <section id="faq" class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+        <h2 class="text-xl font-bold">❓ よくある質問</h2>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">14日無料トライアル後、自動で課金されますか？</summary>
+          <p class="mt-2 pl-4 text-slate-600">いいえ、自動課金されません。クレカ登録不要でお試しいただけます。継続される場合のみ別途お手続きください。</p>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">複数店舗運営は対応してますか？</summary>
+          <p class="mt-2 pl-4 text-slate-600">現在は 1 店舗 1 アカウント。多店舗対応は 2026 年内のロードマップに入っています。先行ご相談で個別 Cloud Run インスタンス発行でご提供可能です。</p>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">既存のシフト管理ツール（Air シフト等）からのデータ移行は？</summary>
+          <p class="mt-2 pl-4 text-slate-600">スタッフ情報は CSV 取込で一括登録できます。シフトの履歴データはお問合せください、移行スクリプト個別対応します。</p>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">VOIXA との違いは？</summary>
+          <p class="mt-2 pl-4 text-slate-600">VOIXA = 予約電話の自動応答 AI、Shifty = シフト作成の自動化 AI。両方契約で月¥1,500 OFF。</p>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">データの安全性は？</summary>
+          <p class="mt-2 pl-4 text-slate-600">Google Cloud Platform 上で運用、全通信 HTTPS、データは Firestore で暗号化保管、パスワードは bcrypt ハッシュ化、CSP 等のセキュリティヘッダ実装済み。バックアップもオーナー側でいつでも JSON 取得可能。</p>
+        </details>
+
+        <details class="group">
+          <summary class="font-semibold cursor-pointer">解約方法</summary>
+          <p class="mt-2 pl-4 text-slate-600">いつでも管理画面から解約可能。違約金等は発生しません。解約後 30 日間データ保持、再開時に復元可能。</p>
+        </details>
+      </section>
+
+      <!-- Contact -->
+      <section id="contact" class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+        <h2 class="text-xl font-bold">✉️ お問合せ</h2>
+        <p>解決しない場合は以下からご連絡ください。<strong>1 営業日以内</strong>に返信いたします。</p>
+        <ul class="space-y-2">
+          <li>📧 メール: <a href="mailto:support@in-dx.jp" class="text-brand-600 underline">support@in-dx.jp</a></li>
+          <li>📋 お問合せフォーム: <a href="/#contact" class="text-brand-600 underline">トップページのフォーム</a></li>
+        </ul>
+        <div class="bg-slate-100 rounded-md p-3 text-xs text-slate-600">
+          お問合せ時は以下があるとスムーズです:<br>
+          ・アカウントのメールアドレス<br>
+          ・問題が起きた具体的な操作・画面<br>
+          ・スクリーンショット（あれば）
+        </div>
+      </section>
+
+    </article>
+  </main>
+
+  <footer class="bg-slate-900 text-slate-400 py-8 mt-10 text-center text-xs">
+    © 2026 飲DX. All rights reserved.
+    <span class="mx-2">|</span>
+    <a href="/tos" class="hover:text-white">利用規約</a>
+    <span class="mx-2">|</span>
+    <a href="/privacy" class="hover:text-white">プライバシー</a>
+    <span class="mx-2">|</span>
+    <a href="/tokushoho" class="hover:text-white">特商法</a>
+  </footer>
+
+  <script>
+    // 検索: マッチしないセクションを薄表示
+    const searchBox = document.getElementById('searchBox');
+    searchBox.addEventListener('input', () => {
+      const q = searchBox.value.toLowerCase().trim();
+      document.querySelectorAll('article > section').forEach(sec => {
+        if (!q) { sec.style.display = ''; sec.style.opacity = '1'; return; }
+        const text = sec.textContent.toLowerCase();
+        if (text.includes(q)) {
+          sec.style.display = '';
+          sec.style.opacity = '1';
+        } else {
+          sec.style.opacity = '0.3';
+        }
+      });
+    });
+
+    // ハッシュリンクで該当セクションを開く
+    if (location.hash) {
+      const id = location.hash.slice(1);
+      const sec = document.getElementById(id);
+      if (sec) {
+        sec.querySelectorAll('details').forEach(d => d.open = true);
+        sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shifty デモ — 触って確かめる</title>
+  <meta name="robots" content="noindex,nofollow" />
+  <script>window.__SHIFTY_DEMO_MODE__ = true;</script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='white' font-family='system-ui,sans-serif' font-weight='700'%3ES%3C/text%3E%3C/svg%3E" />
+  <meta name="theme-color" content="#4f46e5" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { brand: { 50:'#eef2ff', 100:'#e0e7ff', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca' } },
+          fontFamily: { sans: ['"Hiragino Sans"','"Yu Gothic"','Meiryo','system-ui','sans-serif'] }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+
+  <!-- Auth Overlay (hidden in demo) -->
+  <div id="authOverlay" class="hidden fixed inset-0 z-[60] bg-slate-100 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-xl p-8 w-full max-w-md">
+      <div id="authSetup" class="hidden"></div>
+      <div id="authLogin" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- Top bar -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-gradient-to-br from-brand-500 to-brand-700 rounded-lg flex items-center justify-center text-white text-lg font-bold">S</div>
+        <div>
+          <h1 class="font-bold text-lg leading-tight">Shifty <span class="text-xs text-amber-600 font-normal">DEMO</span></h1>
+          <p class="text-xs text-slate-500" id="restaurantName">—</p>
+        </div>
+      </div>
+
+      <!-- Week navigator -->
+      <div id="weekNav" class="flex items-center gap-1 text-sm bg-slate-50 rounded-lg p-1">
+        <button id="prevWeekBtn" class="px-2 py-1 hover:bg-white rounded">◀</button>
+        <button id="weekJumpBtn" class="px-3 py-1 hover:bg-white rounded font-medium">—</button>
+        <button id="nextWeekBtn" class="px-2 py-1 hover:bg-white rounded">▶</button>
+        <span id="weekStatusBadge" class="ml-1 text-xs px-2 py-0.5 rounded">—</span>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <a href="/#contact" class="text-xs bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5 rounded font-semibold">14日無料トライアル →</a>
+      </div>
+    </div>
+
+    <nav class="max-w-7xl mx-auto px-2 overflow-x-auto">
+      <ul class="flex gap-1 text-sm">
+        <li><button data-tab="dashboard"   class="tab-btn px-4 py-2.5 border-b-2 border-transparent">📊 ダッシュボード</button></li>
+        <li><button data-tab="staff"       class="tab-btn px-4 py-2.5 border-b-2 border-transparent">👥 スタッフ</button></li>
+        <li><button data-tab="preferences" class="tab-btn px-4 py-2.5 border-b-2 border-transparent">📝 希望収集</button></li>
+        <li><button data-tab="schedule"    class="tab-btn px-4 py-2.5 border-b-2 border-transparent">📅 シフト編成</button></li>
+        <li><button data-tab="export"      class="tab-btn px-4 py-2.5 border-b-2 border-transparent">📤 エクスポート</button></li>
+        <li><button data-tab="settings"    class="tab-btn px-4 py-2.5 border-b-2 border-transparent">⚙️ 設定</button></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6" id="main"></main>
+
+  <!-- Hidden buttons (kept for app.js compat) -->
+  <button id="logoutBtn" class="hidden"></button>
+  <button id="resetBtn" class="hidden"></button>
+  <input id="loginPass" type="password" class="hidden">
+  <button id="loginBtn" class="hidden"></button>
+  <input id="setupPass1" type="password" class="hidden">
+  <input id="setupPass2" type="password" class="hidden">
+  <button id="setupBtn" class="hidden"></button>
+  <div id="loginErr" class="hidden"></div>
+  <div id="setupErr" class="hidden"></div>
+
+  <div id="toast" class="fixed bottom-6 right-6 z-50 space-y-2"></div>
+
+  <div id="modal" class="hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" id="modalBody"></div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/algorithm.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

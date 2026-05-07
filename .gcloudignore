@@ -1,0 +1,31 @@
+# Cloud Run デプロイ用除外ファイル
+.git
+.gitignore
+.idea/
+.vscode/
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+
+# ローカル DB（Cloud Run では Firestore を使う）
+shifty.db
+shifty.db-journal
+*.sqlite
+
+# 機密
+.env
+.env.*
+*-key.json
+sa-key.json
+
+# その他
+.DS_Store
+Thumbs.db
+node_modules/

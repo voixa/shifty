@@ -1,0 +1,203 @@
+/* Shifty — custom styles beyond Tailwind */
+
+.tab-btn {
+  white-space: nowrap;
+  color: #64748b;
+  transition: all .15s ease;
+}
+.tab-btn:hover { color: #334155; }
+.tab-btn.active {
+  color: #4f46e5;
+  border-bottom-color: #4f46e5 !important;
+  font-weight: 600;
+}
+
+/* Calendar grid */
+.cal-grid {
+  display: grid;
+  grid-template-columns: 60px repeat(7, minmax(120px, 1fr));
+  gap: 1px;
+  background: #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 12px;
+}
+.cal-cell {
+  background: #fff;
+  padding: 4px;
+  min-height: 56px;
+  position: relative;
+}
+.cal-cell.head {
+  background: #f8fafc;
+  font-weight: 600;
+  text-align: center;
+  padding: 8px 4px;
+}
+
+.assignment-chip {
+  display: block;
+  padding: 4px 6px;
+  margin-bottom: 2px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+  border-left: 3px solid;
+  background: #f8fafc;
+  transition: all .12s;
+}
+.assignment-chip:hover {
+  background: #eef2ff;
+  transform: translateX(2px);
+}
+.assignment-chip.editable {
+  cursor: grab;
+}
+.assignment-chip.editable:active {
+  cursor: grabbing;
+}
+.assignment-chip.dragging {
+  opacity: 0.4;
+}
+.assignment-chip.drop-target {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+  background: #e0e7ff !important;
+}
+.assignment-chip .name { font-weight: 600; }
+.assignment-chip .time { color: #64748b; font-size: 10px; }
+
+.toast-item {
+  background: #1e293b;
+  color: white;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.15);
+  animation: slideUp .25s ease;
+}
+.toast-item.success { background: #059669; }
+.toast-item.error   { background: #dc2626; }
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Budget gauge */
+.gauge-bar {
+  height: 10px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.gauge-bar > div {
+  height: 100%;
+  border-radius: 999px;
+  transition: width .3s, background .3s;
+}
+
+/* Pos badges */
+.pos-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+}
+
+/* Print styles */
+@media print {
+  header, .no-print { display: none !important; }
+  body { background: white; }
+  .cal-cell { min-height: auto; }
+}
+
+/* Loader */
+.spinner {
+  width: 22px; height: 22px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #4f46e5;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Responsive tweaks */
+@media (max-width: 640px) {
+  .cal-grid { grid-template-columns: 40px repeat(7, minmax(90px, 1fr)); font-size: 11px; }
+  .cal-cell { min-height: 48px; padding: 2px; }
+  .assignment-chip { font-size: 10px; padding: 3px 4px; }
+  .assignment-chip .time { font-size: 9px; }
+}
+
+/* Mobile vertical calendar (< 640px) */
+@media (max-width: 640px) {
+  .cal-grid.mobile-stack {
+    display: flex !important;
+    flex-direction: column;
+    gap: 8px;
+    background: transparent;
+    font-size: 12px;
+  }
+  .cal-grid.mobile-stack .cal-cell {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 8px;
+    min-height: auto;
+  }
+  .cal-grid.mobile-stack .cal-cell.head { display: none; }
+  .cal-grid.mobile-stack .day-header {
+    font-weight: 700;
+    color: #475569;
+    margin-bottom: 4px;
+  }
+  .cal-grid.mobile-stack .session-header {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 6px;
+    border-top: 1px dashed #e2e8f0;
+    padding-top: 4px;
+  }
+}
+
+/* Floating Action Button (mobile) */
+.fab {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 30;
+  display: none;
+  background: #4f46e5;
+  color: white;
+  border-radius: 999px;
+  padding: 14px 20px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(79, 70, 229, .4);
+  font-size: 14px;
+}
+@media (max-width: 640px) {
+  .fab { display: inline-flex; align-items: center; gap: 6px; }
+}
+
+/* PWA install prompt area */
+.pwa-install-banner {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  background: #4f46e5;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}

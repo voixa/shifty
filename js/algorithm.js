@@ -1,0 +1,688 @@
+// algorithm.js v2 — 監査可能・検証可能なシフト最適化エンジン
+//
+// 設計方針:
+//   ハード制約 (HARD_CONSTRAINTS): 違反ゼロを保証 (post-condition で検証)
+//   ソフト制約 (SCORE_FACTORS):    全要素を 0..1 に正規化 + 重み付き合計
+//   多重スタート (RANDOM_RESTARTS): 局所最適を脱出
+//   結果検証:                       生成後に必ず検査、違反は明示
+//
+// 仕様の詳細: docs/algorithm.md
+(function () {
+  const { calcHours, timeOverlap, timeContains, dayOfWeek, uid } = window.ShiftyData;
+
+  // =====================================================================
+  // ハード制約（HARD CONSTRAINTS）— 違反は絶対に発生させない
+  // =====================================================================
+  const HARD_CONSTRAINTS = [
+    {
+      id: "position_match",
+      label: "ポジション適合",
+      rationale: "スタッフが本職または兼任可能なポジションのみ配置",
+      check(staff, slot, _state, _lr) {
+        return staff.position === slot.position || (staff.canCover || []).includes(slot.position);
+      },
+    },
+    {
+      id: "fixed_day_off",
+      label: "固定休日",
+      rationale: "契約上の固定休日には配置しない",
+      check(staff, slot) {
+        return !(staff.fixedDayOff || []).includes(dayOfWeek(slot.date));
+      },
+    },
+    {
+      id: "no_time_overlap",
+      label: "時間重複なし",
+      rationale: "同時間帯の二重配置は物理的に不可能",
+      check(staff, slot, state) {
+        return !(state.byStaff[staff.id] || []).some(
+          (a) => a.date === slot.date && timeOverlap(a, slot)
+        );
+      },
+    },
+    {
+      id: "personal_max_hours_week",
+      label: "個人契約週上限",
+      rationale: "スタッフとの労働契約上の週時間上限を超えない",
+      check(staff, slot, state) {
+        const slotHours = calcHours(slot.startTime, slot.endTime);
+        return (state.hours[staff.id] || 0) + slotHours <= staff.maxHoursPerWeek;
+      },
+    },
+    {
+      id: "labor_max_hours_week",
+      label: "労務週上限",
+      rationale: "労務ルールで定められた週上限（労基順守）",
+      check(staff, slot, state, lr) {
+        if (!lr || !lr.maxHoursPerWeek) return true;
+        const slotHours = calcHours(slot.startTime, slot.endTime);
+        return (state.hours[staff.id] || 0) + slotHours <= lr.maxHoursPerWeek;
+      },
+    },
+    {
+      id: "labor_max_hours_day",
+      label: "労務1日上限",
+      rationale: "1日あたりの労働時間上限",
+      check(staff, slot, state, lr) {
+        if (!lr || !lr.maxHoursPerDay) return true;
+        const sameDay = (state.byStaff[staff.id] || []).filter((a) => a.date === slot.date);
+        const dayHours =
+          sameDay.reduce((s, a) => s + calcHours(a.startTime, a.endTime), 0) +
+          calcHours(slot.startTime, slot.endTime);
+        return dayHours <= lr.maxHoursPerDay;
+      },
+    },
+    {
+      id: "labor_max_consecutive_days",
+      label: "連勤上限",
+      rationale: "連続勤務日数の上限（疲労・事故防止）",
+      check(staff, slot, state, lr) {
+        if (!lr || !lr.maxConsecutiveDays) return true;
+        return consecutiveDaysIfAdded(staff, slot, state) <= lr.maxConsecutiveDays;
+      },
+    },
+  ];
+
+  function checkAllHardConstraints(staff, slot, state, lr) {
+    const violated = [];
+    for (const c of HARD_CONSTRAINTS) {
+      if (!c.check(staff, slot, state, lr)) violated.push(c.id);
+    }
+    return violated;
+  }
+
+  function isEligible(staff, slot, state, lr) {
+    return checkAllHardConstraints(staff, slot, state, lr).length === 0;
+  }
+
+  // =====================================================================
+  // ソフト制約（SCORE FACTORS）— すべて 0..1 に正規化
+  // =====================================================================
+  const SCORE_FACTORS = {
+    preference: {
+      label: "希望充足",
+      rationale: "スタッフの提出した希望と一致するほど高得点",
+      compute(staff, slot, _state, prefs, _lr) {
+        const pref = findPreference(prefs, staff.id, slot);
+        if (!pref) return { value: 0.30, detail: "希望未提出（中立）" };
+        if (pref.priority === "avoid") return { value: 0.0, detail: "回避希望" };
+        const within = timeContains(pref, slot);
+        if (pref.priority === "must") {
+          return within
+            ? { value: 1.0, detail: "必須（完全包含）" }
+            : { value: 0.55, detail: "必須（部分一致）" };
+        }
+        return within
+          ? { value: 0.85, detail: "希望（完全包含）" }
+          : { value: 0.40, detail: "希望（部分一致）" };
+      },
+    },
+    positionMatch: {
+      label: "ポジション適合",
+      rationale: "本職に配置するほど高得点",
+      compute(staff, slot) {
+        if (staff.position === slot.position) return { value: 1.0, detail: "本職" };
+        return { value: 0.5, detail: "兼任" };
+      },
+    },
+    fairness: {
+      label: "公平性",
+      rationale: "未充足時間が多いほど優先（既配置時間が少ないほど高得点）",
+      compute(staff, _slot, state, _prefs, lr) {
+        const cap = Math.min(staff.maxHoursPerWeek, lr?.maxHoursPerWeek ?? Infinity);
+        const cur = state.hours[staff.id] || 0;
+        if (cur < staff.minHoursPerWeek) {
+          return { value: 1.0, detail: `最低時間未達 (${cur.toFixed(1)}/${staff.minHoursPerWeek}h)` };
+        }
+        const room = Math.max(1, cap - staff.minHoursPerWeek);
+        const used = Math.max(0, cur - staff.minHoursPerWeek);
+        return { value: Math.max(0, 1 - used / room), detail: `余裕 ${(room - used).toFixed(1)}h` };
+      },
+    },
+    cost: {
+      label: "コスト",
+      rationale: "時給が低いほど高得点（人件費抑制）",
+      compute(staff) {
+        const f = staff._costFactor;
+        return { value: f != null ? f : 0.5, detail: `時給¥${staff.hourlyWage}` };
+      },
+    },
+    skill: {
+      label: "スキル",
+      rationale: "スキルレベルが高いほど高得点（1〜5を 0..1 に正規化）",
+      compute(staff) {
+        return { value: (staff.skill || 1) / 5, detail: `スキル${staff.skill || 1}/5` };
+      },
+    },
+  };
+
+  // 既定の重み（合計1.0）
+  const DEFAULT_WEIGHTS = {
+    preference: 0.40,
+    positionMatch: 0.15,
+    fairness: 0.20,
+    cost: 0.15,
+    skill: 0.10,
+  };
+
+  function normalizeWeights(input) {
+    const w = { ...DEFAULT_WEIGHTS, ...(input || {}) };
+    let sum = 0;
+    for (const k of Object.keys(SCORE_FACTORS)) sum += Math.max(0, w[k] || 0);
+    if (sum === 0) return { ...DEFAULT_WEIGHTS };
+    const out = {};
+    for (const k of Object.keys(SCORE_FACTORS)) out[k] = Math.max(0, w[k] || 0) / sum;
+    return out;
+  }
+
+  function scoreCandidate(staff, slot, state, prefs, lr, weights) {
+    let total = 0;
+    const breakdown = [];
+    for (const [k, factor] of Object.entries(SCORE_FACTORS)) {
+      const { value, detail } = factor.compute(staff, slot, state, prefs, lr);
+      const weight = weights[k] || 0;
+      const contrib = value * weight;
+      total += contrib;
+      breakdown.push({
+        id: k,
+        label: factor.label,
+        value,
+        weight,
+        contrib,
+        detail,
+      });
+    }
+    return { score: total, breakdown };
+  }
+
+  // =====================================================================
+  // ヘルパー
+  // =====================================================================
+  function findPreference(prefs, staffId, slot) {
+    return (prefs || []).find(
+      (p) => p.staffId === staffId && p.date === slot.date && timeOverlap(p, slot)
+    );
+  }
+
+  function consecutiveDaysIfAdded(staff, slot, state) {
+    const dates = new Set((state.byStaff[staff.id] || []).map((a) => a.date));
+    dates.add(slot.date);
+    const sorted = [...dates].sort();
+    let max = 1, cur = 1;
+    for (let i = 1; i < sorted.length; i++) {
+      const diff =
+        (new Date(sorted[i]) - new Date(sorted[i - 1])) / (1000 * 60 * 60 * 24);
+      if (diff === 1) {
+        cur++;
+        max = Math.max(max, cur);
+      } else cur = 1;
+    }
+    return max;
+  }
+
+  // 決定的な乱数（seed入力で同じ結果）— Mulberry32
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0;
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // =====================================================================
+  // Phase 1: Coverage（困難スロット優先で必要人数を埋める）
+  // =====================================================================
+  function phase1Coverage({ staff, slots, preferences, laborRules, weights, seed }) {
+    const rand = mulberry32(seed);
+    const state = {
+      hours: Object.fromEntries(staff.map((s) => [s.id, 0])),
+      byStaff: Object.fromEntries(staff.map((s) => [s.id, []])),
+      assignments: [],
+      unfilled: [],
+    };
+
+    const instances = [];
+    for (const sl of slots) {
+      for (let i = 0; i < sl.requiredCount; i++) {
+        instances.push({ ...sl, instanceIdx: i, _r: rand() });
+      }
+    }
+
+    // 困難度順ソート: 候補が少ないスロット先 → 同率はランダム
+    instances.sort((a, b) => {
+      const aCand = staff.filter((s) => isEligible(s, a, state, laborRules)).length;
+      const bCand = staff.filter((s) => isEligible(s, b, state, laborRules)).length;
+      if (aCand !== bCand) return aCand - bCand;
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+      return a._r - b._r;
+    });
+
+    for (const slot of instances) {
+      const eligible = staff.filter((s) => isEligible(s, slot, state, laborRules));
+      if (eligible.length === 0) {
+        state.unfilled.push(slot);
+        continue;
+      }
+      const scored = eligible
+        .map((s) => ({
+          staff: s,
+          ...scoreCandidate(s, slot, state, preferences, laborRules, weights),
+        }))
+        .sort((a, b) => b.score - a.score || rand() - 0.5);
+      const picked = scored[0];
+
+      const cost =
+        picked.staff.hourlyWage * calcHours(slot.startTime, slot.endTime);
+      const a = {
+        id: uid("a_"),
+        date: slot.date,
+        staffId: picked.staff.id,
+        position: slot.position,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        cost,
+        score: picked.score,
+        breakdown: picked.breakdown,
+        // 監査ログ: この時点での候補トップ3を記録
+        topCandidates: scored.slice(0, 3).map((x) => ({
+          staffId: x.staff.id,
+          name: x.staff.name,
+          score: x.score,
+        })),
+      };
+      state.assignments.push(a);
+      state.byStaff[picked.staff.id].push(a);
+      state.hours[picked.staff.id] += calcHours(slot.startTime, slot.endTime);
+    }
+    return state;
+  }
+
+  // =====================================================================
+  // Phase 2: Optimize（局所交換: スコア改善があれば入替）
+  // =====================================================================
+  function phase2Optimize(state, { staff, preferences, laborRules, weights }) {
+    let improved = true;
+    let rounds = 0;
+    const MAX_ROUNDS = 8;
+    const IMPROVEMENT_THRESHOLD = 0.005; // 0.5% 以上の改善のみ採用
+
+    while (improved && rounds < MAX_ROUNDS) {
+      improved = false;
+      rounds++;
+      for (let i = 0; i < state.assignments.length; i++) {
+        const a = state.assignments[i];
+        const slotLike = {
+          date: a.date,
+          position: a.position,
+          startTime: a.startTime,
+          endTime: a.endTime,
+        };
+        const stateMinusA = removeAssignmentVirtual(state, a);
+        const eligible = staff.filter((s) => isEligible(s, slotLike, stateMinusA, laborRules));
+        if (eligible.length === 0) continue;
+        const scored = eligible
+          .map((s) => ({
+            staff: s,
+            ...scoreCandidate(s, slotLike, stateMinusA, preferences, laborRules, weights),
+          }))
+          .sort((x, y) => y.score - x.score);
+        const best = scored[0];
+        if (best.staff.id !== a.staffId && best.score > a.score + IMPROVEMENT_THRESHOLD) {
+          const newCost = best.staff.hourlyWage * calcHours(a.startTime, a.endTime);
+          const newA = {
+            ...a,
+            staffId: best.staff.id,
+            cost: newCost,
+            score: best.score,
+            breakdown: best.breakdown,
+            topCandidates: scored.slice(0, 3).map((x) => ({
+              staffId: x.staff.id, name: x.staff.name, score: x.score,
+            })),
+          };
+          state.byStaff[a.staffId] = state.byStaff[a.staffId].filter((x) => x.id !== a.id);
+          state.hours[a.staffId] -= calcHours(a.startTime, a.endTime);
+          state.byStaff[best.staff.id].push(newA);
+          state.hours[best.staff.id] += calcHours(a.startTime, a.endTime);
+          state.assignments[i] = newA;
+          improved = true;
+        }
+      }
+    }
+    state._optimizeRounds = rounds;
+    return state;
+  }
+
+  function removeAssignmentVirtual(state, a) {
+    const clone = {
+      hours: { ...state.hours },
+      byStaff: Object.fromEntries(
+        Object.entries(state.byStaff).map(([k, v]) => [k, v.filter((x) => x.id !== a.id)])
+      ),
+      assignments: state.assignments,
+      unfilled: state.unfilled,
+    };
+    clone.hours[a.staffId] -= calcHours(a.startTime, a.endTime);
+    return clone;
+  }
+
+  // =====================================================================
+  // Post-condition 検証（生成後の正当性チェック）
+  // =====================================================================
+  function verifyHardConstraints(state, { staff, laborRules }) {
+    // 各 assignment を空状態から積み上げて、各時点で全制約を満たすか確認
+    const replay = {
+      hours: Object.fromEntries(staff.map((s) => [s.id, 0])),
+      byStaff: Object.fromEntries(staff.map((s) => [s.id, []])),
+    };
+    const violations = [];
+    // 日付・時刻順に再生
+    const ordered = [...state.assignments].sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)
+    );
+    for (const a of ordered) {
+      const s = staff.find((x) => x.id === a.staffId);
+      if (!s) {
+        violations.push({ assignmentId: a.id, type: "staff_not_found", staffId: a.staffId });
+        continue;
+      }
+      const violatedIds = checkAllHardConstraints(s, a, replay, laborRules);
+      if (violatedIds.length) {
+        for (const vid of violatedIds) {
+          violations.push({
+            assignmentId: a.id,
+            staffId: a.staffId,
+            staffName: s.name,
+            date: a.date,
+            position: a.position,
+            constraintId: vid,
+            label: HARD_CONSTRAINTS.find((c) => c.id === vid)?.label || vid,
+          });
+        }
+      }
+      replay.byStaff[s.id].push(a);
+      replay.hours[s.id] += calcHours(a.startTime, a.endTime);
+    }
+    return violations;
+  }
+
+  // =====================================================================
+  // Metrics（カバー率・希望充足・公平性・コスト）
+  // =====================================================================
+  function calcMetrics(state, { staff, slots, preferences }) {
+    const totalSlots = slots.reduce((s, x) => s + x.requiredCount, 0);
+    const filled = state.assignments.length;
+    const coverageRate = totalSlots ? filled / totalSlots : 1;
+
+    // 希望充足: 提出された want/must の何%が assignment と一致したか
+    const offeredPrefs = (preferences || []).filter((p) => p.priority !== "avoid");
+    const totalWants = offeredPrefs.length;
+    let prefHit = 0;
+    for (const p of offeredPrefs) {
+      const hit = state.assignments.find(
+        (a) =>
+          a.staffId === p.staffId &&
+          a.date === p.date &&
+          timeOverlap(a, p)
+      );
+      if (hit) prefHit++;
+    }
+    const prefSat = totalWants ? prefHit / totalWants : 0;
+
+    // 回避希望違反 (avoid と一致した assignment)
+    const avoidViolations = (preferences || [])
+      .filter((p) => p.priority === "avoid")
+      .filter((p) =>
+        state.assignments.some(
+          (a) =>
+            a.staffId === p.staffId &&
+            a.date === p.date &&
+            timeOverlap(a, p)
+        )
+      ).length;
+
+    const totalCost = state.assignments.reduce((s, a) => s + a.cost, 0);
+
+    // 公平性指標
+    const hoursList = staff.map((s) => state.hours[s.id] || 0);
+    const mean = hoursList.length ? hoursList.reduce((a, b) => a + b, 0) / hoursList.length : 0;
+    const variance = hoursList.length
+      ? hoursList.reduce((a, h) => a + (h - mean) ** 2, 0) / hoursList.length
+      : 0;
+    const std = Math.sqrt(variance);
+    const cv = mean > 0 ? std / mean : 0; // 変動係数（低いほど均等）
+    const minMet = staff.filter((s) => (state.hours[s.id] || 0) >= s.minHoursPerWeek).length;
+    const minMetRate = staff.length ? minMet / staff.length : 0;
+    const overMaxCount = staff.filter((s) => (state.hours[s.id] || 0) > s.maxHoursPerWeek).length;
+
+    const perStaff = staff.map((s) => {
+      const hours = state.hours[s.id] || 0;
+      const cost = (state.byStaff[s.id] || []).reduce((sm, a) => sm + a.cost, 0);
+      return {
+        staffId: s.id,
+        name: s.name,
+        position: s.position,
+        hours,
+        cost,
+        meetsMin: hours >= s.minHoursPerWeek,
+        overMax: hours > s.maxHoursPerWeek,
+      };
+    });
+
+    return {
+      totalSlots,
+      filled,
+      coverageRate,
+      preferenceSatisfaction: prefSat,
+      preferenceHit: prefHit,
+      preferenceTotal: totalWants,
+      avoidViolations,
+      totalCost,
+      fairness: { mean, std, cv, minMetRate, overMaxCount },
+      perStaff,
+      unfilled: state.unfilled,
+    };
+  }
+
+  // 目的関数（重み付き合計、多重スタートでこれが最大の解を採用）
+  function objectiveValue(metrics, weights) {
+    const w = weights || DEFAULT_WEIGHTS;
+    // coverage を最重要、希望充足、公平性 (1-cv)、コスト効率
+    const wCov = 0.40;
+    const wPref = w.preference || 0.30;
+    const wFair = w.fairness || 0.15;
+    const wCost = w.cost || 0.10;
+    const fairnessScore = 1 - Math.min(1, metrics.fairness.cv);
+    const costScore = 1; // コストはハード予算なら別途扱い、ここでは中立（生成内では最小化を scoreCandidate で実現）
+    return (
+      wCov * metrics.coverageRate +
+      wPref * metrics.preferenceSatisfaction +
+      wFair * fairnessScore +
+      wCost * costScore -
+      0.2 * metrics.avoidViolations -
+      0.1 * metrics.fairness.overMaxCount
+    );
+  }
+
+  // =====================================================================
+  // Public API
+  // =====================================================================
+  function generateShift({
+    staff,
+    slots,
+    preferences,
+    laborRules,
+    weights: rawWeights,
+    randomStarts = 5,
+  }) {
+    const weights = normalizeWeights(rawWeights);
+
+    // staff のコスト要素を事前計算（最安=1.0、最高=0.0）
+    const wages = staff.map((s) => s.hourlyWage);
+    const minW = Math.min(...wages);
+    const maxW = Math.max(...wages);
+    const range = Math.max(1, maxW - minW);
+    const staffWithCost = staff.map((s) => ({
+      ...s,
+      _costFactor: 1 - (s.hourlyWage - minW) / range,
+    }));
+
+    let bestState = null;
+    let bestObj = -Infinity;
+    let bestSeed = -1;
+    const trial = [];
+
+    for (let r = 0; r < Math.max(1, randomStarts); r++) {
+      const seed = (r + 1) * 12345;
+      let state = phase1Coverage({
+        staff: staffWithCost,
+        slots,
+        preferences,
+        laborRules,
+        weights,
+        seed,
+      });
+      state = phase2Optimize(state, {
+        staff: staffWithCost,
+        preferences,
+        laborRules,
+        weights,
+      });
+      const m = calcMetrics(state, { staff: staffWithCost, slots, preferences });
+      const obj = objectiveValue(m, weights);
+      trial.push({ seed, obj, coverage: m.coverageRate, prefSat: m.preferenceSatisfaction });
+      if (obj > bestObj) {
+        bestObj = obj;
+        bestState = state;
+        bestSeed = seed;
+      }
+    }
+
+    const metrics = calcMetrics(bestState, {
+      staff: staffWithCost,
+      slots,
+      preferences,
+    });
+    const violations = verifyHardConstraints(bestState, {
+      staff: staffWithCost,
+      laborRules,
+    });
+
+    return {
+      assignments: bestState.assignments,
+      metrics,
+      unfilled: bestState.unfilled,
+      audit: {
+        weights,
+        randomStarts: Math.max(1, randomStarts),
+        bestSeed,
+        bestObjective: bestObj,
+        trials: trial,
+        hardConstraintsChecked: HARD_CONSTRAINTS.map((c) => ({
+          id: c.id,
+          label: c.label,
+          rationale: c.rationale,
+        })),
+        scoreFactors: Object.entries(SCORE_FACTORS).map(([id, f]) => ({
+          id,
+          label: f.label,
+          rationale: f.rationale,
+          weight: weights[id],
+        })),
+        hardViolations: violations,
+        passed: violations.length === 0,
+      },
+    };
+  }
+
+  function recommendSubstitute(target, { staff, preferences, assignments, laborRules, weights: rawWeights }) {
+    const weights = normalizeWeights(rawWeights);
+    const wages = staff.map((s) => s.hourlyWage);
+    const minW = Math.min(...wages);
+    const maxW = Math.max(...wages);
+    const range = Math.max(1, maxW - minW);
+    const staffWithCost = staff.map((s) => ({
+      ...s,
+      _costFactor: 1 - (s.hourlyWage - minW) / range,
+    }));
+
+    const state = {
+      hours: Object.fromEntries(staffWithCost.map((s) => [s.id, 0])),
+      byStaff: Object.fromEntries(staffWithCost.map((s) => [s.id, []])),
+    };
+    for (const a of assignments) {
+      if (a.id === target.id) continue;
+      state.hours[a.staffId] = (state.hours[a.staffId] || 0) + calcHours(a.startTime, a.endTime);
+      (state.byStaff[a.staffId] = state.byStaff[a.staffId] || []).push(a);
+    }
+    const slotLike = {
+      date: target.date,
+      position: target.position,
+      startTime: target.startTime,
+      endTime: target.endTime,
+    };
+    const eligible = staffWithCost.filter(
+      (s) => s.id !== target.staffId && isEligible(s, slotLike, state, laborRules)
+    );
+    return eligible
+      .map((s) => ({
+        staff: s,
+        ...scoreCandidate(s, slotLike, state, preferences, laborRules, weights),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+  }
+
+  // =====================================================================
+  // Self-test ユーティリティ（外部から呼び出し可能）
+  // =====================================================================
+  function runSelfTest(seedInput) {
+    const result = generateShift(seedInput);
+    const checks = [
+      {
+        name: "ハード制約違反ゼロ",
+        passed: result.audit.hardViolations.length === 0,
+        detail: `違反 ${result.audit.hardViolations.length} 件`,
+      },
+      {
+        name: "全 assignment にスコア内訳がある",
+        passed: result.assignments.every((a) => Array.isArray(a.breakdown) && a.breakdown.length > 0),
+        detail: `${result.assignments.length} assignment`,
+      },
+      {
+        name: "全 assignment のスコアが 0..1 の範囲",
+        passed: result.assignments.every((a) => a.score >= 0 && a.score <= 1.0001),
+        detail: "正規化スコア",
+      },
+      {
+        name: "重み合計が 1.0（許容誤差 0.01）",
+        passed: Math.abs(Object.values(result.audit.weights).reduce((s, x) => s + x, 0) - 1) < 0.01,
+        detail: `合計 ${Object.values(result.audit.weights).reduce((s, x) => s + x, 0).toFixed(3)}`,
+      },
+      {
+        name: "再現性（同入力で同結果）",
+        passed: (() => {
+          const r2 = generateShift(seedInput);
+          return JSON.stringify(r2.assignments.map((a) => `${a.date}|${a.position}|${a.startTime}|${a.staffId}`).sort())
+            === JSON.stringify(result.assignments.map((a) => `${a.date}|${a.position}|${a.startTime}|${a.staffId}`).sort());
+        })(),
+        detail: "決定的シード",
+      },
+    ];
+    return { result, checks, allPassed: checks.every((c) => c.passed) };
+  }
+
+  window.ShiftyAlgo = {
+    generateShift,
+    recommendSubstitute,
+    calcMetrics,
+    runSelfTest,
+    HARD_CONSTRAINTS,
+    SCORE_FACTORS,
+    DEFAULT_WEIGHTS,
+  };
+})();

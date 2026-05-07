@@ -1,0 +1,14 @@
+.git
+.gitignore
+.claude
+.idea
+.vscode
+__pycache__
+*.pyc
+shifty.db*
+.env
+.env.*
+*-key.json
+sa-key.json
+.DS_Store
+node_modules

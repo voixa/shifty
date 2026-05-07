@@ -1,0 +1,2551 @@
+// app.js v3 — Multi-week + Publish + Auth
+(function () {
+const D = window.ShiftyData;
+const { DAY_LABELS, uid, fmtDate, todayMonday, addDays, dayOfWeek, calcHours,
+        buildSlots, ensureWeek, listWeeks,
+        loadState, saveState, resetState } = D;
+const { generateShift, recommendSubstitute, calcMetrics } = window.ShiftyAlgo;
+
+let state = null;
+let currentTab = "dashboard";
+
+// ===== Utilities =====
+function $(s, r = document) { return r.querySelector(s); }
+function $$(s, r = document) { return [...r.querySelectorAll(s)]; }
+function el(tag, attrs = {}, children = []) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k === "html") e.innerHTML = v;
+    else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === "style") Object.assign(e.style, v);
+    else e.setAttribute(k, v);
+  }
+  for (const c of [].concat(children)) {
+    if (c == null) continue;
+    if (c instanceof Node) e.appendChild(c);
+    else e.appendChild(document.createTextNode(String(c)));
+  }
+  return e;
+}
+function fmtYen(n) { return "¥" + Math.round(n).toLocaleString(); }
+function fmtPct(r) { return Math.round(r * 100) + "%"; }
+function persist() { saveState(state).catch(() => {}); }
+function toast(msg, type = "") {
+  const t = el("div", { class: `toast-item ${type}` }, msg);
+  $("#toast").appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s).replace(/"/g, "&quot;"); }
+
+// ===== Week helpers =====
+function curWeek() { return ensureWeek(state, state.meta.currentWeekStart); }
+function curSlots()       { return curWeek().slots; }
+function curPrefs()       { return curWeek().preferences; }
+function curAssignments() { return curWeek().assignments; }
+function curStatus()      { return curWeek().status; }
+
+function goToWeek(weekStart) {
+  state.meta.currentWeekStart = weekStart;
+  ensureWeek(state, weekStart);
+  persist();
+  renderHeader();
+  render();
+}
+
+// ===== Position/session helpers =====
+function posCfg(id) {
+  return (state?.meta?.positions || []).find(p => p.id === id) || { id, label: id, color: "#64748b" };
+}
+function posBadge(p) {
+  const cfg = posCfg(p);
+  return `<span class="pos-badge" style="background:${cfg.color}">${escapeHtml(cfg.label)}</span>`;
+}
+
+// ===== ヘルプツールチップ =====
+const HELP_TIPS = {
+  "staffing-matrix": {
+    title: "必要人数マトリクス",
+    body: "曜日 × 時間帯 × ポジションで「何人必要か」を定義します。AIはこの表を満たすようにシフトを組みます。",
+    href: "/help#settings",
+  },
+  "labor-rules": {
+    title: "労務ルール",
+    body: "週・日・連勤・休日の上限を設定。AIはこれをハード制約として絶対守ります（労基順守）。",
+    href: "/help#settings",
+  },
+  "algo-weights": {
+    title: "アルゴリズム重み",
+    body: "5要素（希望充足・ポジション・公平性・コスト・スキル）の優先度を 0〜100 で調整。合計は自動正規化。",
+    href: "/docs/algorithm.md",
+  },
+  "preference": {
+    title: "希望（want）/必須（must）/不可（avoid）",
+    body: "want=入れたら入りたい、must=絶対入れて、avoid=避けて。avoidは可能な限り守られます。",
+    href: "/help#preferences",
+  },
+  "publish": {
+    title: "確定",
+    body: "下書き → 確定 で、スタッフがポータルから自分のシフトを閲覧できるようになります。LINE通知文も自動生成。",
+    href: "/help#publish",
+  },
+  "template": {
+    title: "テンプレート",
+    body: "現在のシフト配置を保存して、別の週に再利用できます。「夏休みシフト」「通常週」等。",
+    href: "/help#schedule",
+  },
+  "audit": {
+    title: "AI 検証レポート",
+    body: "ハード制約7種・スコア要素5種・全試行履歴を表示。第三者監査可能な意思決定エンジン。",
+    href: "/docs/algorithm.md",
+  },
+  "snapshot": {
+    title: "自動スナップショット",
+    body: "毎日 03:00 JST にサーバ側で自動バックアップ。30日分保持。任意の日に巻き戻せます。",
+    href: "/help#trouble",
+  },
+};
+
+function helpIcon(termId) {
+  const tip = HELP_TIPS[termId];
+  if (!tip) return "";
+  return `<button class="help-icon ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 hover:bg-brand-100 text-slate-500 hover:text-brand-600 text-[10px] font-bold align-middle"
+    data-help="${termId}" title="${escapeAttr(tip.title)}" type="button" tabindex="0">?</button>`;
+}
+
+// ヘルプアイコンクリックでツールチップ表示
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest?.(".help-icon");
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const termId = btn.dataset.help;
+  const tip = HELP_TIPS[termId];
+  if (!tip) return;
+  // 既存ポップアップを閉じる
+  document.querySelectorAll(".help-popup").forEach(p => p.remove());
+  const rect = btn.getBoundingClientRect();
+  const pop = document.createElement("div");
+  pop.className = "help-popup fixed z-[70] bg-slate-900 text-white text-xs rounded-lg p-3 shadow-2xl max-w-xs";
+  pop.style.left = Math.min(window.innerWidth - 280, rect.left) + "px";
+  pop.style.top = (rect.bottom + 6) + "px";
+  pop.innerHTML = `
+    <div class="font-semibold mb-1">${escapeHtml(tip.title)}</div>
+    <div class="text-slate-300 leading-relaxed">${escapeHtml(tip.body)}</div>
+    <a href="${tip.href}" target="_blank" class="text-brand-300 underline text-[10px] mt-2 block">もっと詳しく →</a>
+  `;
+  document.body.appendChild(pop);
+  setTimeout(() => {
+    document.addEventListener("click", function close(ev) {
+      if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener("click", close); }
+    });
+  }, 100);
+});
+
+function modal(content) {
+  const m = $("#modal");
+  $("#modalBody").innerHTML = "";
+  $("#modalBody").appendChild(content);
+  m.classList.remove("hidden");
+  m.onclick = (e) => { if (e.target === m) closeModal(); };
+}
+function closeModal() { $("#modal").classList.add("hidden"); }
+
+function regenerateCurSlots() {
+  curWeek().slots = buildSlots(state.meta, state.meta.currentWeekStart);
+}
+
+// ===== Change Log =====
+function logChange(type, detail, extra = {}) {
+  const wk = curWeek();
+  if (!Array.isArray(wk.changeLog)) wk.changeLog = [];
+  wk.changeLog.push({
+    at: new Date().toISOString(),
+    type, detail, ...extra,
+  });
+  // 最新100件のみ保持
+  if (wk.changeLog.length > 100) wk.changeLog = wk.changeLog.slice(-100);
+}
+
+// ===== Routing =====
+function setTab(tab) {
+  currentTab = tab;
+  $$(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  render();
+}
+
+function render() {
+  if (!state) return;
+  const main = $("#main");
+  main.innerHTML = "";
+  if (currentTab === "dashboard")   main.appendChild(viewDashboard());
+  if (currentTab === "staff")       main.appendChild(viewStaff());
+  if (currentTab === "preferences") main.appendChild(viewPreferences());
+  if (currentTab === "schedule")    main.appendChild(viewSchedule());
+  if (currentTab === "export")      main.appendChild(viewExport());
+  if (currentTab === "settings")    main.appendChild(viewSettings());
+  // モバイル用 FAB（シフト編成タブのみ）
+  const oldFab = document.getElementById("mobileFab");
+  if (oldFab) oldFab.remove();
+  if (currentTab === "schedule" && curStatus() === "draft") {
+    const fab = el("button", {
+      id: "mobileFab", class: "fab",
+      onclick: autoGenerate,
+    }, "🤖 AI生成");
+    document.body.appendChild(fab);
+  }
+  renderHeader();
+}
+
+function renderHeader() {
+  if (!state) return;
+  $("#restaurantName").textContent = state.meta.restaurantName + " · " + state.meta.currentWeekStart + " 週";
+  // Week nav label
+  $("#weekJumpBtn").textContent = state.meta.currentWeekStart.slice(5).replace("-", "/") + "〜";
+  // Status badge
+  const badge = $("#weekStatusBadge");
+  const status = curStatus();
+  if (status === "published") {
+    badge.className = "ml-1 text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800";
+    badge.textContent = "✓ 確定済";
+  } else {
+    badge.className = "ml-1 text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800";
+    badge.textContent = "下書き";
+  }
+}
+
+// ===== View: Dashboard =====
+function viewDashboard() {
+  const wrap = el("div", { class: "space-y-6" });
+  wrap.appendChild(el("div", { class: "flex items-center justify-between" }, [
+    el("h2", { class: "text-xl font-bold" }, "今週の概要"),
+    el("div", { class: "text-sm text-slate-500" }, state.meta.currentWeekStart + " 〜"),
+  ]));
+
+  const assignments = curAssignments();
+  const metrics = assignments.length
+    ? calcMetrics(
+        { hours: aggregateHours(), byStaff: aggregateByStaff(), assignments, unfilled: [] },
+        { staff: state.staff, slots: curSlots(), preferences: curPrefs() })
+    : null;
+
+  const kpis = el("div", { class: "grid grid-cols-2 md:grid-cols-4 gap-3" });
+  kpis.appendChild(kpiCard("スタッフ", state.staff.length + "名", "👥"));
+  kpis.appendChild(kpiCard("シフト枠", curSlots().reduce((s, x) => s + x.requiredCount, 0) + "枠", "🪑"));
+  if (metrics) {
+    kpis.appendChild(kpiCard("カバー率", fmtPct(metrics.coverageRate), "✅", metrics.coverageRate < 1 ? "warn" : "ok"));
+    kpis.appendChild(kpiCard("人件費", fmtYen(metrics.totalCost), "💴", metrics.totalCost > state.meta.weeklyBudget ? "warn" : "ok"));
+  } else {
+    kpis.appendChild(kpiCard("カバー率", "— ", "✅"));
+    kpis.appendChild(kpiCard("人件費", "— ", "💴"));
+  }
+  wrap.appendChild(kpis);
+
+  const cost = metrics ? metrics.totalCost : 0;
+  const budget = state.meta.weeklyBudget;
+  const ratio = budget > 0 ? Math.min(2, cost / budget) : 0;
+  const gaugeColor = ratio >= 1 ? "#dc2626" : ratio >= 0.85 ? "#f59e0b" : "#10b981";
+  wrap.appendChild(el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" }, [
+    el("div", { class: "flex items-center justify-between mb-2" }, [
+      el("div", { class: "text-sm font-semibold text-slate-700" }, "今週予算"),
+      el("div", { class: "text-sm text-slate-600" }, `${fmtYen(cost)} / ${fmtYen(budget)}`),
+    ]),
+    el("div", { class: "gauge-bar" }, [
+      el("div", { style: { width: Math.min(100, ratio * 100) + "%", background: gaugeColor } })
+    ]),
+    el("div", { class: "text-xs text-slate-500 mt-2" }, ratio >= 1 ? "⚠️ 予算超過" : "想定内"),
+  ]));
+
+  // Status
+  const statusCard = el("div", { class: `${curStatus() === "published" ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"} border rounded-xl p-4` });
+  if (curStatus() === "published") {
+    statusCard.appendChild(el("div", { class: "font-semibold text-emerald-900" }, "✓ この週は確定済みです"));
+    statusCard.appendChild(el("div", { class: "text-sm text-emerald-800 mt-1" },
+      "スタッフはポータルから自分のシフトを確認できます。"));
+  } else {
+    statusCard.appendChild(el("div", { class: "font-semibold text-amber-900" }, "📝 下書き状態"));
+    statusCard.appendChild(el("div", { class: "text-sm text-amber-800 mt-1" },
+      "シフト編成タブで「確定する」と、スタッフがポータルで自分のシフトを見られます。"));
+  }
+  wrap.appendChild(statusCard);
+
+  // Unsubmitted
+  const unsubmitted = state.staff.filter(s => !curPrefs().some(p => p.staffId === s.id));
+  if (unsubmitted.length && curStatus() === "draft") {
+    wrap.appendChild(el("div", { class: "bg-amber-50 border border-amber-200 rounded-xl p-4" }, [
+      el("div", { class: "font-semibold text-amber-900 mb-1" }, `🔔 希望未提出: ${unsubmitted.length}名`),
+      el("div", { class: "text-sm text-amber-800 mb-2" }, unsubmitted.map(s => s.name).join("・")),
+      el("button", {
+        class: "text-sm bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-md",
+        onclick: () => setTab("preferences"),
+      }, "希望収集タブへ →"),
+    ]));
+  }
+
+  if (metrics && metrics.unfilled && metrics.unfilled.length) {
+    wrap.appendChild(el("div", { class: "bg-red-50 border border-red-200 rounded-xl p-4" }, [
+      el("div", { class: "font-semibold text-red-900 mb-1" }, `⚠️ 未充足スロット: ${metrics.unfilled.length}件`),
+      el("div", { class: "text-sm text-red-800" }, "シフト編成タブで詳細を確認できます。"),
+    ]));
+  }
+
+  // 今日 / 明日の出勤者
+  wrap.appendChild(renderTodayPanel());
+  wrap.appendChild(renderTomorrowPanel());
+
+  // Past weeks analytics
+  const trends = computeTrends();
+  if (trends.length >= 2) {
+    const chartCard = el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" });
+    chartCard.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
+      el("div", { class: "font-semibold" }, "📈 過去週推移"),
+      el("div", { class: "text-xs text-slate-500" }, `直近 ${trends.length} 週`),
+    ]));
+    const grid = el("div", { class: "grid grid-cols-1 md:grid-cols-3 gap-4" });
+    const c1 = el("div", {}, [el("div", { class: "text-xs text-slate-500 mb-1" }, "人件費 (¥)"), el("canvas", { id: "trendCost", style: { maxHeight: "180px" } })]);
+    const c2 = el("div", {}, [el("div", { class: "text-xs text-slate-500 mb-1" }, "カバー率 (%)"), el("canvas", { id: "trendCoverage", style: { maxHeight: "180px" } })]);
+    const c3 = el("div", {}, [el("div", { class: "text-xs text-slate-500 mb-1" }, "希望充足 (%)"), el("canvas", { id: "trendPref", style: { maxHeight: "180px" } })]);
+    grid.appendChild(c1); grid.appendChild(c2); grid.appendChild(c3);
+    chartCard.appendChild(grid);
+    wrap.appendChild(chartCard);
+    setTimeout(() => drawTrendCharts(trends), 50);
+  }
+
+  // 月間労働時間ランキング
+  wrap.appendChild(renderMonthlyHoursRanking());
+
+  wrap.appendChild(el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" }, [
+    el("div", { class: "font-semibold mb-3" }, "クイックアクション"),
+    el("div", { class: "grid grid-cols-2 md:grid-cols-3 gap-2" }, [
+      quickAction("🤖 AIシフト自動生成", () => { setTab("schedule"); setTimeout(autoGenerate, 300); }),
+      quickAction("📝 希望を入力", () => setTab("preferences")),
+      quickAction("👥 スタッフ追加", () => { setTab("staff"); setTimeout(() => openStaffEdit(), 200); }),
+      quickAction("⚙️ 店舗設定", () => setTab("settings")),
+      quickAction("📤 シフト出力", () => setTab("export")),
+      quickAction("🔄 サンプル再投入", async () => {
+        if (!confirm("全データをリセットしてサンプルに戻しますか？")) return;
+        state = await resetState();
+        render();
+        toast("サンプルデータを再投入しました", "success");
+      }),
+    ]),
+  ]));
+  return wrap;
+}
+
+function kpiCard(label, value, icon, status = "") {
+  const colors = status === "warn" ? "bg-amber-50 border-amber-200" : status === "ok" ? "bg-emerald-50 border-emerald-200" : "bg-white border-slate-200";
+  return el("div", { class: `${colors} rounded-xl p-4 border` }, [
+    el("div", { class: "flex items-center justify-between text-slate-500 text-xs mb-1" }, [
+      el("span", {}, label), el("span", {}, icon),
+    ]),
+    el("div", { class: "text-2xl font-bold" }, value),
+  ]);
+}
+
+function quickAction(label, onclick) {
+  return el("button", {
+    class: "text-left bg-slate-50 hover:bg-brand-50 hover:border-brand-500 border border-slate-200 rounded-lg px-3 py-2.5 text-sm transition",
+    onclick,
+  }, label);
+}
+
+function renderMonthlyHoursRanking() {
+  // 当月（meta.currentWeekStart の年月）
+  const ref = state.meta.currentWeekStart;
+  const yearMonth = ref.slice(0, 7); // YYYY-MM
+  const totals = Object.fromEntries(state.staff.map(s => [s.id, { name: s.name, hours: 0, cost: 0, position: s.position }]));
+  for (const wk of Object.values(state.weeks)) {
+    for (const a of wk.assignments || []) {
+      if (!a.date.startsWith(yearMonth)) continue;
+      const s = totals[a.staffId];
+      if (!s) continue;
+      const h = calcHours(a.startTime, a.endTime);
+      s.hours += h;
+      s.cost += a.cost || 0;
+    }
+  }
+  const ranked = Object.values(totals).filter(s => s.hours > 0).sort((a, b) => b.hours - a.hours);
+
+  const card = el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" });
+  card.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
+    el("div", { class: "font-semibold" }, `📊 ${yearMonth} 月間労働時間ランキング`),
+    el("div", { class: "text-xs text-slate-500" }, `${ranked.length} 名出勤`),
+  ]));
+  if (!ranked.length) {
+    card.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" }, "今月のデータはまだありません"));
+    return card;
+  }
+  const max = ranked[0].hours;
+  const tbl = el("table", { class: "w-full text-sm" });
+  tbl.innerHTML = `<thead class="text-xs text-slate-500"><tr>
+    <th class="text-left py-1">#</th>
+    <th class="text-left py-1">名前</th>
+    <th class="text-right py-1">時間</th>
+    <th class="text-right py-1">給与</th>
+    <th class="text-left py-1 pl-2">割合</th>
+  </tr></thead>`;
+  const tb = el("tbody");
+  ranked.forEach((s, i) => {
+    const ratio = s.hours / max;
+    const tr = el("tr", { class: "border-t border-slate-100" });
+    tr.innerHTML = `
+      <td class="py-1.5 text-slate-500">${i + 1}</td>
+      <td class="py-1.5 font-medium">${escapeHtml(s.name)} <span class="text-xs text-slate-500">${escapeHtml(posCfg(s.position).label)}</span></td>
+      <td class="py-1.5 text-right">${s.hours.toFixed(1)}h</td>
+      <td class="py-1.5 text-right">${fmtYen(s.cost)}</td>
+      <td class="py-1.5 pl-2">
+        <div class="gauge-bar"><div style="width:${ratio*100}%;background:#6366f1"></div></div>
+      </td>`;
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  card.appendChild(tbl);
+  return card;
+}
+
+function renderAuditReport(audit) {
+  const passed = audit.passed && audit.hardViolations.length === 0;
+  const card = el("div", {
+    class: passed
+      ? "bg-emerald-50 border border-emerald-300 rounded-xl p-4 space-y-3"
+      : "bg-red-50 border border-red-300 rounded-xl p-4 space-y-3",
+  });
+
+  card.appendChild(el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
+    el("div", { class: passed ? "font-bold text-emerald-900" : "font-bold text-red-900" },
+      passed ? "✅ 検証レポート: 全制約クリア" : `⚠️ 検証レポート: ハード制約違反 ${audit.hardViolations.length}件`),
+    el("button", { class: "text-xs underline text-slate-600",
+      onclick: () => openAuditDetail(audit) }, "詳細を見る"),
+  ]));
+
+  // 主要指標
+  const metricsGrid = el("div", { class: "grid grid-cols-2 md:grid-cols-4 gap-3 text-xs" });
+  const items = [
+    { label: "ハード制約検査", value: audit.hardConstraintsChecked.length + "件 全パス", ok: passed },
+    { label: "試行回数", value: `${audit.randomStarts}回中ベスト採用`, ok: true },
+    { label: "目的関数値", value: (audit.bestObjective).toFixed(3), ok: true },
+    { label: "重み設定", value: "標準" + (state.meta.algorithmWeights ? "（カスタム可）" : ""), ok: true },
+  ];
+  items.forEach(it => {
+    metricsGrid.appendChild(el("div", { class: "bg-white rounded p-2" }, [
+      el("div", { class: "text-slate-500 text-[10px]" }, it.label),
+      el("div", { class: it.ok ? "font-semibold text-slate-800" : "font-semibold text-red-700" }, it.value),
+    ]));
+  });
+  card.appendChild(metricsGrid);
+
+  // 違反があれば一覧
+  if (!passed) {
+    const violList = el("div", { class: "text-xs space-y-1" });
+    violList.appendChild(el("div", { class: "font-semibold text-red-900 mt-2" }, "違反内容:"));
+    audit.hardViolations.slice(0, 5).forEach(v => {
+      violList.appendChild(el("div", { class: "text-red-700" },
+        `・${v.staffName || v.staffId} / ${v.date} / ${v.label || v.constraintId}`));
+    });
+    if (audit.hardViolations.length > 5) {
+      violList.appendChild(el("div", { class: "text-red-700" },
+        `... 他 ${audit.hardViolations.length - 5} 件`));
+    }
+    card.appendChild(violList);
+  }
+
+  return card;
+}
+
+function openAuditDetail(audit) {
+  const body = el("div", { class: "p-6 space-y-4" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🛡️ アルゴリズム検証レポート"));
+
+  body.appendChild(el("p", { class: "text-xs text-slate-500" },
+    "シフトはこの基準で生成されました。仕様の詳細は docs/algorithm.md を参照してください。"));
+
+  // ハード制約
+  const hard = el("div", { class: "bg-white border rounded-md p-3 space-y-2" });
+  hard.appendChild(el("div", { class: "font-semibold text-sm" }, "🛑 ハード制約（違反ゼロを保証）"));
+  audit.hardConstraintsChecked.forEach(c => {
+    hard.appendChild(el("div", { class: "text-xs" }, [
+      el("span", { class: "text-emerald-600 font-bold" }, "✓ "),
+      el("span", { class: "font-medium" }, c.label),
+      el("span", { class: "text-slate-500" }, " — " + c.rationale),
+    ]));
+  });
+  if (audit.hardViolations.length > 0) {
+    hard.appendChild(el("div", { class: "mt-2 text-xs text-red-700 font-semibold" },
+      `❌ 違反 ${audit.hardViolations.length}件:`));
+    audit.hardViolations.forEach(v => {
+      hard.appendChild(el("div", { class: "text-xs text-red-700 ml-3" },
+        `${v.staffName} / ${v.date} / ${v.label}`));
+    });
+  }
+  body.appendChild(hard);
+
+  // ソフト制約（スコア要素）
+  const soft = el("div", { class: "bg-white border rounded-md p-3 space-y-2" });
+  soft.appendChild(el("div", { class: "font-semibold text-sm" }, "⚖️ スコア要素（重み付き加点方式）"));
+  soft.appendChild(el("div", { class: "text-[11px] text-slate-500" },
+    "各要素を 0..1 に正規化、重みで加重平均。重み合計 = 1.0"));
+  audit.scoreFactors.forEach(f => {
+    const row = el("div", { class: "flex items-center gap-2 text-xs" });
+    row.innerHTML = `
+      <span class="w-24 font-medium">${escapeHtml(f.label)}</span>
+      <span class="text-slate-500 w-12">${(f.weight*100).toFixed(0)}%</span>
+      <div class="flex-1 h-1.5 bg-slate-200 rounded">
+        <div class="h-full bg-brand-600 rounded" style="width:${(f.weight*100).toFixed(0)}%"></div>
+      </div>
+      <span class="text-[10px] text-slate-500 flex-1">${escapeHtml(f.rationale)}</span>
+    `;
+    soft.appendChild(row);
+  });
+  body.appendChild(soft);
+
+  // 試行
+  const trial = el("div", { class: "bg-slate-50 rounded-md p-3 text-xs" });
+  trial.appendChild(el("div", { class: "font-semibold mb-1" }, `🎯 試行 ${audit.randomStarts} 回（ベスト解採用）`));
+  audit.trials.forEach(t => {
+    const isBest = t.seed === audit.bestSeed;
+    trial.appendChild(el("div", { class: `flex justify-between ${isBest ? 'font-bold text-emerald-700' : 'text-slate-600'}` }, [
+      el("span", {}, `Seed ${t.seed}${isBest ? ' ← 採用' : ''}`),
+      el("span", {}, `obj=${t.obj.toFixed(3)} cov=${(t.coverage*100).toFixed(0)}% pref=${(t.prefSat*100).toFixed(0)}%`),
+    ]));
+  });
+  body.appendChild(trial);
+
+  body.appendChild(el("button", { class: "w-full bg-slate-200 rounded-md py-2 text-sm", onclick: closeModal }, "閉じる"));
+  modal(body);
+}
+
+function renderTomorrowPanel() {
+  const tomorrow = addDays(fmtDate(new Date()), 1);
+  let tomorrowWeek = null;
+  for (const wk of listWeeks(state)) {
+    const wEnd = addDays(wk, 6);
+    if (tomorrow >= wk && tomorrow <= wEnd) { tomorrowWeek = wk; break; }
+  }
+  const list = tomorrowWeek ? state.weeks[tomorrowWeek].assignments.filter(a => a.date === tomorrow) : [];
+  list.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+  const card = el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" });
+  card.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
+    el("div", { class: "font-semibold flex items-center gap-2" }, [
+      el("span", {}, "🌅 明日の出勤"),
+      el("span", { class: "text-xs text-slate-500" }, tomorrow),
+    ]),
+  ]));
+  if (!list.length) {
+    card.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-3" },
+      tomorrowWeek ? "明日の出勤者はいません" : "対象週が見つかりません"));
+  } else {
+    const grid = el("div", { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" });
+    for (const a of list) {
+      const s = state.staff.find(x => x.id === a.staffId);
+      const cfg = posCfg(a.position);
+      const item = el("div", { class: "border border-slate-200 rounded-md p-2 flex items-center gap-2" });
+      item.innerHTML = `
+        <div class="w-1 self-stretch rounded" style="background:${cfg.color}"></div>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-sm truncate">${escapeHtml(s?.name || "?")}</div>
+          <div class="text-xs text-slate-600">${a.startTime}〜${a.endTime} <span class="text-slate-500">${escapeHtml(cfg.label)}</span></div>
+        </div>`;
+      grid.appendChild(item);
+    }
+    card.appendChild(grid);
+  }
+  return card;
+}
+
+function renderTodayPanel() {
+  const today = fmtDate(new Date());
+  // 今日が含まれる週を探す
+  let todayWeek = null;
+  for (const wk of listWeeks(state)) {
+    const wEnd = addDays(wk, 6);
+    if (today >= wk && today <= wEnd) { todayWeek = wk; break; }
+  }
+  const todayAssignments = todayWeek ? state.weeks[todayWeek].assignments.filter(a => a.date === today) : [];
+  todayAssignments.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+  const card = el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" });
+  card.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
+    el("div", { class: "font-semibold flex items-center gap-2" }, [
+      el("span", {}, "📅 今日の出勤"),
+      el("span", { class: "text-xs text-slate-500" }, today),
+    ]),
+    todayWeek && state.weeks[todayWeek].status === "draft"
+      ? el("span", { class: "text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800" }, "下書き中")
+      : (todayWeek ? el("span", { class: "text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800" }, "確定済") : null),
+  ]));
+  if (!todayAssignments.length) {
+    card.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" },
+      todayWeek ? "今日の出勤者はいません（休業日 or 未配置）" : "対象週が見つかりません"));
+  } else {
+    const grid = el("div", { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" });
+    for (const a of todayAssignments) {
+      const s = state.staff.find(x => x.id === a.staffId);
+      const cfg = posCfg(a.position);
+      const item = el("div", { class: "border border-slate-200 rounded-md p-2 flex items-center gap-2" });
+      item.innerHTML = `
+        <div class="w-1 self-stretch rounded" style="background:${cfg.color}"></div>
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-sm truncate">${escapeHtml(s?.name || "?")}</div>
+          <div class="text-xs text-slate-600">${a.startTime}〜${a.endTime} <span class="text-slate-500">${escapeHtml(cfg.label)}</span></div>
+        </div>`;
+      grid.appendChild(item);
+    }
+    card.appendChild(grid);
+  }
+  return card;
+}
+
+function computeTrends() {
+  // 全週から最新8週を時系列で
+  const weekKeys = listWeeks(state).slice(-8);
+  const out = [];
+  for (const wk of weekKeys) {
+    const w = state.weeks[wk];
+    if (!w || !w.assignments?.length) continue;
+    const m = calcMetrics(
+      {
+        hours: Object.fromEntries(state.staff.map(s => [s.id, 0])),
+        byStaff: Object.fromEntries(state.staff.map(s => [s.id, []])),
+        assignments: w.assignments,
+        unfilled: [],
+      },
+      { staff: state.staff, slots: w.slots, preferences: w.preferences });
+    // hours/byStaff の再計算
+    for (const a of w.assignments) {
+      m.perStaff = m.perStaff;
+    }
+    out.push({
+      weekStart: wk,
+      label: wk.slice(5).replace("-", "/"),
+      cost: w.assignments.reduce((s, a) => s + a.cost, 0),
+      coverage: m.coverageRate,
+      pref: m.preferenceSatisfaction,
+      status: w.status,
+    });
+  }
+  return out;
+}
+
+const _chartInstances = {};
+function drawTrendCharts(trends) {
+  for (const k of Object.keys(_chartInstances)) {
+    try { _chartInstances[k]?.destroy(); } catch (_) {}
+    delete _chartInstances[k];
+  }
+  const labels = trends.map(t => t.label);
+  const mkChart = (id, data, color, isPct) => {
+    const ctx = document.getElementById(id);
+    if (!ctx || !window.Chart) return;
+    _chartInstances[id] = new Chart(ctx, {
+      type: "bar",
+      data: { labels, datasets: [{ data, backgroundColor: color, borderRadius: 4 }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, ticks: isPct ? { callback: v => v + "%" } : { callback: v => v >= 1000 ? (v / 1000) + "k" : v } },
+          x: { grid: { display: false } },
+        },
+      },
+    });
+  };
+  mkChart("trendCost",     trends.map(t => Math.round(t.cost)),         "#6366f1", false);
+  mkChart("trendCoverage", trends.map(t => Math.round(t.coverage * 100)), "#10b981", true);
+  mkChart("trendPref",     trends.map(t => Math.round(t.pref * 100)),     "#f59e0b", true);
+}
+
+function aggregateHours() {
+  const h = Object.fromEntries(state.staff.map(s => [s.id, 0]));
+  for (const a of curAssignments()) h[a.staffId] = (h[a.staffId] || 0) + calcHours(a.startTime, a.endTime);
+  return h;
+}
+function aggregateByStaff() {
+  const m = Object.fromEntries(state.staff.map(s => [s.id, []]));
+  for (const a of curAssignments()) (m[a.staffId] = m[a.staffId] || []).push(a);
+  return m;
+}
+
+// ===== View: Staff =====
+function viewStaff() {
+  const wrap = el("div", { class: "space-y-4" });
+  wrap.appendChild(el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
+    el("h2", { class: "text-xl font-bold" }, `スタッフ管理 (${state.staff.length}名)`),
+    el("div", { class: "flex gap-2 flex-wrap" }, [
+      el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50",
+        onclick: () => importCsvDialog() }, "📥 CSV取込"),
+      el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50",
+        onclick: copyAllStaffLinks }, "🔗 全員のリンク"),
+      el("button", { class: "text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md px-3 py-1.5",
+        onclick: () => openStaffEdit() }, "＋ 追加"),
+    ]),
+  ]));
+
+  const table = el("div", { class: "bg-white rounded-xl border border-slate-200 overflow-x-auto" });
+  table.innerHTML = `
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-slate-600 text-xs">
+        <tr>
+          <th class="text-left px-3 py-2">名前</th>
+          <th class="text-left px-3 py-2">本職</th>
+          <th class="text-left px-3 py-2">兼任</th>
+          <th class="text-right px-3 py-2">時給</th>
+          <th class="text-right px-3 py-2">週時間</th>
+          <th class="text-left px-3 py-2">固定休</th>
+          <th class="text-left px-3 py-2">スキル</th>
+          <th class="px-3 py-2"></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>`;
+  const tbody = table.querySelector("tbody");
+  state.staff.forEach(s => {
+    const tr = el("tr", { class: "border-t border-slate-100 hover:bg-slate-50" });
+    tr.innerHTML = `
+      <td class="px-3 py-2.5 font-medium">${escapeHtml(s.name)}</td>
+      <td class="px-3 py-2.5">${posBadge(s.position)}</td>
+      <td class="px-3 py-2.5">${s.canCover.length ? s.canCover.map(p => escapeHtml(posCfg(p).label)).join("・") : "<span class=\"text-slate-400\">—</span>"}</td>
+      <td class="px-3 py-2.5 text-right">${fmtYen(s.hourlyWage)}</td>
+      <td class="px-3 py-2.5 text-right">${s.minHoursPerWeek}〜${s.maxHoursPerWeek}h</td>
+      <td class="px-3 py-2.5">${s.fixedDayOff.map(d => DAY_LABELS[d]).join("・") || "<span class=\"text-slate-400\">—</span>"}</td>
+      <td class="px-3 py-2.5">${"★".repeat(s.skill)}<span class="text-slate-300">${"★".repeat(5 - s.skill)}</span></td>`;
+    const td = el("td", { class: "px-3 py-2.5 text-right whitespace-nowrap" }, [
+      el("button", { class: "text-xs text-emerald-600 hover:underline mr-2",
+        onclick: () => copyStaffLink(s) }, "🔗 リンク"),
+      el("button", { class: "text-xs text-brand-600 hover:underline mr-2",
+        onclick: () => openStaffEdit(s) }, "編集"),
+      el("button", { class: "text-xs text-red-600 hover:underline",
+        onclick: () => {
+          if (!confirm(`${s.name} を削除しますか？`)) return;
+          state.staff = state.staff.filter(x => x.id !== s.id);
+          // 全週から該当スタッフのデータを除去
+          for (const wk of Object.values(state.weeks)) {
+            wk.preferences = wk.preferences.filter(p => p.staffId !== s.id);
+            wk.assignments = wk.assignments.filter(a => a.staffId !== s.id);
+          }
+          persist(); render(); toast("削除しました", "success");
+        } }, "削除"),
+    ]);
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  });
+  wrap.appendChild(table);
+  return wrap;
+}
+
+async function copyStaffLink(s) {
+  try {
+    const { token } = await window.ShiftyAPI.genStaffToken(s.id);
+    const url = `${location.origin}/staff?t=${token}`;
+    await navigator.clipboard.writeText(url);
+    toast(`${s.name} のリンクをコピーしました`, "success");
+  } catch (e) { toast("リンク生成失敗: " + e.message, "error"); }
+}
+
+async function copyAllStaffLinks() {
+  try {
+    const lines = [];
+    for (const s of state.staff) {
+      const { token } = await window.ShiftyAPI.genStaffToken(s.id);
+      const url = `${location.origin}/staff?t=${token}`;
+      lines.push(`【${s.name}】${url}`);
+    }
+    const txt = lines.join("\n");
+    await navigator.clipboard.writeText(txt);
+    toast(`${state.staff.length}名分のリンクをコピー`, "success");
+    const body = el("div", { class: "p-6 space-y-2" });
+    body.appendChild(el("h3", { class: "font-bold text-lg" }, "全スタッフの希望入力リンク"));
+    body.appendChild(el("p", { class: "text-xs text-slate-500" }, "下記をコピーしてLINEで一斉送信してください"));
+    body.appendChild(el("textarea", { class: "w-full border rounded-md p-2 text-xs font-mono h-64", readonly: "" }, txt));
+    body.appendChild(el("div", { class: "flex justify-end" }, [
+      el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    ]));
+    modal(body);
+  } catch (e) { toast("リンク生成失敗: " + e.message, "error"); }
+}
+
+function openStaffEdit(s = null) {
+  const isNew = !s;
+  const data = s ? { ...s } : {
+    id: uid("s_"), name: "", position: state.meta.positions[0]?.id || "hall", canCover: [],
+    hourlyWage: 1100, maxHoursPerWeek: 28, minHoursPerWeek: 10,
+    fixedDayOff: [], skill: 3, notes: ""
+  };
+  const body = el("div", { class: "p-6 space-y-4" });
+  body.innerHTML = `<h3 class="font-bold text-lg mb-3">${isNew ? "新規スタッフ追加" : "スタッフ編集"}</h3>`;
+  const form = el("div", { class: "space-y-3 text-sm" });
+  form.innerHTML = `
+    <label class="block"><span class="text-slate-600">名前</span>
+      <input data-k="name" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.name)}"></label>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block"><span class="text-slate-600">本職</span>
+        <select data-k="position" class="mt-1 w-full border rounded-md px-3 py-2">
+          ${state.meta.positions.map(p => `<option value="${p.id}" ${data.position === p.id ? "selected" : ""}>${escapeHtml(p.label)}</option>`).join("")}
+        </select></label>
+      <label class="block"><span class="text-slate-600">時給(円)</span>
+        <input data-k="hourlyWage" type="number" class="mt-1 w-full border rounded-md px-3 py-2" value="${data.hourlyWage}"></label>
+      <label class="block"><span class="text-slate-600">週最低(h)</span>
+        <input data-k="minHoursPerWeek" type="number" class="mt-1 w-full border rounded-md px-3 py-2" value="${data.minHoursPerWeek}"></label>
+      <label class="block"><span class="text-slate-600">週最大(h)</span>
+        <input data-k="maxHoursPerWeek" type="number" class="mt-1 w-full border rounded-md px-3 py-2" value="${data.maxHoursPerWeek}"></label>
+      <label class="block"><span class="text-slate-600">スキル(1-5)</span>
+        <input data-k="skill" type="number" min="1" max="5" class="mt-1 w-full border rounded-md px-3 py-2" value="${data.skill}"></label>
+    </div>
+    <div>
+      <span class="text-slate-600 block mb-1">兼任可能ポジション</span>
+      <div class="flex flex-wrap gap-2">
+        ${state.meta.positions.map(p =>
+          `<label class="inline-flex items-center gap-1 text-sm border rounded-md px-2 py-1 cursor-pointer">
+            <input type="checkbox" data-cover="${p.id}" ${data.canCover.includes(p.id) ? "checked" : ""}>
+            ${escapeHtml(p.label)}</label>`).join("")}
+      </div>
+    </div>
+    <div>
+      <span class="text-slate-600 block mb-1">固定休</span>
+      <div class="flex gap-1 flex-wrap">
+        ${DAY_LABELS.map((d, i) =>
+          `<label class="inline-flex items-center gap-1 text-sm border rounded-md px-2 py-1 cursor-pointer">
+            <input type="checkbox" data-off="${i}" ${data.fixedDayOff.includes(i) ? "checked" : ""}>
+            ${d}</label>`).join("")}
+      </div>
+    </div>
+    <label class="block"><span class="text-slate-600">メールアドレス（シフト変更通知の宛先・任意）</span>
+      <input data-k="email" type="email" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.email || "")}" placeholder="staff@example.com"></label>
+    <label class="block"><span class="text-slate-600">メモ</span>
+      <input data-k="notes" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.notes || "")}"></label>`;
+  body.appendChild(form);
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2" }, [
+    el("button", { class: "px-3 py-1.5 text-sm", onclick: closeModal }, "キャンセル"),
+    el("button", { class: "px-4 py-1.5 text-sm bg-brand-600 text-white rounded-md", onclick: () => {
+      $$("input,select", form).forEach(inp => {
+        const k = inp.dataset.k;
+        if (k) data[k] = inp.type === "number" ? Number(inp.value) : inp.value;
+      });
+      data.canCover = $$("input[data-cover]", form).filter(i => i.checked).map(i => i.dataset.cover);
+      data.fixedDayOff = $$("input[data-off]", form).filter(i => i.checked).map(i => Number(i.dataset.off));
+      if (!data.name) { toast("名前を入力してください", "error"); return; }
+      if (isNew) state.staff.push(data);
+      else state.staff = state.staff.map(x => x.id === data.id ? data : x);
+      persist(); closeModal(); render(); toast(isNew ? "追加しました" : "更新しました", "success");
+    } }, "保存"),
+  ]));
+  modal(body);
+}
+
+function importCsvDialog() {
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.innerHTML = `
+    <h3 class="font-bold text-lg">CSV取込</h3>
+    <p class="text-sm text-slate-600">列: 名前,本職ID,時給,週最低,週最大,固定休(0-6スペース区切り),スキル<br>
+    本職IDは設定タブで定義したID（例: hall, kitchen, cashier, manager）</p>
+    <textarea id="csvText" class="w-full border rounded-md px-3 py-2 text-sm font-mono h-40" placeholder="例: 山田太郎,hall,1100,10,28,0,3"></textarea>`;
+  body.appendChild(el("div", { class: "flex justify-end gap-2" }, [
+    el("button", { class: "px-3 py-1.5 text-sm", onclick: closeModal }, "キャンセル"),
+    el("button", { class: "px-4 py-1.5 text-sm bg-brand-600 text-white rounded-md", onclick: () => {
+      const txt = $("#csvText").value.trim();
+      if (!txt) return;
+      const rows = txt.split(/\n/).map(r => r.split(",").map(x => x.trim())).filter(r => r.length >= 5);
+      let added = 0;
+      for (const r of rows) {
+        const off = r[5] ? r[5].split(/[\s\/]+/).map(Number).filter(n => !isNaN(n)) : [];
+        state.staff.push({
+          id: uid("s_"), name: r[0], position: r[1] || state.meta.positions[0]?.id, canCover: [],
+          hourlyWage: Number(r[2]) || 1100, minHoursPerWeek: Number(r[3]) || 10, maxHoursPerWeek: Number(r[4]) || 28,
+          fixedDayOff: off, skill: Number(r[6]) || 3, notes: "",
+        });
+        added++;
+      }
+      persist(); closeModal(); render(); toast(`${added}名 取り込みました`, "success");
+    } }, "取込"),
+  ]));
+  modal(body);
+}
+
+// ===== View: Preferences =====
+function viewPreferences() {
+  const wrap = el("div", { class: "space-y-4" });
+  wrap.appendChild(el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
+    el("h2", { class: "text-xl font-bold" }, "希望収集"),
+    el("div", { class: "flex gap-2" }, [
+      el("button", { class: "text-sm bg-emerald-600 text-white rounded-md px-3 py-1.5",
+        onclick: copyAllStaffLinks }, "💬 LINE用 全員リンク生成"),
+    ]),
+  ]));
+
+  const submitted = state.staff.filter(s => curPrefs().some(p => p.staffId === s.id));
+  const notSubmitted = state.staff.filter(s => !curPrefs().some(p => p.staffId === s.id));
+  wrap.appendChild(el("div", { class: "grid grid-cols-2 gap-3" }, [
+    el("div", { class: "bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm" }, [
+      el("div", { class: "font-semibold text-emerald-900" }, `提出済 ${submitted.length}/${state.staff.length}`),
+      el("div", { class: "text-emerald-800 mt-1" }, submitted.map(s => s.name).join("・") || "—"),
+    ]),
+    el("div", { class: "bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm" }, [
+      el("div", { class: "font-semibold text-amber-900" }, `未提出 ${notSubmitted.length}名`),
+      el("div", { class: "text-amber-800 mt-1" }, notSubmitted.map(s => s.name).join("・") || "✓ 全員提出済み"),
+    ]),
+  ]));
+
+  const w0 = state.meta.currentWeekStart;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+
+  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4" });
+  card.appendChild(el("div", { class: "font-semibold mb-1" }, "希望入力（管理側で代理入力）"));
+  card.appendChild(el("div", { class: "text-xs text-slate-500 mb-3" },
+    "通常はスタッフ自身がモバイルで入力します（上の「LINE用 全員リンク生成」ボタンを使用）"));
+
+  const select = el("select", { class: "border rounded-md px-3 py-2 text-sm w-full mb-3" });
+  state.staff.forEach(s => select.appendChild(el("option", { value: s.id }, s.name)));
+  card.appendChild(select);
+
+  const grid = el("div", { class: "space-y-2" });
+  function refreshGrid(staffId) {
+    grid.innerHTML = "";
+    days.forEach(d => {
+      const dow = dayOfWeek(d);
+      const dayLabel = `${d.slice(5)} (${DAY_LABELS[dow]})`;
+      const row = el("div", { class: "flex items-center gap-2 text-sm bg-slate-50 rounded-md p-2 flex-wrap" });
+      row.appendChild(el("div", { class: "w-20 font-medium text-slate-700" }, dayLabel));
+      for (const sess of state.meta.sessions) {
+        const cur = curPrefs().find(p => p.staffId === staffId && p.date === d && p.startTime === sess.startTime && p.endTime === sess.endTime);
+        const cls = cur
+          ? (cur.priority === "must"  ? "bg-red-100 border-red-300 text-red-800"
+            : cur.priority === "avoid" ? "bg-slate-200 border-slate-300 text-slate-600 line-through"
+            : "bg-emerald-100 border-emerald-300 text-emerald-800")
+          : "bg-white border-slate-300 text-slate-500";
+        const btn = el("button", {
+          class: `text-xs px-2.5 py-1 rounded-md border ${cls}`,
+          onclick: () => {
+            const order = ["want", "must", "avoid", "none"];
+            const cur2 = curPrefs().find(p => p.staffId === staffId && p.date === d && p.startTime === sess.startTime && p.endTime === sess.endTime);
+            const idx = cur2 ? order.indexOf(cur2.priority) : -1;
+            const next = order[(idx + 1) % 4];
+            curWeek().preferences = curPrefs().filter(p => !(p.staffId === staffId && p.date === d && p.startTime === sess.startTime && p.endTime === sess.endTime));
+            if (next !== "none") {
+              curWeek().preferences.push({ id: uid("p_"), staffId, date: d, startTime: sess.startTime, endTime: sess.endTime, priority: next });
+            }
+            persist(); refreshGrid(staffId);
+          }
+        }, sess.label);
+        row.appendChild(btn);
+      }
+      grid.appendChild(row);
+    });
+    grid.appendChild(el("div", { class: "text-xs text-slate-500 pt-2" },
+      "タップで [未入力 → 希望 → 必須 → 入りたくない] を切替"));
+  }
+  select.onchange = () => refreshGrid(select.value);
+  refreshGrid(state.staff[0]?.id);
+  card.appendChild(grid);
+  wrap.appendChild(card);
+  return wrap;
+}
+
+// ===== View: Schedule =====
+function viewSchedule() {
+  const wrap = el("div", { class: "space-y-4" });
+
+  const headerRow = el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
+    el("h2", { class: "text-xl font-bold" }, "シフト編成"),
+    el("div", { class: "flex gap-2 flex-wrap" }, [
+      el("button", { class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50",
+        onclick: () => {
+          if (curStatus() === "published") { toast("確定済の週はクリアできません。先に「下書きに戻す」してください。", "error"); return; }
+          curWeek().assignments = []; persist(); render(); toast("クリアしました");
+        } }, "クリア"),
+      el("button", { class: "text-sm border border-emerald-600 text-emerald-700 rounded-md px-3 py-1.5 hover:bg-emerald-50",
+        onclick: copyFromPreviousWeek }, "📋 先週からコピー"),
+      el("button", { class: "text-sm border border-purple-600 text-purple-700 rounded-md px-3 py-1.5 hover:bg-purple-50",
+        onclick: openTemplateDialog }, "📑 テンプレ"),
+      el("button", { class: "text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md px-3 py-1.5",
+        onclick: autoGenerate }, "🤖 AI自動生成"),
+    ]),
+  ]);
+  wrap.appendChild(headerRow);
+
+  // Publish / unpublish controls
+  const pubBox = el("div", {});
+  if (curStatus() === "draft") {
+    pubBox.className = "bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between flex-wrap gap-2";
+    pubBox.appendChild(el("div", { class: "text-sm text-amber-900" }, [
+      el("div", { class: "font-semibold" }, "📝 この週は下書き状態"),
+      el("div", { class: "text-xs" }, "「確定する」を押すと、スタッフがポータルで自分のシフトを閲覧できるようになります。"),
+    ]));
+    pubBox.appendChild(el("button", { class: "text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-4 py-2 font-semibold",
+      onclick: () => publishWeek() }, "✓ 確定する"));
+  } else {
+    pubBox.className = "bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between flex-wrap gap-2";
+    pubBox.appendChild(el("div", { class: "text-sm text-emerald-900" }, [
+      el("div", { class: "font-semibold" }, `✓ 確定済 (${curWeek().publishedAt?.slice(0, 16) || ""})`),
+      el("div", { class: "text-xs" }, "スタッフはポータルから自分のシフトを閲覧中。変更したい場合は「下書きに戻す」してください。"),
+    ]));
+    pubBox.appendChild(el("div", { class: "flex gap-2 flex-wrap" }, [
+      el("button", { class: "text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-1.5",
+        onclick: () => openLineNotificationDialog() }, "💬 LINE通知文"),
+      el("button", { class: "text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-1.5",
+        onclick: () => sendShiftEmails() }, "📧 メール一斉送信"),
+      el("button", { class: "text-sm border border-emerald-700 text-emerald-700 rounded-md px-3 py-1.5",
+        onclick: () => unpublishWeek() }, "下書きに戻す"),
+    ]));
+  }
+  wrap.appendChild(pubBox);
+
+  if (curAssignments().length) {
+    // 検証レポート（最新生成のもの）
+    if (state._lastAudit) wrap.appendChild(renderAuditReport(state._lastAudit));
+
+    const m = calcMetrics(
+      { hours: aggregateHours(), byStaff: aggregateByStaff(), assignments: curAssignments(), unfilled: getUnfilled() },
+      { staff: state.staff, slots: curSlots(), preferences: curPrefs() });
+    const cost = m.totalCost;
+    const ratio = state.meta.weeklyBudget > 0 ? cost / state.meta.weeklyBudget : 0;
+    const gaugeColor = ratio >= 1 ? "#dc2626" : ratio >= 0.85 ? "#f59e0b" : "#10b981";
+    const ms = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm" });
+    ms.innerHTML = `
+      <div><div class="text-slate-500 text-xs">カバー率</div><div class="text-lg font-bold ${m.coverageRate < 1 ? "text-amber-600" : "text-emerald-600"}">${fmtPct(m.coverageRate)}</div></div>
+      <div><div class="text-slate-500 text-xs">希望充足</div><div class="text-lg font-bold">${fmtPct(m.preferenceSatisfaction)}</div></div>
+      <div><div class="text-slate-500 text-xs">人件費</div><div class="text-lg font-bold ${ratio >= 1 ? "text-red-600" : ""}">${fmtYen(cost)}</div></div>
+      <div><div class="text-slate-500 text-xs">予算消化</div>
+        <div class="gauge-bar mt-2"><div style="width:${Math.min(100, ratio * 100)}%;background:${gaugeColor}"></div></div>
+        <div class="text-xs mt-1 text-slate-600">${fmtPct(Math.min(2, ratio))}</div>
+      </div>`;
+    wrap.appendChild(ms);
+
+    if (m.unfilled && m.unfilled.length) {
+      const ul = el("div", { class: "bg-red-50 border border-red-200 rounded-xl p-3 text-sm" });
+      ul.appendChild(el("div", { class: "font-semibold text-red-900 mb-1" }, `⚠️ 未充足 ${m.unfilled.length}件`));
+      ul.appendChild(el("div", { class: "text-red-800 text-xs" },
+        m.unfilled.slice(0, 5).map(s => `${s.date.slice(5)}(${DAY_LABELS[dayOfWeek(s.date)]}) ${posCfg(s.position).label} ${s.startTime}〜`).join(" / ")));
+      wrap.appendChild(ul);
+    }
+  }
+
+  wrap.appendChild(renderCalendar());
+  if (curAssignments().length) wrap.appendChild(renderStaffSummary());
+  if ((curWeek().changeLog || []).length) wrap.appendChild(renderChangeLog());
+  return wrap;
+}
+
+function renderChangeLog() {
+  const log = curWeek().changeLog || [];
+  const sorted = [...log].reverse(); // 新しい順
+  const card = el("details", { class: "bg-white border border-slate-200 rounded-xl p-4" });
+  const summary = el("summary", { class: "font-semibold cursor-pointer flex items-center justify-between" });
+  summary.innerHTML = `<span>📜 変更履歴 <span class="text-xs text-slate-500 font-normal">(${log.length}件)</span></span><span class="text-xs text-slate-400">クリックで開閉 ▾</span>`;
+  card.appendChild(summary);
+  const list = el("div", { class: "mt-3 space-y-1.5 text-xs" });
+  const TYPE_LABEL = { publish: "✅ 確定", unpublish: "📝 下書きに戻す", delete: "🗑 削除", swap: "🔄 入替", substitute: "🆘 代打", add: "➕ 追加", autogenerate: "🤖 AI生成" };
+  sorted.forEach(entry => {
+    const at = new Date(entry.at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const row = el("div", { class: "flex items-start gap-2 border-b border-slate-100 pb-1.5" });
+    row.innerHTML = `
+      <span class="text-slate-400 w-20 flex-none">${at}</span>
+      <span class="font-medium w-24 flex-none">${TYPE_LABEL[entry.type] || entry.type}</span>
+      <span class="flex-1 text-slate-700">${escapeHtml(entry.detail || "")}</span>
+    `;
+    list.appendChild(row);
+  });
+  card.appendChild(list);
+  return card;
+}
+
+function publishWeek() {
+  if (!curAssignments().length) { toast("シフトを生成してから確定してください", "error"); return; }
+  if (!confirm("この週を確定しますか？確定後はスタッフがポータルで閲覧できるようになります。")) return;
+  const wasRepublish = curWeek().publishedAt;
+  curWeek().status = "published";
+  curWeek().publishedAt = new Date().toISOString();
+  logChange("publish", wasRepublish ? "再確定" : "確定", { assignmentCount: curAssignments().length });
+  persist(); render();
+  toast("確定しました。LINE通知文が生成できます。", "success");
+  setTimeout(openLineNotificationDialog, 400);
+}
+
+function unpublishWeek() {
+  if (!confirm("下書きに戻しますか？スタッフは閲覧できなくなります。")) return;
+  curWeek().status = "draft";
+  curWeek().publishedAt = null;
+  logChange("unpublish", "下書きに戻す");
+  persist(); render();
+  toast("下書きに戻しました", "success");
+}
+
+async function sendShiftEmails() {
+  const withEmail = state.staff.filter(s => (s.email || "").trim());
+  if (!withEmail.length) {
+    toast("メール登録済みのスタッフがいません。スタッフタブで email を設定してください。", "error");
+    return;
+  }
+  if (!confirm(`${withEmail.length}名のスタッフにシフト確定メールを送信します。よろしいですか？`)) return;
+  try {
+    const r = await window.ShiftyAPI.notifyShifts(state.meta.currentWeekStart);
+    if (r.sent === 0) {
+      toast(`送信失敗: SMTP 未設定の可能性があります（LAUNCH.md 参照）`, "error");
+    } else {
+      toast(`✅ ${r.sent}名にメール送信しました${r.skipped_no_email ? ` (email未設定: ${r.skipped_no_email}名)` : ""}`, "success");
+    }
+  } catch (e) {
+    toast("送信失敗: " + e.message, "error");
+  }
+}
+
+async function openLineNotificationDialog() {
+  // 全スタッフのトークンを取得
+  let tokens = {};
+  try {
+    tokens = await window.ShiftyAPI.listStaffTokens();
+    // 未生成のスタッフ用に生成
+    for (const s of state.staff) {
+      if (!tokens[s.id]) {
+        const r = await window.ShiftyAPI.genStaffToken(s.id);
+        tokens[s.id] = r.token;
+      }
+    }
+  } catch (e) { toast("トークン取得失敗: " + e.message, "error"); return; }
+
+  const w0 = state.meta.currentWeekStart;
+  const wEnd = addDays(w0, 6);
+  const lines = [
+    `【シフト確定のお知らせ】`,
+    `${state.meta.restaurantName}`,
+    `期間: ${w0} 〜 ${wEnd}`,
+    ``,
+    `各自、下記URLから自分の今週のシフトを確認してください。`,
+    ``,
+  ];
+  for (const s of state.staff) {
+    const t = tokens[s.id];
+    if (!t) continue;
+    lines.push(`【${s.name}さん】`);
+    lines.push(`${location.origin}/staff?t=${t}`);
+    lines.push("");
+  }
+  const txt = lines.join("\n");
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "💬 LINE通知文（コピーして送信）"));
+  body.appendChild(el("p", { class: "text-xs text-slate-500" },
+    "下記をコピーしてLINEグループに貼り付けてください。各スタッフは自分のリンクを開くと、自分のシフトのみが見られます。"));
+  const ta = el("textarea", { class: "w-full border rounded-md p-2 text-xs font-mono h-72", readonly: "" }, txt);
+  body.appendChild(ta);
+  body.appendChild(el("div", { class: "flex justify-end gap-2" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    el("button", { class: "px-4 py-1.5 text-sm bg-brand-600 text-white rounded-md", onclick: async () => {
+      try { await navigator.clipboard.writeText(txt); toast("コピーしました", "success"); }
+      catch (_) { ta.select(); document.execCommand("copy"); toast("コピーしました", "success"); }
+    } }, "📋 クリップボードにコピー"),
+  ]));
+  modal(body);
+}
+
+function renderCalendar() {
+  const w0 = state.meta.currentWeekStart;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  const isMobile = window.innerWidth < 640;
+  // モバイル時は縦スタック表示
+  if (isMobile) return renderCalendarMobile(days);
+  const grid = el("div", { class: "cal-grid" });
+  grid.appendChild(el("div", { class: "cal-cell head" }, ""));
+  for (const d of days) {
+    const dow = dayOfWeek(d);
+    grid.appendChild(el("div", { class: "cal-cell head" }, [
+      el("div", { class: dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "" }, `${d.slice(5)} (${DAY_LABELS[dow]})`),
+    ]));
+  }
+
+  for (const sess of state.meta.sessions) {
+    grid.appendChild(el("div", { class: "cal-cell head" }, [
+      el("div", {}, sess.label),
+      el("div", { class: "text-[10px] font-normal text-slate-500" }, `${sess.startTime}〜`),
+    ]));
+    for (const d of days) {
+      const cell = el("div", { class: "cal-cell" });
+      const dayAssignments = curAssignments().filter(a => a.date === d && a.startTime === sess.startTime);
+      for (const pos of state.meta.positions) {
+        const list = dayAssignments.filter(a => a.position === pos.id);
+        list.forEach(a => {
+          const s = state.staff.find(x => x.id === a.staffId);
+          const cfg = posCfg(pos.id);
+          const editable = curStatus() === "draft";
+          const chip = el("div", {
+            class: "assignment-chip" + (editable ? " editable" : ""),
+            draggable: editable ? "true" : "false",
+            "data-assignment-id": a.id,
+            style: { borderColor: cfg.color },
+            onclick: () => openAssignmentDetail(a),
+            ondragstart: editable ? (e) => handleChipDragStart(e, a) : null,
+            ondragover: editable ? (e) => { e.preventDefault(); chip.classList.add("drop-target"); } : null,
+            ondragleave: editable ? () => chip.classList.remove("drop-target") : null,
+            ondrop: editable ? (e) => { chip.classList.remove("drop-target"); handleChipDrop(e, a); } : null,
+            ondragend: () => $$(".assignment-chip").forEach(c => c.classList.remove("drop-target", "dragging")),
+          });
+          chip.innerHTML = `<div class="name">${escapeHtml(s?.name || "?")}</div>
+            <div class="time">${escapeHtml(cfg.label)} ${a.startTime.slice(0,5)}〜${a.endTime.slice(0,5)}</div>`;
+          cell.appendChild(chip);
+        });
+      }
+      const slotsInCell = curSlots().filter(s => s.date === d && s.startTime === sess.startTime);
+      slotsInCell.forEach(slot => {
+        const filledN = dayAssignments.filter(a => a.position === slot.position).length;
+        const missing = slot.requiredCount - filledN;
+        if (missing > 0 && curAssignments().length > 0) {
+          cell.appendChild(el("div", { class: "text-[10px] text-red-600 bg-red-50 rounded px-1 mt-0.5" },
+            `不足: ${posCfg(slot.position).label} ×${missing}`));
+        }
+      });
+      grid.appendChild(cell);
+    }
+  }
+  return grid;
+}
+
+function renderCalendarMobile(days) {
+  const wrap = el("div", { class: "space-y-2" });
+  for (const d of days) {
+    const dow = dayOfWeek(d);
+    const dayCard = el("div", { class: "bg-white border border-slate-200 rounded-lg p-3" });
+    const dowColor = dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "text-slate-700";
+    dayCard.appendChild(el("div", { class: `font-bold text-sm mb-2 ${dowColor}` }, `${d.slice(5)} (${DAY_LABELS[dow]})`));
+
+    let totalCount = 0;
+    for (const sess of state.meta.sessions) {
+      const dayAssignments = curAssignments().filter(a => a.date === d && a.startTime === sess.startTime);
+      if (!dayAssignments.length) {
+        // 未充足チェック
+        const slotsCnt = curSlots().filter(s => s.date === d && s.startTime === sess.startTime)
+          .reduce((s, x) => s + x.requiredCount, 0);
+        if (slotsCnt > 0 && curAssignments().length > 0) {
+          dayCard.appendChild(el("div", { class: "text-xs text-red-600 bg-red-50 rounded px-2 py-1 mb-1" },
+            `${sess.icon} ${sess.label} 未充足 ${slotsCnt}名`));
+        }
+        continue;
+      }
+      const sessHead = el("div", { class: "text-xs font-semibold text-slate-600 mt-2 flex items-center gap-1" });
+      sessHead.innerHTML = `<span>${sess.icon || ""}</span><span>${escapeHtml(sess.label)}</span><span class="text-slate-400">${sess.startTime}〜${sess.endTime}</span>`;
+      dayCard.appendChild(sessHead);
+      // 未充足チェック
+      const slotsInCell = curSlots().filter(s => s.date === d && s.startTime === sess.startTime);
+      slotsInCell.forEach(slot => {
+        const filledN = dayAssignments.filter(a => a.position === slot.position).length;
+        const missing = slot.requiredCount - filledN;
+        if (missing > 0) {
+          dayCard.appendChild(el("div", { class: "text-[10px] text-red-600 bg-red-50 rounded px-1 mt-0.5 inline-block" },
+            `不足: ${posCfg(slot.position).label} ×${missing}`));
+        }
+      });
+      const list = el("div", { class: "space-y-1 mt-1" });
+      for (const pos of state.meta.positions) {
+        const ll = dayAssignments.filter(a => a.position === pos.id);
+        ll.forEach(a => {
+          const s = state.staff.find(x => x.id === a.staffId);
+          const cfg = posCfg(pos.id);
+          const editable = curStatus() === "draft";
+          const chip = el("div", {
+            class: "assignment-chip flex items-center justify-between" + (editable ? " editable" : ""),
+            draggable: editable ? "true" : "false",
+            "data-assignment-id": a.id,
+            style: { borderColor: cfg.color, padding: "6px 8px" },
+            onclick: () => openAssignmentDetail(a),
+            ondragstart: editable ? (e) => handleChipDragStart(e, a) : null,
+            ondragover: editable ? (e) => { e.preventDefault(); chip.classList.add("drop-target"); } : null,
+            ondragleave: editable ? () => chip.classList.remove("drop-target") : null,
+            ondrop: editable ? (e) => { chip.classList.remove("drop-target"); handleChipDrop(e, a); } : null,
+            ondragend: () => $$(".assignment-chip").forEach(c => c.classList.remove("drop-target", "dragging")),
+          });
+          chip.innerHTML = `
+            <span><span class="name font-semibold">${escapeHtml(s?.name || "?")}</span> <span class="text-[10px] text-slate-500">${escapeHtml(cfg.label)}</span></span>
+            <span class="text-[10px] text-slate-500">${a.startTime.slice(0,5)}〜${a.endTime.slice(0,5)}</span>
+          `;
+          list.appendChild(chip);
+          totalCount++;
+        });
+      }
+      dayCard.appendChild(list);
+    }
+    if (totalCount === 0 && curAssignments().length > 0) {
+      dayCard.appendChild(el("div", { class: "text-xs text-slate-400 text-center py-2" }, "（該当なし）"));
+    }
+    wrap.appendChild(dayCard);
+  }
+  return wrap;
+}
+
+function openAssignmentDetail(a) {
+  const s = state.staff.find(x => x.id === a.staffId);
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("div", { class: "flex items-center justify-between" }, [
+    el("h3", { class: "font-bold text-lg" }, s?.name || "?"),
+    el("span", { html: posBadge(a.position) }),
+  ]));
+  body.appendChild(el("div", { class: "text-sm text-slate-600" }, `${a.date} ${a.startTime}〜${a.endTime} (${calcHours(a.startTime, a.endTime)}h, ${fmtYen(a.cost)})`));
+
+  // 新フォーマット: breakdown (0..1正規化値 × 重み) + 旧 reasons 互換
+  if (a.breakdown && a.breakdown.length) {
+    const tbl = el("div", { class: "bg-slate-50 rounded-md p-3 text-xs space-y-1" });
+    tbl.appendChild(el("div", { class: "font-semibold text-slate-700 mb-2" }, "🤖 AIスコア内訳（重み付き加点方式）"));
+    const head = el("div", { class: "grid grid-cols-12 gap-2 text-[10px] text-slate-500 mb-1" });
+    head.innerHTML = `<div class="col-span-3">要素</div><div class="col-span-3">値(0-100)</div><div class="col-span-2">重み</div><div class="col-span-2 text-right">寄与</div><div class="col-span-2 text-right">詳細</div>`;
+    tbl.appendChild(head);
+    a.breakdown.forEach(b => {
+      const row = el("div", { class: "grid grid-cols-12 gap-2 items-center" });
+      row.innerHTML = `
+        <div class="col-span-3">${escapeHtml(b.label)}</div>
+        <div class="col-span-3 flex items-center gap-1">
+          <div class="flex-1 h-1.5 bg-slate-200 rounded">
+            <div class="h-full bg-brand-600 rounded" style="width:${(b.value*100).toFixed(0)}%"></div>
+          </div>
+          <span class="text-[10px] w-7 text-right">${(b.value*100).toFixed(0)}</span>
+        </div>
+        <div class="col-span-2 text-slate-600">×${(b.weight*100).toFixed(0)}%</div>
+        <div class="col-span-2 text-right text-emerald-600 font-semibold">${(b.contrib*100).toFixed(1)}</div>
+        <div class="col-span-2 text-right text-[10px] text-slate-500" title="${escapeAttr(b.detail || '')}">${escapeHtml((b.detail||'').slice(0,12))}</div>
+      `;
+      tbl.appendChild(row);
+    });
+    tbl.appendChild(el("div", { class: "flex justify-between font-bold border-t pt-1.5 mt-2" }, [
+      el("span", {}, "合計スコア (0-100)"),
+      el("span", { class: "text-brand-600" }, (a.score * 100).toFixed(1)),
+    ]));
+    body.appendChild(tbl);
+
+    // 候補者比較
+    if (a.topCandidates && a.topCandidates.length > 1) {
+      const cand = el("div", { class: "bg-blue-50 rounded-md p-3 text-xs" });
+      cand.appendChild(el("div", { class: "font-semibold text-slate-700 mb-2" }, "🔍 候補者比較（上位3名）"));
+      a.topCandidates.forEach((c, i) => {
+        const isPicked = c.staffId === a.staffId;
+        cand.appendChild(el("div", { class: `flex justify-between ${isPicked ? 'font-bold text-brand-700' : 'text-slate-600'}` }, [
+          el("span", {}, `${i+1}. ${c.name}${isPicked ? ' ← 採用' : ''}`),
+          el("span", {}, (c.score * 100).toFixed(1)),
+        ]));
+      });
+      body.appendChild(cand);
+    }
+  } else if (a.reasons) {
+    // 旧フォーマット互換
+    const tbl = el("div", { class: "bg-slate-50 rounded-md p-3 text-xs space-y-1" });
+    tbl.appendChild(el("div", { class: "font-semibold text-slate-700 mb-1" }, "🤖 AIスコア内訳"));
+    a.reasons.forEach(([label, pts]) => {
+      tbl.appendChild(el("div", { class: "flex justify-between" }, [
+        el("span", {}, label),
+        el("span", { class: pts >= 0 ? "text-emerald-600" : "text-red-600" }, (pts >= 0 ? "+" : "") + Math.round(pts)),
+      ]));
+    });
+    tbl.appendChild(el("div", { class: "flex justify-between font-bold border-t pt-1 mt-1" }, [
+      el("span", {}, "合計スコア"), el("span", {}, Math.round(a.score)),
+    ]));
+    body.appendChild(tbl);
+  }
+
+  if (curStatus() === "draft") {
+    body.appendChild(el("button", { class: "w-full text-sm bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-md py-2 font-semibold",
+      onclick: () => showSubstitutes(a) }, "🆘 欠勤想定 → 代打推薦"));
+
+    body.appendChild(el("div", { class: "flex justify-between gap-2" }, [
+      el("button", { class: "flex-1 text-sm border border-red-300 text-red-700 rounded-md py-1.5",
+        onclick: () => {
+          if (!confirm("このアサインを削除しますか？")) return;
+          const removedStaff = state.staff.find(x => x.id === a.staffId);
+          curWeek().assignments = curAssignments().filter(x => x.id !== a.id);
+          logChange("delete", `${a.date} ${a.startTime}〜 ${posCfg(a.position).label} (${removedStaff?.name || "?"}) 削除`);
+          persist(); closeModal(); render(); toast("削除しました", "success");
+        } }, "削除"),
+      el("button", { class: "flex-1 text-sm bg-slate-200 rounded-md py-1.5", onclick: closeModal }, "閉じる"),
+    ]));
+  } else {
+    body.appendChild(el("div", { class: "text-xs text-slate-500" }, "確定済の週は編集不可（下書きに戻すと編集できます）"));
+    body.appendChild(el("button", { class: "w-full text-sm bg-slate-200 rounded-md py-1.5", onclick: closeModal }, "閉じる"));
+  }
+  modal(body);
+}
+
+function showSubstitutes(targetA) {
+  const a = targetA;
+  const subs = recommendSubstitute(a, {
+    staff: state.staff, slots: curSlots(), preferences: curPrefs(), assignments: curAssignments(),
+    laborRules: state.meta.laborRules, weights: state.meta.algorithmWeights,
+  });
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🆘 代打推薦"));
+  if (!subs.length) {
+    body.appendChild(el("div", { class: "text-sm text-slate-600" }, "対応可能なスタッフが見つかりません。"));
+  } else {
+    subs.forEach((cand, i) => {
+      const s = cand.staff;
+      const row = el("div", { class: "flex items-center justify-between bg-slate-50 rounded-md p-3" });
+      row.innerHTML = `
+        <div>
+          <div class="font-semibold">${i+1}. ${escapeHtml(s.name)} <span class="text-xs text-slate-500">${escapeHtml(posCfg(s.position).label)}</span></div>
+          <div class="text-xs text-slate-600">スコア ${Math.round(cand.score)} / ${fmtYen(s.hourlyWage)}/h</div>
+        </div>`;
+      const btn = el("button", { class: "text-xs bg-brand-600 text-white rounded px-3 py-1.5",
+        onclick: () => {
+          const idx = curAssignments().findIndex(x => x.id === a.id);
+          if (idx >= 0) {
+            const oldStaff = state.staff.find(x => x.id === a.staffId);
+            curAssignments()[idx] = {
+              ...a, staffId: s.id, cost: s.hourlyWage * calcHours(a.startTime, a.endTime),
+              reasons: cand.reasons, score: cand.score, breakdown: cand.breakdown,
+            };
+            logChange("substitute", `${oldStaff?.name || "?"} → ${s.name} に代打入替（${a.date} ${a.startTime}〜 ${posCfg(a.position).label}）`);
+            persist(); closeModal(); render(); toast("代打を割当てました", "success");
+          }
+        } }, "入替");
+      row.appendChild(btn);
+      body.appendChild(row);
+    });
+  }
+  body.appendChild(el("button", { class: "mt-2 w-full text-sm bg-slate-200 rounded-md py-1.5", onclick: closeModal }, "閉じる"));
+  modal(body);
+}
+
+function getUnfilled() {
+  const unfilled = [];
+  for (const sl of curSlots()) {
+    const n = curAssignments().filter(a => a.date === sl.date && a.position === sl.position && a.startTime === sl.startTime).length;
+    for (let i = n; i < sl.requiredCount; i++) unfilled.push(sl);
+  }
+  return unfilled;
+}
+
+function renderStaffSummary() {
+  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl overflow-x-auto" });
+  card.innerHTML = `<div class="font-semibold p-3 border-b">スタッフ別サマリ</div>`;
+  const tbl = el("table", { class: "w-full text-sm" });
+  tbl.innerHTML = `
+    <thead class="bg-slate-50 text-slate-600 text-xs"><tr>
+      <th class="text-left px-3 py-2">名前</th>
+      <th class="text-right px-3 py-2">時間</th>
+      <th class="text-right px-3 py-2">給与</th>
+      <th class="text-left px-3 py-2">状態</th>
+    </tr></thead>`;
+  const tb = el("tbody");
+  const hours = aggregateHours();
+  for (const s of state.staff) {
+    const h = hours[s.id] || 0;
+    const cost = curAssignments().filter(a => a.staffId === s.id).reduce((sm, a) => sm + a.cost, 0);
+    let status = "✓";
+    let statusClass = "text-slate-400";
+    if (h === 0) { status = "— 未配置"; statusClass = "text-slate-400"; }
+    else if (h < s.minHoursPerWeek) { status = `△ 最低未達(${s.minHoursPerWeek}h)`; statusClass = "text-amber-600"; }
+    else if (h > s.maxHoursPerWeek) { status = `× 上限超過(${s.maxHoursPerWeek}h)`; statusClass = "text-red-600"; }
+    else { status = "✓ OK"; statusClass = "text-emerald-600"; }
+    const tr = el("tr", { class: "border-t border-slate-100" });
+    tr.innerHTML = `
+      <td class="px-3 py-2">${escapeHtml(s.name)} <span class="text-xs text-slate-500">${escapeHtml(posCfg(s.position).label)}</span></td>
+      <td class="px-3 py-2 text-right">${h.toFixed(1)}h</td>
+      <td class="px-3 py-2 text-right">${fmtYen(cost)}</td>
+      <td class="px-3 py-2 ${statusClass}">${status}</td>`;
+    tb.appendChild(tr);
+  }
+  tbl.appendChild(tb);
+  card.appendChild(tbl);
+  return card;
+}
+
+// ===== Drag & Drop =====
+let draggedAssignment = null;
+
+function handleChipDragStart(e, a) {
+  draggedAssignment = a;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", a.id);
+  e.target.classList.add("dragging");
+}
+
+function handleChipDrop(e, target) {
+  e.preventDefault();
+  if (!draggedAssignment || draggedAssignment.id === target.id) { draggedAssignment = null; return; }
+  if (curStatus() === "published") { toast("確定済では編集不可", "error"); draggedAssignment = null; return; }
+
+  // Swap staffIds between dragged and target
+  const draggedStaff = state.staff.find(s => s.id === draggedAssignment.staffId);
+  const targetStaff = state.staff.find(s => s.id === target.staffId);
+  if (!draggedStaff || !targetStaff) { draggedAssignment = null; return; }
+
+  // Eligibility check: each staff must be able to cover the other's slot
+  const checkEligible = (staff, slot) => {
+    if (staff.position !== slot.position && !staff.canCover.includes(slot.position)) return false;
+    if (staff.fixedDayOff.includes(dayOfWeek(slot.date))) return false;
+    return true;
+  };
+  const draggedFitsTarget = checkEligible(draggedStaff, target);
+  const targetFitsDragged = checkEligible(targetStaff, draggedAssignment);
+  if (!draggedFitsTarget || !targetFitsDragged) {
+    if (!confirm(`⚠️ 制約違反の可能性があります（ポジション/固定休）。それでも入替えしますか？`)) {
+      draggedAssignment = null;
+      return;
+    }
+  }
+
+  const newDragged = {
+    ...draggedAssignment,
+    staffId: target.staffId,
+    cost: targetStaff.hourlyWage * calcHours(draggedAssignment.startTime, draggedAssignment.endTime),
+    reasons: [["手動入替", 0]],
+    score: 0,
+  };
+  const newTarget = {
+    ...target,
+    staffId: draggedAssignment.staffId,
+    cost: draggedStaff.hourlyWage * calcHours(target.startTime, target.endTime),
+    reasons: [["手動入替", 0]],
+    score: 0,
+  };
+  curWeek().assignments = curAssignments().map(a => {
+    if (a.id === draggedAssignment.id) return newDragged;
+    if (a.id === target.id) return newTarget;
+    return a;
+  });
+  logChange("swap", `${draggedStaff.name} ⇔ ${targetStaff.name} 入替（${draggedAssignment.date} ${draggedAssignment.startTime}〜 と ${target.date} ${target.startTime}〜）`);
+  draggedAssignment = null;
+  persist(); render();
+  toast(`${draggedStaff.name} ⇔ ${targetStaff.name} 入替完了`, "success");
+}
+
+// ===== Templates =====
+function openTemplateDialog() {
+  const body = el("div", { class: "p-6 space-y-4" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "📑 シフトテンプレート"));
+
+  // Save current as template
+  body.appendChild(el("div", { class: "bg-purple-50 border border-purple-200 rounded-md p-3" }, [
+    el("div", { class: "text-sm text-purple-900 font-semibold mb-2" }, "現在の週をテンプレートに保存"),
+    el("div", { class: "flex gap-2" }, [
+      el("input", { id: "tpl-name", class: "flex-1 border rounded-md px-3 py-1.5 text-sm", placeholder: "テンプレ名（例: 通常週、夏休みシフト）" }),
+      el("button", { class: "text-sm bg-purple-600 text-white rounded-md px-3 py-1.5",
+        onclick: saveCurrentAsTemplate }, "💾 保存"),
+    ]),
+  ]));
+
+  // List templates
+  const list = el("div", { class: "space-y-2" });
+  if (!state.meta.templates?.length) {
+    list.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-6" }, "保存済テンプレートはありません"));
+  } else {
+    state.meta.templates.forEach(tpl => {
+      const row = el("div", { class: "bg-slate-50 rounded-md p-3 flex items-center justify-between gap-2" });
+      const meta = el("div", {});
+      meta.innerHTML = `<div class="font-semibold text-sm">${escapeHtml(tpl.name)}</div>
+        <div class="text-xs text-slate-500">${tpl.createdAt?.slice(0, 10) || "?"} / ${tpl.patterns?.length || 0} 配置</div>`;
+      row.appendChild(meta);
+      row.appendChild(el("div", { class: "flex gap-2" }, [
+        el("button", { class: "text-xs bg-purple-600 text-white rounded-md px-3 py-1.5",
+          onclick: () => applyTemplate(tpl.id) }, "📥 読込"),
+        el("button", { class: "text-xs text-red-600 hover:underline",
+          onclick: () => {
+            if (!confirm(`「${tpl.name}」を削除しますか？`)) return;
+            state.meta.templates = state.meta.templates.filter(t => t.id !== tpl.id);
+            persist(); closeModal(); openTemplateDialog();
+            toast("削除しました", "success");
+          } }, "削除"),
+      ]));
+      list.appendChild(row);
+    });
+  }
+  body.appendChild(list);
+
+  body.appendChild(el("div", { class: "flex justify-end" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+  ]));
+  modal(body);
+}
+
+function saveCurrentAsTemplate() {
+  const name = $("#tpl-name").value.trim();
+  if (!name) { toast("テンプレ名を入力", "error"); return; }
+  if (!curAssignments().length) { toast("現在の週にアサインがありません", "error"); return; }
+
+  const patterns = curAssignments().map(a => ({
+    dayOfWeek: dayOfWeek(a.date),
+    position: a.position,
+    startTime: a.startTime,
+    endTime: a.endTime,
+    staffId: a.staffId,
+  }));
+  state.meta.templates.push({
+    id: uid("tpl_"),
+    name, createdAt: new Date().toISOString(),
+    patterns,
+  });
+  persist();
+  closeModal();
+  openTemplateDialog();
+  toast(`「${name}」を保存しました（${patterns.length}配置）`, "success");
+}
+
+function applyTemplate(templateId) {
+  const tpl = state.meta.templates.find(t => t.id === templateId);
+  if (!tpl) return;
+  if (curStatus() === "published") { toast("確定済の週には適用できません", "error"); return; }
+  if (curAssignments().length > 0 && !confirm("既存のアサインを上書きします。続行しますか？")) return;
+
+  const w0 = state.meta.currentWeekStart;
+  const newAssignments = [];
+  let skippedNoStaff = 0, skippedFixedOff = 0;
+
+  for (const p of tpl.patterns) {
+    // 同じdayOfWeekの今週日付を探す
+    let date = null;
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(w0, i);
+      if (dayOfWeek(d) === p.dayOfWeek) { date = d; break; }
+    }
+    if (!date) continue;
+    const s = state.staff.find(x => x.id === p.staffId);
+    if (!s) { skippedNoStaff++; continue; }
+    if (s.fixedDayOff.includes(p.dayOfWeek)) { skippedFixedOff++; continue; }
+    newAssignments.push({
+      id: uid("a_"),
+      date,
+      staffId: p.staffId,
+      position: p.position,
+      startTime: p.startTime,
+      endTime: p.endTime,
+      cost: s.hourlyWage * calcHours(p.startTime, p.endTime),
+      reasons: [["テンプレ復元", 0]],
+      score: 0,
+    });
+  }
+  curWeek().assignments = newAssignments;
+  persist(); closeModal(); render();
+  const msg = `${newAssignments.length}件適用` + (skippedNoStaff ? ` / 退職者${skippedNoStaff}除外` : "") + (skippedFixedOff ? ` / 固定休${skippedFixedOff}除外` : "");
+  toast(msg, "success");
+}
+
+function copyFromPreviousWeek() {
+  const cur = state.meta.currentWeekStart;
+  const prev = addDays(cur, -7);
+  const prevWeek = state.weeks[prev];
+  if (!prevWeek || !prevWeek.assignments?.length) {
+    toast("先週のシフトデータが見つかりません", "error");
+    return;
+  }
+  if (curStatus() === "published") {
+    toast("確定済の週には貼り付けできません", "error");
+    return;
+  }
+  if (curAssignments().length > 0) {
+    if (!confirm("今の週に既にアサインがあります。上書きしますか？")) return;
+  }
+  let copied = 0, skippedNoStaff = 0, skippedFixedOff = 0;
+  const newAssignments = [];
+  for (const a of prevWeek.assignments) {
+    const newDate = addDays(a.date, 7);
+    const s = state.staff.find(x => x.id === a.staffId);
+    if (!s) { skippedNoStaff++; continue; }
+    if (s.fixedDayOff.includes(dayOfWeek(newDate))) { skippedFixedOff++; continue; }
+    newAssignments.push({ ...a, id: uid("a_"), date: newDate });
+    copied++;
+  }
+  curWeek().assignments = newAssignments;
+  persist(); render();
+  const msg = `${copied} 件をコピー` + (skippedNoStaff ? ` / 退職者${skippedNoStaff}件除外` : "") + (skippedFixedOff ? ` / 固定休${skippedFixedOff}件除外` : "");
+  toast(msg, "success");
+}
+
+function autoGenerate() {
+  if (state.staff.length === 0) { toast("スタッフがいません", "error"); return; }
+  if (curStatus() === "published") { toast("確定済の週は再生成できません。先に「下書きに戻す」してください。", "error"); return; }
+  if (curSlots().length === 0) { toast("シフト枠がありません。設定タブで必要人数を定義してください。", "error"); return; }
+  toast("AI最適化を実行中...");
+  setTimeout(() => {
+    const result = generateShift({
+      staff: state.staff, slots: curSlots(), preferences: curPrefs(),
+      laborRules: state.meta.laborRules,
+      weights: state.meta.algorithmWeights,
+      randomStarts: state.meta.randomStarts || 5,
+    });
+    state._lastAudit = result.audit;
+    curWeek().assignments = result.assignments;
+    logChange("autogenerate", `AI生成: ${result.assignments.length}件配置 / カバー${fmtPct(result.metrics.coverageRate)} / 希望${fmtPct(result.metrics.preferenceSatisfaction)}`, {
+      audit: result.audit ? { passed: result.audit.passed, violations: result.audit.hardViolations.length } : null,
+    });
+    persist();
+    render();
+    const m = result.metrics;
+    toast(`✅ 完成: カバー${fmtPct(m.coverageRate)} / 希望${fmtPct(m.preferenceSatisfaction)} / ${fmtYen(m.totalCost)}`, "success");
+  }, 400);
+}
+
+// ===== View: Export =====
+function viewExport() {
+  const wrap = el("div", { class: "space-y-4" });
+  wrap.appendChild(el("h2", { class: "text-xl font-bold" }, "エクスポート"));
+
+  if (!curAssignments().length) {
+    wrap.appendChild(el("div", { class: "bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900" },
+      "シフトが未生成です。「シフト編成」タブで自動生成してください。"));
+    return wrap;
+  }
+
+  wrap.appendChild(el("div", { class: "flex gap-2 no-print flex-wrap" }, [
+    el("button", { class: "text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-md px-3 py-1.5",
+      onclick: downloadCsv }, "📄 CSVダウンロード"),
+    el("button", { class: "text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-md px-3 py-1.5",
+      onclick: () => window.print() }, "🖨 印刷ビュー"),
+    el("button", { class: "text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-1.5",
+      onclick: openLineNotificationDialog }, "💬 LINE通知文を作成"),
+  ]));
+
+  const w0 = state.meta.currentWeekStart;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  const tbl = el("div", { class: "bg-white border border-slate-200 rounded-xl overflow-x-auto" });
+  let html = `<div class="p-3 font-semibold">${escapeHtml(state.meta.restaurantName)} シフト表 / ${w0}〜</div>
+    <table class="w-full text-xs"><thead class="bg-slate-50">
+      <tr><th class="text-left px-2 py-1">名前</th>`;
+  days.forEach(d => { html += `<th class="px-2 py-1">${d.slice(5)}<br><span class="font-normal">${DAY_LABELS[dayOfWeek(d)]}</span></th>`; });
+  html += `<th class="text-right px-2 py-1">時間</th><th class="text-right px-2 py-1">給与</th></tr></thead><tbody>`;
+  state.staff.forEach(s => {
+    html += `<tr class="border-t border-slate-100"><td class="px-2 py-1 font-semibold">${escapeHtml(s.name)}</td>`;
+    days.forEach(d => {
+      const list = curAssignments().filter(a => a.staffId === s.id && a.date === d).sort((a,b) => a.startTime.localeCompare(b.startTime));
+      html += `<td class="px-2 py-1 text-center">${list.map(a => `${a.startTime.slice(0,5)}-${a.endTime.slice(0,5)}<br><span class="text-[10px] text-slate-500">${escapeHtml(posCfg(a.position).label)}</span>`).join("<hr class=\"my-1\">") || "<span class=\"text-slate-300\">休</span>"}</td>`;
+    });
+    const h = curAssignments().filter(a => a.staffId === s.id).reduce((sm, a) => sm + calcHours(a.startTime, a.endTime), 0);
+    const cost = curAssignments().filter(a => a.staffId === s.id).reduce((sm, a) => sm + a.cost, 0);
+    html += `<td class="px-2 py-1 text-right">${h.toFixed(1)}h</td><td class="px-2 py-1 text-right">${fmtYen(cost)}</td></tr>`;
+  });
+  const totalCost = curAssignments().reduce((s, a) => s + a.cost, 0);
+  const totalH = curAssignments().reduce((s, a) => s + calcHours(a.startTime, a.endTime), 0);
+  html += `<tr class="border-t-2 border-slate-300 font-bold bg-slate-50"><td class="px-2 py-1">合計</td><td colspan="7"></td><td class="px-2 py-1 text-right">${totalH.toFixed(1)}h</td><td class="px-2 py-1 text-right">${fmtYen(totalCost)}</td></tr>`;
+  html += `</tbody></table>`;
+  tbl.innerHTML = html;
+  wrap.appendChild(tbl);
+  return wrap;
+}
+
+function downloadCsv() {
+  const w0 = state.meta.currentWeekStart;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  let csv = "名前," + days.map(d => `${d}(${DAY_LABELS[dayOfWeek(d)]})`).join(",") + ",時間,給与\n";
+  state.staff.forEach(s => {
+    const cells = days.map(d => {
+      const list = curAssignments().filter(a => a.staffId === s.id && a.date === d).sort((a,b) => a.startTime.localeCompare(b.startTime));
+      return list.map(a => `${a.startTime}-${a.endTime}(${posCfg(a.position).label})`).join("/");
+    });
+    const h = curAssignments().filter(a => a.staffId === s.id).reduce((sm, a) => sm + calcHours(a.startTime, a.endTime), 0);
+    const cost = curAssignments().filter(a => a.staffId === s.id).reduce((sm, a) => sm + a.cost, 0);
+    csv += [s.name, ...cells, h.toFixed(1) + "h", cost].map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
+  });
+  const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: `shift_${w0}.csv` });
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast("CSVをダウンロードしました", "success");
+}
+
+// ===== View: Settings =====
+function viewSettings() {
+  const wrap = el("div", { class: "space-y-6" });
+  wrap.appendChild(el("h2", { class: "text-xl font-bold" }, "⚙️ 店舗設定"));
+  wrap.appendChild(el("div", { class: "text-sm text-slate-600" },
+    "ここで設定した内容に基づいて、シフト枠（必要人数マトリクス）が生成されます。"));
+
+  // Basic
+  const basic = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  basic.appendChild(el("div", { class: "font-semibold" }, "1. 基本情報"));
+  const grid1 = el("div", { class: "grid grid-cols-1 md:grid-cols-3 gap-3 text-sm" });
+  grid1.innerHTML = `
+    <label class="block"><span class="text-slate-600">店舗名</span>
+      <input id="set-name" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(state.meta.restaurantName)}"></label>
+    <label class="block"><span class="text-slate-600">週の予算(円)</span>
+      <input id="set-budget" type="number" class="mt-1 w-full border rounded-md px-3 py-2" value="${state.meta.weeklyBudget}"></label>
+    <label class="block"><span class="text-slate-600">対象週(月曜)</span>
+      <input id="set-weekstart" type="date" class="mt-1 w-full border rounded-md px-3 py-2" value="${state.meta.currentWeekStart}"></label>`;
+  basic.appendChild(grid1);
+  basic.appendChild(el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
+    onclick: () => {
+      state.meta.restaurantName = $("#set-name").value;
+      state.meta.weeklyBudget = Number($("#set-budget").value) || 0;
+      const newWeek = $("#set-weekstart").value;
+      if (newWeek && newWeek !== state.meta.currentWeekStart) {
+        state.meta.currentWeekStart = newWeek;
+        ensureWeek(state, newWeek);
+      }
+      persist(); render(); toast("基本情報を更新", "success");
+    } }, "保存"));
+  wrap.appendChild(basic);
+
+  // Password
+  const passCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  passCard.appendChild(el("div", { class: "font-semibold" }, "2. オーナーパスワード変更"));
+  const passGrid = el("div", { class: "grid grid-cols-1 md:grid-cols-3 gap-3 text-sm" });
+  passGrid.innerHTML = `
+    <label class="block"><span class="text-slate-600">現在のパスワード</span>
+      <input id="set-curpass" type="password" class="mt-1 w-full border rounded-md px-3 py-2"></label>
+    <label class="block"><span class="text-slate-600">新パスワード(6字以上)</span>
+      <input id="set-newpass" type="password" class="mt-1 w-full border rounded-md px-3 py-2"></label>
+    <label class="block"><span class="text-slate-600">確認</span>
+      <input id="set-newpass2" type="password" class="mt-1 w-full border rounded-md px-3 py-2"></label>`;
+  passCard.appendChild(passGrid);
+  passCard.appendChild(el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
+    onclick: async () => {
+      const cur = $("#set-curpass").value;
+      const n1 = $("#set-newpass").value;
+      const n2 = $("#set-newpass2").value;
+      if (!cur || !n1) return toast("入力してください", "error");
+      if (n1 !== n2) return toast("新パスワードが一致しません", "error");
+      if (n1.length < 6) return toast("6文字以上必要", "error");
+      try {
+        await window.ShiftyAPI.authChangePassword(cur, n1);
+        $("#set-curpass").value = $("#set-newpass").value = $("#set-newpass2").value = "";
+        toast("パスワードを変更しました", "success");
+      } catch (e) {
+        toast(e.message.includes("invalid_current") ? "現在のパスワードが違います" : "変更失敗: " + e.message, "error");
+      }
+    } }, "変更"));
+  wrap.appendChild(passCard);
+
+  // Positions
+  const posCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  posCard.appendChild(el("div", { class: "flex items-center justify-between" }, [
+    el("div", { class: "font-semibold" }, "3. ポジション"),
+    el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
+      onclick: () => editPositionDialog() }, "＋ 追加"),
+  ]));
+  const posList = el("div", { class: "space-y-2" });
+  state.meta.positions.forEach(p => {
+    const row = el("div", { class: "flex items-center gap-2 bg-slate-50 rounded-md p-2 text-sm" });
+    row.innerHTML = `
+      <span class="pos-badge" style="background:${p.color}">${escapeHtml(p.label)}</span>
+      <span class="text-xs text-slate-500 font-mono">${escapeHtml(p.id)}</span>`;
+    row.appendChild(el("div", { class: "ml-auto flex gap-2" }, [
+      el("button", { class: "text-xs text-brand-600 hover:underline",
+        onclick: () => editPositionDialog(p) }, "編集"),
+      el("button", { class: "text-xs text-red-600 hover:underline",
+        onclick: () => {
+          if (!confirm(`${p.label} を削除しますか？このポジションを使うスタッフ・シフト枠は保持されますがラベル表示が壊れます。`)) return;
+          state.meta.positions = state.meta.positions.filter(x => x.id !== p.id);
+          for (const sessId in state.meta.staffingPlan) {
+            for (const dow in state.meta.staffingPlan[sessId]) {
+              delete state.meta.staffingPlan[sessId][dow][p.id];
+            }
+          }
+          regenerateCurSlots();
+          persist(); render(); toast("削除しました", "success");
+        } }, "削除"),
+    ]));
+    posList.appendChild(row);
+  });
+  posCard.appendChild(posList);
+  wrap.appendChild(posCard);
+
+  // Sessions
+  const sessCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  sessCard.appendChild(el("div", { class: "flex items-center justify-between" }, [
+    el("div", { class: "font-semibold" }, "4. 営業セッション（時間帯）"),
+    el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
+      onclick: () => editSessionDialog() }, "＋ 追加"),
+  ]));
+  const sessList = el("div", { class: "space-y-2" });
+  state.meta.sessions.forEach(s => {
+    const row = el("div", { class: "flex items-center gap-2 bg-slate-50 rounded-md p-2 text-sm flex-wrap" });
+    row.innerHTML = `
+      <span class="text-lg">${s.icon || ""}</span>
+      <span class="font-medium">${escapeHtml(s.label)}</span>
+      <span class="text-xs text-slate-500 font-mono">${escapeHtml(s.id)}</span>
+      <span class="text-xs text-slate-600">${s.startTime}〜${s.endTime}</span>`;
+    row.appendChild(el("div", { class: "ml-auto flex gap-2" }, [
+      el("button", { class: "text-xs text-brand-600 hover:underline",
+        onclick: () => editSessionDialog(s) }, "編集"),
+      el("button", { class: "text-xs text-red-600 hover:underline",
+        onclick: () => {
+          if (!confirm(`${s.label} を削除しますか？`)) return;
+          state.meta.sessions = state.meta.sessions.filter(x => x.id !== s.id);
+          delete state.meta.staffingPlan[s.id];
+          regenerateCurSlots();
+          persist(); render(); toast("削除しました", "success");
+        } }, "削除"),
+    ]));
+    sessList.appendChild(row);
+  });
+  sessCard.appendChild(sessList);
+  wrap.appendChild(sessCard);
+
+  // Staffing matrix
+  const matrixCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const matrixHeader = el("div", { class: "font-semibold" });
+  matrixHeader.innerHTML = `5. 必要人数マトリクス${helpIcon("staffing-matrix")}`;
+  matrixCard.appendChild(matrixHeader);
+  matrixCard.appendChild(el("div", { class: "text-xs text-slate-500" },
+    "セルに必要人数を入力。0で枠なし。新規作成週には自動適用。既存週には『今の週に再適用』で反映。"));
+
+  for (const sess of state.meta.sessions) {
+    const sessSection = el("div", { class: "border border-slate-200 rounded-md p-3 space-y-2" });
+    sessSection.appendChild(el("div", { class: "font-semibold text-sm flex items-center gap-2" }, [
+      el("span", {}, sess.icon || ""),
+      el("span", {}, `${sess.label} (${sess.startTime}〜${sess.endTime})`),
+    ]));
+    const tbl = el("table", { class: "w-full text-xs" });
+    let headHtml = `<thead><tr><th class="text-left p-1">ポジション</th>`;
+    for (let d = 1; d <= 7; d++) {
+      const dow = d === 7 ? 0 : d;
+      const dowColor = dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "";
+      headHtml += `<th class="p-1 text-center ${dowColor}">${DAY_LABELS[dow]}</th>`;
+    }
+    headHtml += `</tr></thead><tbody>`;
+    let bodyHtml = "";
+    for (const pos of state.meta.positions) {
+      bodyHtml += `<tr class="border-t border-slate-100"><td class="p-1">${posBadge(pos.id)}</td>`;
+      for (let d = 1; d <= 7; d++) {
+        const dow = d === 7 ? 0 : d;
+        const cur = state.meta.staffingPlan[sess.id]?.[dow]?.[pos.id] || 0;
+        bodyHtml += `<td class="p-1 text-center"><input type="number" min="0" class="w-12 border rounded px-1 py-0.5 text-center"
+          data-mat-sess="${sess.id}" data-mat-dow="${dow}" data-mat-pos="${pos.id}" value="${cur}"></td>`;
+      }
+      bodyHtml += `</tr>`;
+    }
+    tbl.innerHTML = headHtml + bodyHtml + `</tbody>`;
+    sessSection.appendChild(tbl);
+    matrixCard.appendChild(sessSection);
+  }
+  matrixCard.appendChild(el("div", { class: "flex gap-2 flex-wrap" }, [
+    el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-4 py-1.5",
+      onclick: () => {
+        $$("input[data-mat-sess]").forEach(inp => {
+          const ses = inp.dataset.matSess, dow = inp.dataset.matDow, pos = inp.dataset.matPos;
+          state.meta.staffingPlan[ses] = state.meta.staffingPlan[ses] || {};
+          state.meta.staffingPlan[ses][dow] = state.meta.staffingPlan[ses][dow] || {};
+          state.meta.staffingPlan[ses][dow][pos] = Number(inp.value) || 0;
+        });
+        persist(); toast("計画を保存（新規作成週に自動適用）", "success");
+      } }, "💾 計画を保存"),
+    el("button", { class: "text-sm border border-brand-600 text-brand-600 rounded-md px-4 py-1.5",
+      onclick: () => {
+        if (curStatus() === "published") return toast("確定済の週には再適用できません", "error");
+        regenerateCurSlots();
+        persist(); render(); toast("今の週に再適用しました", "success");
+      } }, "↻ 今の週に再適用"),
+  ]));
+  wrap.appendChild(matrixCard);
+
+  // Labor rules
+  const laborCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const laborHeader = el("div", { class: "font-semibold" });
+  laborHeader.innerHTML = `6. 労務ルール（労基順守）${helpIcon("labor-rules")}`;
+  laborCard.appendChild(laborHeader);
+  laborCard.appendChild(el("div", { class: "text-xs text-slate-500" },
+    "ここで設定した上限を AI 自動生成・代打推薦が hard constraint として守ります（個人契約とのMINを採用）"));
+  const lr = state.meta.laborRules;
+  const lrGrid = el("div", { class: "grid grid-cols-2 md:grid-cols-4 gap-3 text-sm" });
+  lrGrid.innerHTML = `
+    <label class="block"><span class="text-slate-600">週最大労働時間</span>
+      <input id="lr-week" type="number" class="mt-1 w-full border rounded-md px-3 py-2" value="${lr.maxHoursPerWeek}"></label>
+    <label class="block"><span class="text-slate-600">1日最大労働時間</span>
+      <input id="lr-day" type="number" class="mt-1 w-full border rounded-md px-3 py-2" value="${lr.maxHoursPerDay}"></label>
+    <label class="block"><span class="text-slate-600">連勤上限(日)</span>
+      <input id="lr-cons" type="number" class="mt-1 w-full border rounded-md px-3 py-2" value="${lr.maxConsecutiveDays}"></label>
+    <label class="block"><span class="text-slate-600">最低週休(日)</span>
+      <input id="lr-rest" type="number" class="mt-1 w-full border rounded-md px-3 py-2" value="${lr.minRestDaysPerWeek}"></label>`;
+  laborCard.appendChild(lrGrid);
+  laborCard.appendChild(el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
+    onclick: () => {
+      state.meta.laborRules = {
+        maxHoursPerWeek: Number($("#lr-week").value) || 40,
+        maxHoursPerDay: Number($("#lr-day").value) || 8,
+        maxConsecutiveDays: Number($("#lr-cons").value) || 5,
+        minRestDaysPerWeek: Number($("#lr-rest").value) || 1,
+      };
+      persist(); render(); toast("労務ルールを保存（次回 AI 生成から適用）", "success");
+    } }, "保存"));
+  wrap.appendChild(laborCard);
+
+  // Algorithm weights
+  const algoCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const algoHeader = el("div", { class: "flex items-center justify-between flex-wrap gap-2" });
+  const algoTitle = el("div", { class: "font-semibold" });
+  algoTitle.innerHTML = `7. アルゴリズム重み調整${helpIcon("algo-weights")}`;
+  algoHeader.appendChild(algoTitle);
+  algoHeader.appendChild(el("a", { class: "text-xs text-brand-600 underline", href: "/docs/algorithm.md", target: "_blank" }, "📖 仕様書"));
+  algoCard.appendChild(algoHeader);
+  algoCard.appendChild(el("div", { class: "text-xs text-slate-500" },
+    "各スコア要素の重みを 0〜100 で設定。合計は自動正規化。標準は希望充足を最重視。"));
+
+  const aw = state.meta.algorithmWeights;
+  const FACTORS = [
+    { id: "preference",    label: "希望充足",       desc: "スタッフの提出希望と一致" },
+    { id: "positionMatch", label: "ポジション適合", desc: "本職に配置（兼任より優先）" },
+    { id: "fairness",      label: "公平性",         desc: "未充足時間が多い人を優先" },
+    { id: "cost",          label: "コスト",         desc: "時給が低い人を優先（人件費抑制）" },
+    { id: "skill",         label: "スキル",         desc: "高スキル人を優先" },
+  ];
+  const grid = el("div", { class: "space-y-2" });
+  FACTORS.forEach(f => {
+    const row = el("div", { class: "flex items-center gap-3 text-sm" });
+    row.innerHTML = `
+      <div class="w-32">
+        <div class="font-medium">${f.label}</div>
+        <div class="text-[10px] text-slate-500">${f.desc}</div>
+      </div>
+      <input type="range" min="0" max="100" value="${Math.round((aw[f.id]||0)*100)}"
+        data-aw="${f.id}" class="flex-1">
+      <span class="text-xs w-12 text-right" data-awval="${f.id}">${Math.round((aw[f.id]||0)*100)}</span>
+    `;
+    grid.appendChild(row);
+  });
+  algoCard.appendChild(grid);
+
+  // 多重スタート
+  const rsRow = el("div", { class: "flex items-center gap-3 text-sm pt-2 border-t border-slate-100" });
+  rsRow.innerHTML = `
+    <div class="w-32">
+      <div class="font-medium">試行回数</div>
+      <div class="text-[10px] text-slate-500">多いほど高品質（遅くなる）</div>
+    </div>
+    <input type="range" id="aw-randomStarts" min="1" max="20" value="${state.meta.randomStarts || 5}" class="flex-1">
+    <span class="text-xs w-12 text-right" id="aw-randomStarts-val">${state.meta.randomStarts || 5}</span>
+  `;
+  algoCard.appendChild(rsRow);
+
+  algoCard.appendChild(el("div", { class: "flex gap-2 pt-2" }, [
+    el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-4 py-1.5", onclick: () => {
+      const newWeights = {};
+      FACTORS.forEach(f => {
+        const inp = $(`input[data-aw="${f.id}"]`);
+        newWeights[f.id] = Number(inp.value) / 100;
+      });
+      // 正規化
+      const sum = Object.values(newWeights).reduce((s, v) => s + v, 0);
+      if (sum > 0) {
+        for (const k of Object.keys(newWeights)) newWeights[k] /= sum;
+      }
+      state.meta.algorithmWeights = newWeights;
+      state.meta.randomStarts = Number($("#aw-randomStarts").value) || 5;
+      persist(); render(); toast("重みを保存（次回 AI 生成から適用）", "success");
+    } }, "💾 保存"),
+    el("button", { class: "text-sm border border-slate-300 rounded-md px-4 py-1.5", onclick: () => {
+      state.meta.algorithmWeights = { preference: 0.40, positionMatch: 0.15, fairness: 0.20, cost: 0.15, skill: 0.10 };
+      state.meta.randomStarts = 5;
+      persist(); render(); toast("既定値に戻しました", "success");
+    } }, "↻ 既定値に戻す"),
+  ]));
+
+  // リアルタイムスライダー値表示
+  setTimeout(() => {
+    FACTORS.forEach(f => {
+      const inp = $(`input[data-aw="${f.id}"]`);
+      const out = $(`[data-awval="${f.id}"]`);
+      if (inp && out) inp.addEventListener("input", () => { out.textContent = inp.value; });
+    });
+    const rs = $("#aw-randomStarts"), rsv = $("#aw-randomStarts-val");
+    if (rs && rsv) rs.addEventListener("input", () => { rsv.textContent = rs.value; });
+  }, 50);
+
+  wrap.appendChild(algoCard);
+
+  // Staff Messages inbox
+  const msgCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const msgHeader = el("div", { class: "flex items-center justify-between" });
+  msgHeader.innerHTML = `<div class="font-semibold">📥 スタッフからの連絡</div>`;
+  msgHeader.appendChild(el("button", { id: "refreshMsgBtn", class: "text-xs text-brand-600 underline", onclick: () => loadStaffMessages() }, "↻ 更新"));
+  msgCard.appendChild(msgHeader);
+  const msgListEl = el("div", { id: "staffMsgList", class: "space-y-2 max-h-72 overflow-y-auto" });
+  msgListEl.innerHTML = '<div class="text-xs text-slate-500">読み込み中...</div>';
+  msgCard.appendChild(msgListEl);
+  wrap.appendChild(msgCard);
+
+  setTimeout(loadStaffMessages, 100);
+
+  // Backup
+  const backupCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  backupCard.appendChild(el("div", { class: "font-semibold" }, "8. データバックアップ"));
+  backupCard.appendChild(el("div", { class: "text-xs text-slate-500" },
+    "全データ（店舗・スタッフ・全週・トークン）を JSON でエクスポート/インポートできます。定期的にダウンロードして保管推奨。"));
+  backupCard.appendChild(el("div", { class: "flex gap-2 flex-wrap" }, [
+    el("button", { class: "text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-md px-3 py-1.5",
+      onclick: downloadBackup }, "📥 JSONでダウンロード"),
+    el("label", { class: "text-sm bg-amber-600 hover:bg-amber-700 text-white rounded-md px-3 py-1.5 cursor-pointer" }, [
+      el("span", {}, "📤 JSONから復元"),
+      el("input", { type: "file", accept: "application/json,.json", class: "hidden", onchange: handleRestoreFile }),
+    ]),
+    el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5",
+      onclick: openSnapshotsDialog }, "🕒 過去スナップショット"),
+  ]));
+  backupCard.appendChild(el("div", { class: "text-xs text-slate-500 pt-2 border-t border-slate-100" },
+    "💡 サーバ側で毎日 03:00 (JST) に自動スナップショット取得（過去 30 日分保持）。「過去スナップショット」ボタンから任意の日に巻き戻せます。"));
+  wrap.appendChild(backupCard);
+
+  // Danger
+  const danger = el("div", { class: "bg-red-50 border border-red-200 rounded-xl p-4 space-y-2" });
+  danger.appendChild(el("div", { class: "font-semibold text-red-900" }, "⚠️ 危険操作"));
+  danger.appendChild(el("button", { class: "text-sm bg-red-600 hover:bg-red-700 text-white rounded-md px-3 py-1.5",
+    onclick: async () => {
+      if (!confirm("全データをリセットしてサンプルに戻します。よろしいですか？")) return;
+      state = await resetState(); render(); toast("リセット完了", "success");
+    } }, "全データリセット"));
+  wrap.appendChild(danger);
+
+  return wrap;
+}
+
+async function downloadBackup() {
+  try {
+    const data = await window.ShiftyAPI.backup();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const today = new Date().toISOString().slice(0, 10);
+    const a = el("a", { href: url, download: `shifty-backup-${today}.json` });
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast("バックアップをダウンロードしました", "success");
+  } catch (e) { toast("バックアップ失敗: " + e.message, "error"); }
+}
+
+async function loadStaffMessages() {
+  const listEl = $("#staffMsgList");
+  if (!listEl) return;
+  try {
+    const msgs = await window.ShiftyAPI.listStaffMessages();
+    listEl.innerHTML = "";
+    if (!msgs.length) {
+      listEl.innerHTML = '<div class="text-xs text-slate-500 text-center py-3">受信メッセージはありません</div>';
+      return;
+    }
+    const KIND_LABEL = { general: "💬 連絡", change_request: "📅 変更希望", question: "❓ 質問", report: "📢 報告" };
+    msgs.forEach(m => {
+      const row = el("div", { class: "bg-slate-50 rounded-md p-3 text-sm" });
+      const at = m.createdAt ? new Date(m.createdAt).toLocaleString("ja-JP") : "?";
+      row.innerHTML = `
+        <div class="flex items-center justify-between mb-1">
+          <span class="font-semibold">${escapeHtml(m.staffName || m.staffId)}</span>
+          <span class="text-xs text-slate-500">${at}</span>
+        </div>
+        <div class="text-xs text-amber-700 mb-1">${KIND_LABEL[m.kind] || m.kind}</div>
+        <div class="text-sm text-slate-700 whitespace-pre-wrap">${escapeHtml(m.message || "")}</div>
+      `;
+      listEl.appendChild(row);
+    });
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-xs text-red-600">取得失敗: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function openSnapshotsDialog() {
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🕒 過去スナップショット"));
+  body.appendChild(el("p", { class: "text-xs text-slate-500" },
+    "毎日 03:00 (JST) に自動取得。クリックで該当日の状態に巻き戻ります（現在のデータは上書きされます）。"));
+  const list = el("div", { class: "space-y-1.5 max-h-72 overflow-y-auto" });
+  body.appendChild(list);
+  body.appendChild(el("div", { class: "flex justify-end" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+  ]));
+  modal(body);
+  try {
+    const snapshots = await window.ShiftyAPI.listSnapshots();
+    if (!snapshots.length) {
+      list.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" },
+        "スナップショットがまだありません。毎日 03:00 から取得開始されます。"));
+      return;
+    }
+    snapshots.forEach(snap => {
+      const row = el("div", { class: "flex items-center justify-between bg-slate-50 rounded-md p-2 text-sm" });
+      row.innerHTML = `
+        <div>
+          <span class="font-mono">${snap.date}</span>
+          ${snap.createdAt ? `<span class="text-xs text-slate-500 ml-2">${snap.createdAt.slice(11, 19)} UTC</span>` : ""}
+        </div>`;
+      const restoreBtn = el("button", {
+        class: "text-xs bg-amber-600 text-white rounded px-3 py-1.5",
+        onclick: async () => {
+          if (!confirm(`${snap.date} の状態に巻き戻します。現在のデータは上書きされます。よろしいですか？`)) return;
+          try {
+            await window.ShiftyAPI.restoreSnapshot(snap.date);
+            state = await loadState();
+            closeModal(); render(); toast(`✅ ${snap.date} の状態に復元しました`, "success");
+          } catch (e) {
+            toast("復元失敗: " + e.message, "error");
+          }
+        },
+      }, "復元");
+      row.appendChild(restoreBtn);
+      list.appendChild(row);
+    });
+  } catch (e) {
+    list.appendChild(el("div", { class: "text-sm text-red-600" }, "取得失敗: " + e.message));
+  }
+}
+
+async function handleRestoreFile(ev) {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  if (!confirm(`「${file.name}」から全データを復元します。現在のデータは上書きされます。続行しますか？`)) {
+    ev.target.value = ""; return;
+  }
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    await window.ShiftyAPI.restore(data);
+    state = await loadState();
+    render();
+    toast("復元しました", "success");
+  } catch (e) { toast("復元失敗: " + e.message, "error"); }
+  ev.target.value = "";
+}
+
+function editPositionDialog(p = null) {
+  const isNew = !p;
+  const data = p ? { ...p } : { id: "", label: "", color: "#64748b" };
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.innerHTML = `
+    <h3 class="font-bold text-lg">${isNew ? "ポジション追加" : "ポジション編集"}</h3>
+    <label class="block text-sm"><span class="text-slate-600">ID（半角英数。例: hall）</span>
+      <input id="pos-id" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.id)}" ${isNew ? "" : "readonly"}></label>
+    <label class="block text-sm"><span class="text-slate-600">ラベル（例: ホール）</span>
+      <input id="pos-label" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.label)}"></label>
+    <label class="block text-sm"><span class="text-slate-600">色</span>
+      <input id="pos-color" type="color" class="mt-1 w-20 h-10 border rounded-md" value="${data.color}"></label>`;
+  body.appendChild(el("div", { class: "flex justify-end gap-2" }, [
+    el("button", { class: "px-3 py-1.5 text-sm", onclick: closeModal }, "キャンセル"),
+    el("button", { class: "px-4 py-1.5 text-sm bg-brand-600 text-white rounded-md", onclick: () => {
+      const newP = { id: $("#pos-id").value.trim(), label: $("#pos-label").value.trim(), color: $("#pos-color").value };
+      if (!newP.id || !newP.label) { toast("ID とラベルは必須", "error"); return; }
+      if (isNew && state.meta.positions.some(x => x.id === newP.id)) { toast("ID 重複", "error"); return; }
+      if (isNew) {
+        state.meta.positions.push(newP);
+        for (const ses in state.meta.staffingPlan) {
+          for (const dow in state.meta.staffingPlan[ses]) {
+            state.meta.staffingPlan[ses][dow][newP.id] = 0;
+          }
+        }
+      } else {
+        state.meta.positions = state.meta.positions.map(x => x.id === newP.id ? newP : x);
+      }
+      regenerateCurSlots();
+      persist(); closeModal(); render(); toast(isNew ? "追加しました" : "更新しました", "success");
+    } }, "保存"),
+  ]));
+  modal(body);
+}
+
+function editSessionDialog(s = null) {
+  const isNew = !s;
+  const data = s ? { ...s } : { id: "", label: "", startTime: "11:00", endTime: "15:00", icon: "" };
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.innerHTML = `
+    <h3 class="font-bold text-lg">${isNew ? "セッション追加" : "セッション編集"}</h3>
+    <div class="grid grid-cols-2 gap-3 text-sm">
+      <label class="block"><span class="text-slate-600">ID（例: lunch）</span>
+        <input id="sess-id" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.id)}" ${isNew ? "" : "readonly"}></label>
+      <label class="block"><span class="text-slate-600">ラベル</span>
+        <input id="sess-label" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.label)}"></label>
+      <label class="block"><span class="text-slate-600">開始時刻</span>
+        <input id="sess-start" type="time" class="mt-1 w-full border rounded-md px-3 py-2" value="${data.startTime}"></label>
+      <label class="block"><span class="text-slate-600">終了時刻</span>
+        <input id="sess-end" type="time" class="mt-1 w-full border rounded-md px-3 py-2" value="${data.endTime}"></label>
+      <label class="block col-span-2"><span class="text-slate-600">アイコン（絵文字1文字）</span>
+        <input id="sess-icon" class="mt-1 w-20 border rounded-md px-3 py-2" value="${escapeAttr(data.icon)}"></label>
+    </div>`;
+  body.appendChild(el("div", { class: "flex justify-end gap-2" }, [
+    el("button", { class: "px-3 py-1.5 text-sm", onclick: closeModal }, "キャンセル"),
+    el("button", { class: "px-4 py-1.5 text-sm bg-brand-600 text-white rounded-md", onclick: () => {
+      const newS = {
+        id: $("#sess-id").value.trim(),
+        label: $("#sess-label").value.trim(),
+        startTime: $("#sess-start").value,
+        endTime: $("#sess-end").value,
+        icon: $("#sess-icon").value,
+      };
+      if (!newS.id || !newS.label) { toast("ID とラベルは必須", "error"); return; }
+      if (isNew && state.meta.sessions.some(x => x.id === newS.id)) { toast("ID 重複", "error"); return; }
+      if (isNew) {
+        state.meta.sessions.push(newS);
+        state.meta.staffingPlan[newS.id] = {};
+        for (let d = 0; d < 7; d++) {
+          state.meta.staffingPlan[newS.id][d] = Object.fromEntries(state.meta.positions.map(p => [p.id, 0]));
+        }
+      } else {
+        state.meta.sessions = state.meta.sessions.map(x => x.id === newS.id ? newS : x);
+      }
+      regenerateCurSlots();
+      persist(); closeModal(); render(); toast(isNew ? "追加しました" : "更新しました", "success");
+    } }, "保存"),
+  ]));
+  modal(body);
+}
+
+// ===== Auth boot =====
+function showAuthOverlay(mode) {
+  $("#authOverlay").classList.remove("hidden");
+  $("#authSetup").classList.toggle("hidden", mode !== "setup");
+  $("#authLogin").classList.toggle("hidden", mode !== "login");
+  setTimeout(() => {
+    if (mode === "setup") $("#setupPass1").focus();
+    else $("#loginPass").focus();
+  }, 100);
+}
+function hideAuthOverlay() {
+  $("#authOverlay").classList.add("hidden");
+}
+
+window.onAuthRequired = () => showAuthOverlay("login");
+
+async function bootApp() {
+  // Demo mode: skip auth entirely
+  if (window.__SHIFTY_DEMO_MODE__) {
+    hideAuthOverlay();
+    showDemoBanner();
+    await loadAndRender();
+    return;
+  }
+  // Auth status check
+  let status;
+  try {
+    status = await window.ShiftyAPI.authStatus();
+  } catch (e) {
+    $("#main").innerHTML = `<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-900">サーバ接続失敗: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  if (status.setupRequired) { showAuthOverlay("setup"); return; }
+  if (!status.authenticated) { showAuthOverlay("login"); return; }
+  hideAuthOverlay();
+  await loadAndRender();
+}
+
+function showDemoBanner() {
+  const existing = document.getElementById("demoBanner");
+  if (existing) return;
+  const banner = el("div", {
+    id: "demoBanner",
+    class: "bg-amber-100 border-b border-amber-300 text-amber-900 text-sm py-2 px-4 text-center",
+  });
+  banner.innerHTML = `
+    📌 <strong>デモ環境です</strong> — データはこのブラウザにのみ保存され、リロードでサンプルに戻ります。
+    <a href="/" class="underline ml-2 font-semibold">本番版を見る</a> /
+    <a href="/#contact" class="underline font-semibold">14日無料トライアル</a>
+  `;
+  document.body.insertBefore(banner, document.body.firstChild);
+}
+
+async function loadAndRender() {
+  try {
+    state = await loadState();
+    setTab("dashboard");
+    if (!state.meta.onboardingCompleted && !window.__SHIFTY_DEMO_MODE__) {
+      setTimeout(showOnboarding, 500);
+    }
+  } catch (e) {
+    if (String(e.message).includes("401")) { showAuthOverlay("login"); return; }
+    $("#main").innerHTML = `<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-900">読み込み失敗: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// ===== Onboarding wizard =====
+function showOnboarding() {
+  let step = 0;
+  const STEPS = [
+    {
+      title: "👋 Shifty へようこそ",
+      desc: "30 分で初期セットアップが完了します。<br>順番にご案内しますので、わからなければ「スキップ」もOKです。",
+      content() {
+        return el("div", { class: "text-sm text-slate-600 space-y-2" }, [
+          el("p", {}, "Shifty は飲食店向けの AI シフト自動作成サービスです。"),
+          el("ul", { class: "list-disc pl-5 space-y-1" }, [
+            el("li", {}, "店舗・スタッフ・営業時間を設定"),
+            el("li", {}, "スタッフから希望をスマホで収集"),
+            el("li", {}, "AI が最適なシフトを 5 秒で生成"),
+            el("li", {}, "確定 → スタッフへ通知"),
+          ]),
+          el("p", { class: "bg-blue-50 border border-blue-200 rounded p-3 text-blue-900" },
+            "サンプルデータが入っているので、すぐに触って試せます。"),
+        ]);
+      },
+    },
+    {
+      title: "🏪 店舗名を設定",
+      desc: "ダッシュボードヘッダーに表示されます。後で設定タブから変更できます。",
+      content() {
+        return el("input", {
+          id: "ob-name", class: "w-full border rounded-md px-3 py-2", placeholder: "例: いざかや 縁",
+          value: state.meta.restaurantName === "いざかや 縁" ? "" : state.meta.restaurantName,
+        });
+      },
+      onNext() {
+        const v = $("#ob-name").value.trim();
+        if (v) state.meta.restaurantName = v;
+      },
+    },
+    {
+      title: "💴 週の予算",
+      desc: "週の人件費予算を設定。予算超過時に警告されます。",
+      content() {
+        return el("div", { class: "space-y-2" }, [
+          el("input", {
+            id: "ob-budget", type: "number", class: "w-full border rounded-md px-3 py-2",
+            value: state.meta.weeklyBudget,
+          }),
+          el("div", { class: "text-xs text-slate-500" }, "目安: スタッフ 10名で月¥1,200,000 → 週¥300,000 程度"),
+        ]);
+      },
+      onNext() {
+        const v = Number($("#ob-budget").value);
+        if (v > 0) state.meta.weeklyBudget = v;
+      },
+    },
+    {
+      title: "👥 スタッフ登録",
+      desc: "サンプルで 10 名のスタッフが入っています。実際のスタッフに置き換える場合は次のステップ後にスタッフタブから編集してください。",
+      content() {
+        return el("div", { class: "text-sm space-y-3" }, [
+          el("div", { class: "bg-slate-50 rounded p-3" }, [
+            el("div", { class: "font-semibold mb-1" }, `現在のスタッフ: ${state.staff.length}名`),
+            el("div", { class: "text-xs text-slate-600" }, state.staff.slice(0, 5).map(s => s.name).join(" / ") + (state.staff.length > 5 ? ` 他${state.staff.length - 5}名` : "")),
+          ]),
+          el("div", { class: "text-xs text-slate-500" },
+            "💡 サンプルを使ってまず動作を確認 → 後でスタッフタブの「データリセット」やCSV取込で実データに切替できます。"),
+        ]);
+      },
+    },
+    {
+      title: "📝 希望収集の方法",
+      desc: "スタッフはスマホで希望を提出します。",
+      content() {
+        return el("div", { class: "text-sm space-y-3" }, [
+          el("ol", { class: "list-decimal pl-5 space-y-2" }, [
+            el("li", {}, "スタッフタブで「🔗 全員のリンク」をクリック"),
+            el("li", {}, "クリップボードに各スタッフの URL がコピーされます"),
+            el("li", {}, "LINE グループに貼り付けて配布"),
+            el("li", {}, "スタッフは URL をタップ → スマホでタップ操作のみで希望提出"),
+          ]),
+          el("div", { class: "bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900" },
+            "💡 スタッフは登録不要・アプリインストール不要。年配の方も使えます。"),
+        ]);
+      },
+    },
+    {
+      title: "🎉 セットアップ完了",
+      desc: "これで使い始められます！",
+      content() {
+        return el("div", { class: "text-sm space-y-3" }, [
+          el("p", {}, "シフト編成タブの「🤖 AI 自動生成」ボタンで、サンプルスタッフ・サンプル希望からシフトが自動生成されます。"),
+          el("ul", { class: "list-disc pl-5 space-y-1 text-slate-600" }, [
+            el("li", {}, "結果を確認 → 「確定する」"),
+            el("li", {}, "「💬 LINE通知文」でテンプレ生成"),
+            el("li", {}, "「📧 メール一斉送信」で自動配信"),
+          ]),
+          el("p", { class: "text-xs text-slate-500 pt-2 border-t" },
+            "わからないことがあれば右上の「ヘルプ」をクリック。"),
+        ]);
+      },
+    },
+  ];
+
+  function renderStep() {
+    const s = STEPS[step];
+    const body = el("div", { class: "p-6" });
+    body.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
+      el("h3", { class: "font-bold text-lg" }, s.title),
+      el("span", { class: "text-xs text-slate-500" }, `Step ${step + 1} / ${STEPS.length}`),
+    ]));
+    // progress bar
+    const pb = el("div", { class: "h-1.5 bg-slate-200 rounded-full mb-4 overflow-hidden" });
+    pb.innerHTML = `<div style="width:${((step + 1) / STEPS.length) * 100}%;background:#4f46e5;height:100%"></div>`;
+    body.appendChild(pb);
+    body.appendChild(el("p", { class: "text-sm text-slate-600 mb-4", html: s.desc }));
+    body.appendChild(s.content());
+    body.appendChild(el("div", { class: "flex justify-between mt-6 pt-4 border-t" }, [
+      el("div", {}, [
+        step > 0 ? el("button", {
+          class: "text-sm text-slate-500 hover:text-slate-700 px-3 py-1.5",
+          onclick: () => { step--; renderStep(); },
+        }, "← 戻る") : null,
+      ]),
+      el("div", { class: "flex gap-2" }, [
+        el("button", {
+          class: "text-sm text-slate-500 hover:text-slate-700 px-3 py-1.5",
+          onclick: () => {
+            state.meta.onboardingCompleted = true;
+            persist(); closeModal();
+          },
+        }, "スキップ"),
+        el("button", {
+          class: "text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md px-4 py-1.5 font-semibold",
+          onclick: () => {
+            if (s.onNext) s.onNext();
+            if (step < STEPS.length - 1) {
+              step++;
+              renderStep();
+            } else {
+              state.meta.onboardingCompleted = true;
+              persist(); closeModal(); render();
+              toast("セットアップ完了！シフト編成タブで AI 生成を試してみましょう", "success");
+            }
+          },
+        }, step === STEPS.length - 1 ? "完了 →" : "次へ →"),
+      ]),
+    ]));
+    modal(body);
+  }
+  renderStep();
+}
+
+// ===== Boot =====
+document.addEventListener("DOMContentLoaded", () => {
+  // Tab buttons
+  $$(".tab-btn").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
+
+  // Week nav
+  $("#prevWeekBtn").addEventListener("click", () => goToWeek(addDays(state.meta.currentWeekStart, -7)));
+  $("#nextWeekBtn").addEventListener("click", () => goToWeek(addDays(state.meta.currentWeekStart, 7)));
+  $("#weekJumpBtn").addEventListener("click", () => {
+    const inp = prompt("週の開始日（月曜）を YYYY-MM-DD 形式で入力", state.meta.currentWeekStart);
+    if (inp && /^\d{4}-\d{2}-\d{2}$/.test(inp)) goToWeek(inp);
+    else if (inp) toast("形式が不正", "error");
+  });
+
+  // Logout
+  $("#logoutBtn").addEventListener("click", async () => {
+    if (!confirm("ログアウトしますか？")) return;
+    try { await window.ShiftyAPI.authLogout(); } catch (_) {}
+    state = null;
+    showAuthOverlay("login");
+    toast("ログアウトしました", "success");
+  });
+
+  // Auth handlers
+  $("#setupBtn").addEventListener("click", async () => {
+    const p1 = $("#setupPass1").value;
+    const p2 = $("#setupPass2").value;
+    const err = $("#setupErr");
+    err.classList.add("hidden");
+    if (p1.length < 6) { err.textContent = "6文字以上で入力してください"; err.classList.remove("hidden"); return; }
+    if (p1 !== p2) { err.textContent = "パスワードが一致しません"; err.classList.remove("hidden"); return; }
+    try {
+      await window.ShiftyAPI.authSetup(p1);
+      hideAuthOverlay();
+      await loadAndRender();
+      toast("セットアップ完了", "success");
+    } catch (e) {
+      err.textContent = "セットアップ失敗: " + e.message;
+      err.classList.remove("hidden");
+    }
+  });
+
+  $("#loginBtn").addEventListener("click", async () => {
+    const p = $("#loginPass").value;
+    const err = $("#loginErr");
+    err.classList.add("hidden");
+    try {
+      await window.ShiftyAPI.authLogin(p);
+      $("#loginPass").value = "";
+      hideAuthOverlay();
+      await loadAndRender();
+      toast("ログインしました", "success");
+    } catch (e) {
+      err.textContent = e.message.includes("401") ? "パスワードが違います" : "ログイン失敗";
+      err.classList.remove("hidden");
+    }
+  });
+  $("#loginPass").addEventListener("keydown", e => { if (e.key === "Enter") $("#loginBtn").click(); });
+  $("#setupPass2").addEventListener("keydown", e => { if (e.key === "Enter") $("#setupBtn").click(); });
+
+  bootApp();
+});
+
+})();
