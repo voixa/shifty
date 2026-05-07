@@ -2544,9 +2544,50 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#prevWeekBtn").addEventListener("click", () => goToWeek(addDays(state.meta.currentWeekStart, -7)));
   $("#nextWeekBtn").addEventListener("click", () => goToWeek(addDays(state.meta.currentWeekStart, 7)));
   $("#weekJumpBtn").addEventListener("click", () => {
-    const inp = prompt("週の開始日（月曜）を YYYY-MM-DD 形式で入力", state.meta.currentWeekStart);
-    if (inp && /^\d{4}-\d{2}-\d{2}$/.test(inp)) goToWeek(inp);
-    else if (inp) toast("形式が不正", "error");
+    const body = el("div", { class: "p-6" });
+    body.appendChild(el("h3", { class: "font-bold text-lg mb-3" }, "週ジャンプ"));
+    body.appendChild(el("p", { class: "text-sm text-slate-600 mb-3" }, "ジャンプ先の日付を選択（月曜にスナップされます）"));
+    const today = new Date();
+    const minStr = (() => {
+      const d = new Date(today); d.setMonth(d.getMonth() - 6);
+      return fmt(d);
+    })();
+    const maxStr = (() => {
+      const d = new Date(today); d.setMonth(d.getMonth() + 12);
+      return fmt(d);
+    })();
+    function fmt(d) {
+      const y = d.getFullYear(); const m = String(d.getMonth()+1).padStart(2,"0"); const dd = String(d.getDate()).padStart(2,"0");
+      return `${y}-${m}-${dd}`;
+    }
+    const inp = el("input", {
+      type: "date",
+      class: "w-full border rounded-md px-3 py-2 text-base",
+      value: state.meta.currentWeekStart,
+      min: minStr, max: maxStr,
+      "aria-label": "ジャンプ先の日付",
+    });
+    body.appendChild(inp);
+    body.appendChild(el("div", { class: "flex justify-end gap-2 mt-4" }, [
+      el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+      el("button", {
+        class: "px-3 py-1.5 text-sm bg-brand-600 text-white rounded-md font-semibold",
+        onclick: () => {
+          const v = inp.value;
+          if (!v) { toast("日付を選択してください", "error"); return; }
+          // 月曜にスナップ
+          const d = new Date(v);
+          const day = d.getDay();
+          const diff = day === 0 ? -6 : 1 - day;
+          d.setDate(d.getDate() + diff);
+          const monday = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+          closeModal();
+          goToWeek(monday);
+        },
+      }, "ジャンプ →"),
+    ]));
+    modal(body);
+    setTimeout(() => inp.focus(), 50);
   });
 
   // Logout

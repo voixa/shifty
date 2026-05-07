@@ -67,11 +67,11 @@
       </div>
 
       <!-- Week navigator -->
-      <div id="weekNav" class="flex items-center gap-1 text-sm bg-slate-50 rounded-lg p-1">
-        <button id="prevWeekBtn" class="px-2 py-1 hover:bg-white rounded">◀</button>
-        <button id="weekJumpBtn" class="px-3 py-1 hover:bg-white rounded font-medium">—</button>
-        <button id="nextWeekBtn" class="px-2 py-1 hover:bg-white rounded">▶</button>
-        <span id="weekStatusBadge" class="ml-1 text-xs px-2 py-0.5 rounded">—</span>
+      <div id="weekNav" class="flex items-center gap-1 text-sm bg-slate-50 rounded-lg p-1" role="navigation" aria-label="週ナビゲーション">
+        <button id="prevWeekBtn" class="px-2 py-1 hover:bg-white rounded" aria-label="前の週へ" title="前の週へ">◀</button>
+        <button id="weekJumpBtn" class="px-3 py-1 hover:bg-white rounded font-medium" aria-label="週をジャンプ" title="日付選択で週をジャンプ">—</button>
+        <button id="nextWeekBtn" class="px-2 py-1 hover:bg-white rounded" aria-label="次の週へ" title="次の週へ">▶</button>
+        <span id="weekStatusBadge" class="ml-1 text-xs px-2 py-0.5 rounded" aria-live="polite">—</span>
       </div>
 
       <div class="flex items-center gap-2">
@@ -80,14 +80,14 @@
       </div>
     </div>
 
-    <nav class="max-w-7xl mx-auto px-2 overflow-x-auto">
-      <ul class="flex gap-1 text-sm">
-        <li><button data-tab="dashboard"   class="tab-btn px-4 py-2.5 border-b-2 border-transparent">📊 ダッシュボード</button></li>
-        <li><button data-tab="staff"       class="tab-btn px-4 py-2.5 border-b-2 border-transparent">👥 スタッフ</button></li>
-        <li><button data-tab="preferences" class="tab-btn px-4 py-2.5 border-b-2 border-transparent">📝 希望収集</button></li>
-        <li><button data-tab="schedule"    class="tab-btn px-4 py-2.5 border-b-2 border-transparent">📅 シフト編成</button></li>
-        <li><button data-tab="export"      class="tab-btn px-4 py-2.5 border-b-2 border-transparent">📤 エクスポート</button></li>
-        <li><button data-tab="settings"    class="tab-btn px-4 py-2.5 border-b-2 border-transparent">⚙️ 設定</button></li>
+    <nav class="max-w-7xl mx-auto px-2 overflow-x-auto" aria-label="メインタブ">
+      <ul class="flex gap-1 text-sm" role="tablist">
+        <li role="presentation"><button data-tab="dashboard"   class="tab-btn px-4 py-2.5 border-b-2 border-transparent" role="tab" aria-label="ダッシュボード">📊 ダッシュボード</button></li>
+        <li role="presentation"><button data-tab="staff"       class="tab-btn px-4 py-2.5 border-b-2 border-transparent" role="tab" aria-label="スタッフ管理">👥 スタッフ</button></li>
+        <li role="presentation"><button data-tab="preferences" class="tab-btn px-4 py-2.5 border-b-2 border-transparent" role="tab" aria-label="希望収集">📝 希望収集</button></li>
+        <li role="presentation"><button data-tab="schedule"    class="tab-btn px-4 py-2.5 border-b-2 border-transparent" role="tab" aria-label="シフト編成">📅 シフト編成</button></li>
+        <li role="presentation"><button data-tab="export"      class="tab-btn px-4 py-2.5 border-b-2 border-transparent" role="tab" aria-label="エクスポート">📤 エクスポート</button></li>
+        <li role="presentation"><button data-tab="settings"    class="tab-btn px-4 py-2.5 border-b-2 border-transparent" role="tab" aria-label="設定">⚙️ 設定</button></li>
       </ul>
     </nav>
   </header>
