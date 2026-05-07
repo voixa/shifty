@@ -1072,17 +1072,35 @@ function viewSchedule() {
       el("button", { class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50",
         onclick: () => {
           if (curStatus() === "published") { toast("確定済の週はクリアできません。先に「下書きに戻す」してください。", "error"); return; }
-          curWeek().assignments = []; persist(); render(); toast("クリアしました");
+          const n = curAssignments().length;
+          if (n === 0) return;
+          if (!confirm(`今週の AI 生成シフト ${n} 件を全削除しますか？\nこの操作は取り消せません（希望データは残ります）。`)) return;
+          curWeek().assignments = []; persist(); render(); toast(`${n} 件をクリアしました`);
         } }, "クリア"),
       el("button", { class: "text-sm border border-emerald-600 text-emerald-700 rounded-md px-3 py-1.5 hover:bg-emerald-50",
         onclick: copyFromPreviousWeek }, "📋 先週からコピー"),
       el("button", { class: "text-sm border border-purple-600 text-purple-700 rounded-md px-3 py-1.5 hover:bg-purple-50",
         onclick: openTemplateDialog }, "📑 テンプレ"),
+      el("button", {
+        class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50 " + (swapModeActive ? "bg-amber-500 text-white border-amber-500 hover:bg-amber-600" : ""),
+        onclick: toggleSwapMode,
+        title: "タップでスタッフ入替（モバイル対応）",
+      }, swapModeActive ? "🔁 入替モード ON" : "🔁 入替モード"),
       el("button", { class: "text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md px-3 py-1.5",
         onclick: autoGenerate }, "🤖 AI自動生成"),
     ]),
   ]);
   wrap.appendChild(headerRow);
+
+  if (swapModeActive) {
+    wrap.appendChild(el("div", { class: "bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900" }, [
+      el("div", { class: "font-semibold" }, "🔁 入替モード"),
+      el("div", { class: "text-xs mt-1" },
+        swapModeSourceId
+          ? "もう一つのシフトをタップすると入替されます。もう一度同じシフトをタップで解除。"
+          : "入れ替えたい 1 つ目のシフトをタップしてください。"),
+    ]));
+  }
 
   // Publish / unpublish controls
   const pubBox = el("div", {});
@@ -1288,12 +1306,13 @@ function renderCalendar() {
           const s = state.staff.find(x => x.id === a.staffId);
           const cfg = posCfg(pos.id);
           const editable = curStatus() === "draft";
+          const isSwapSource = swapModeActive && swapModeSourceId === a.id;
           const chip = el("div", {
-            class: "assignment-chip" + (editable ? " editable" : ""),
-            draggable: editable ? "true" : "false",
+            class: "assignment-chip" + (editable ? " editable" : "") + (isSwapSource ? " swap-source" : "") + (swapModeActive ? " swap-mode" : ""),
+            draggable: (editable && !swapModeActive) ? "true" : "false",
             "data-assignment-id": a.id,
             style: { borderColor: cfg.color },
-            onclick: () => openAssignmentDetail(a),
+            onclick: () => handleChipTap(a),
             ondragstart: editable ? (e) => handleChipDragStart(e, a) : null,
             ondragover: editable ? (e) => { e.preventDefault(); chip.classList.add("drop-target"); } : null,
             ondragleave: editable ? () => chip.classList.remove("drop-target") : null,
@@ -1366,7 +1385,7 @@ function renderCalendarMobile(days) {
             draggable: editable ? "true" : "false",
             "data-assignment-id": a.id,
             style: { borderColor: cfg.color, padding: "6px 8px" },
-            onclick: () => openAssignmentDetail(a),
+            onclick: () => handleChipTap(a),
             ondragstart: editable ? (e) => handleChipDragStart(e, a) : null,
             ondragover: editable ? (e) => { e.preventDefault(); chip.classList.add("drop-target"); } : null,
             ondragleave: editable ? () => chip.classList.remove("drop-target") : null,
@@ -1564,8 +1583,56 @@ function renderStaffSummary() {
   return card;
 }
 
-// ===== Drag & Drop =====
+// ===== Drag & Drop & Tap-to-swap =====
 let draggedAssignment = null;
+let swapModeActive = false;
+let swapModeSourceId = null;
+
+function toggleSwapMode() {
+  if (curStatus() === "published") {
+    toast("確定済の週は編集不可。先に「下書きに戻す」してください", "error");
+    return;
+  }
+  swapModeActive = !swapModeActive;
+  swapModeSourceId = null;
+  render();
+}
+
+function handleChipTap(a) {
+  if (!swapModeActive) {
+    openAssignmentDetail(a);
+    return;
+  }
+  if (curStatus() === "published") {
+    swapModeActive = false; swapModeSourceId = null;
+    toast("確定済の週は編集不可", "error");
+    render();
+    return;
+  }
+  if (!swapModeSourceId) {
+    swapModeSourceId = a.id;
+    render();
+    toast(`${(state.staff.find(s => s.id === a.staffId) || {}).name || "?"} を選択。次に入替先のシフトをタップ`, "info", 4000);
+    return;
+  }
+  if (swapModeSourceId === a.id) {
+    swapModeSourceId = null;
+    render();
+    return;
+  }
+  const source = curAssignments().find(x => x.id === swapModeSourceId);
+  if (!source) {
+    swapModeSourceId = null; render(); return;
+  }
+  // 既存の swap ロジックを流用
+  draggedAssignment = source;
+  const fakeEvent = { preventDefault: () => {} };
+  handleChipDrop(fakeEvent, a);
+  swapModeSourceId = null;
+  // モードはタップ後 1 ペアで自動オフ。連続入替したい場合は再度ボタン押下
+  swapModeActive = false;
+  render();
+}
 
 function handleChipDragStart(e, a) {
   draggedAssignment = a;
