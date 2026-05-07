@@ -344,14 +344,9 @@
       return a._r - b._r;
     });
 
-    // 配置進行に応じて困難度を動的に再評価（25%, 50%, 75% の節目のみ）
-    const totalCount = instances.length;
-    const resortAt = new Set([
-      Math.floor(totalCount * 0.25),
-      Math.floor(totalCount * 0.5),
-      Math.floor(totalCount * 0.75),
-    ]);
-    let placedCount = 0;
+    // 注: 動的再ソートは実測でカバー率を下げる場合があり採用せず
+    //  (シナリオ C: 89.7% → 86.5%、A/B/D/E は不変)
+    //  代わりに Phase 2 の swap 最適化で局所最適を脱出する
     let pending = instances;
 
     while (pending.length > 0) {
@@ -404,23 +399,14 @@
       state.byStaff[picked.staff.id].push(a);
       state.hours[picked.staff.id] += calcHours(slot.startTime, slot.endTime);
 
-      placedCount++;
-      if (resortAt.has(placedCount) && pending.length > 1) {
-        pending.sort((x, y) => {
-          const xCand = computeDifficulty(x);
-          const yCand = computeDifficulty(y);
-          if (xCand !== yCand) return xCand - yCand;
-          if (x.date !== y.date) return x.date.localeCompare(y.date);
-          if (x.startTime !== y.startTime) return x.startTime.localeCompare(y.startTime);
-          return x._r - y._r;
-        });
-      }
     }
     return state;
   }
 
   // =====================================================================
-  // Phase 2: Optimize（局所交換: スコア改善があれば入替）
+  // Phase 2: Optimize
+  //  Step A: 単方向置換 — 各 assignment を別スタッフに置き換えで改善
+  //  Step B: 2-opt スワップ — 2 つの assignment を相互に入れ替えて両者改善
   // =====================================================================
   function phase2Optimize(state, { staff, preferences, laborRules, weights }) {
     let improved = true;
@@ -431,6 +417,8 @@
     while (improved && rounds < MAX_ROUNDS) {
       improved = false;
       rounds++;
+
+      // ----- Step A: 単方向置換 -----
       for (let i = 0; i < state.assignments.length; i++) {
         const a = state.assignments[i];
         const slotLike = {
@@ -469,6 +457,56 @@
           improved = true;
         }
       }
+
+      // ----- Step B: 2-opt スワップ -----
+      // 計算量を抑えるため、同日のペア + 同一スタッフ集合のペアのみを候補にする
+      // (異日異ポジションのペアは効果が小さく、O(N^2) 全探索は避ける)
+      const SWAP_THRESHOLD = 0.005;
+      const byDate = {};
+      for (const a of state.assignments) {
+        (byDate[a.date] = byDate[a.date] || []).push(a);
+      }
+      for (const date of Object.keys(byDate)) {
+        const dayAss = byDate[date];
+        for (let i = 0; i < dayAss.length; i++) {
+          for (let j = i + 1; j < dayAss.length; j++) {
+            const a = dayAss[i], b = dayAss[j];
+            if (a.staffId === b.staffId) continue;
+            // 両方の状態から自分を抜いた仮想 state
+            const stateMinusBoth = removeAssignmentsVirtual(state, [a, b]);
+            const sa = staff.find((x) => x.id === a.staffId);
+            const sb = staff.find((x) => x.id === b.staffId);
+            if (!sa || !sb) continue;
+            const slotA = { date: a.date, position: a.position, startTime: a.startTime, endTime: a.endTime };
+            const slotB = { date: b.date, position: b.position, startTime: b.startTime, endTime: b.endTime };
+            // sa が slotB に, sb が slotA に入れるか?
+            if (!isEligible(sa, slotB, stateMinusBoth, laborRules)) continue;
+            if (!isEligible(sb, slotA, stateMinusBoth, laborRules)) continue;
+            const newScoreA = scoreCandidate(sb, slotA, stateMinusBoth, preferences, laborRules, weights).score;
+            const newScoreB = scoreCandidate(sa, slotB, stateMinusBoth, preferences, laborRules, weights).score;
+            const oldSum = a.score + b.score;
+            const newSum = newScoreA + newScoreB;
+            if (newSum > oldSum + SWAP_THRESHOLD) {
+              // 入れ替え実行
+              const newA = { ...a, staffId: sb.id, cost: sb.hourlyWage * calcHours(a.startTime, a.endTime), score: newScoreA };
+              const newB = { ...b, staffId: sa.id, cost: sa.hourlyWage * calcHours(b.startTime, b.endTime), score: newScoreB };
+              state.byStaff[a.staffId] = state.byStaff[a.staffId].filter((x) => x.id !== a.id);
+              state.byStaff[b.staffId] = state.byStaff[b.staffId].filter((x) => x.id !== b.id);
+              state.hours[a.staffId] -= calcHours(a.startTime, a.endTime);
+              state.hours[b.staffId] -= calcHours(b.startTime, b.endTime);
+              state.byStaff[sb.id].push(newA);
+              state.byStaff[sa.id].push(newB);
+              state.hours[sb.id] += calcHours(a.startTime, a.endTime);
+              state.hours[sa.id] += calcHours(b.startTime, b.endTime);
+              const ia = state.assignments.indexOf(a);
+              const ib = state.assignments.indexOf(b);
+              if (ia >= 0) state.assignments[ia] = newA;
+              if (ib >= 0) state.assignments[ib] = newB;
+              improved = true;
+            }
+          }
+        }
+      }
     }
     state._optimizeRounds = rounds;
     return state;
@@ -484,6 +522,22 @@
       unfilled: state.unfilled,
     };
     clone.hours[a.staffId] -= calcHours(a.startTime, a.endTime);
+    return clone;
+  }
+
+  function removeAssignmentsVirtual(state, list) {
+    const ids = new Set(list.map((a) => a.id));
+    const clone = {
+      hours: { ...state.hours },
+      byStaff: Object.fromEntries(
+        Object.entries(state.byStaff).map(([k, v]) => [k, v.filter((x) => !ids.has(x.id))])
+      ),
+      assignments: state.assignments,
+      unfilled: state.unfilled,
+    };
+    for (const a of list) {
+      clone.hours[a.staffId] -= calcHours(a.startTime, a.endTime);
+    }
     return clone;
   }
 
