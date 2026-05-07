@@ -131,15 +131,18 @@
       if (String(e.message).includes("401") || String(e.message).includes("unauthenticated")) throw e;
       console.warn("API getState failed, falling back", e);
     }
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("shifty.v2") || localStorage.getItem("shifty.v1");
-      if (raw) {
-        const parsed = migrate(JSON.parse(raw));
-        try { await window.ShiftyAPI.saveState(parsed); } catch (_) {}
-        return parsed;
+    // デモモードでは localStorage の本番キーから読まない (クロス汚染防止)
+    if (!window.__SHIFTY_DEMO_MODE__) {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("shifty.v2") || localStorage.getItem("shifty.v1");
+        if (raw) {
+          const parsed = migrate(JSON.parse(raw));
+          try { await window.ShiftyAPI.saveState(parsed); } catch (_) {}
+          return parsed;
+        }
+      } catch (e) {
+        console.warn("localStorage parse failed", e);
       }
-    } catch (e) {
-      console.warn("localStorage parse failed", e);
     }
     const fresh = seedFn();
     try { await window.ShiftyAPI.saveState(fresh); } catch (_) {}
@@ -147,7 +150,11 @@
   }
 
   async function saveState(state) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
+    // デモモードでは本番側 STORAGE_KEY に書かない（クロス汚染防止）。
+    // デモは window.ShiftyAPI.saveState 経由で DEMO_KEY (api.js 内) のみに書かれる
+    if (!window.__SHIFTY_DEMO_MODE__) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
+    }
     try { await window.ShiftyAPI.saveState(state); }
     catch (e) {
       if (String(e.message).includes("401") || String(e.message).includes("unauthenticated")) throw e;

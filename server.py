@@ -47,11 +47,31 @@ if SENTRY_DSN:
     except ImportError:
         print("[sentry] sentry-sdk not installed, skipping")
 
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-CHANGE-IN-PRODUCTION")
+# SECRET_KEY: 本番では必須。未設定なら起動を失敗させる（音もなく弱い既知デフォルトを使うのは危険）
+_secret_key = os.environ.get("SECRET_KEY")
+if not _secret_key:
+    if os.environ.get("FLASK_ENV") == "production":
+        raise RuntimeError("SECRET_KEY env var must be set in production. Refusing to start with dev fallback.")
+    _secret_key = "dev-secret-CHANGE-IN-PRODUCTION"
+    print("[warning] using insecure development SECRET_KEY (set FLASK_ENV=production for hard fail)")
+app.config["SECRET_KEY"] = _secret_key
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# セッション寿命を 7 日に短縮（デフォルト 31 日は長すぎる）
+from datetime import timedelta as _td
+app.config["PERMANENT_SESSION_LIFETIME"] = _td(days=7)
+# リクエストボディ上限 5 MiB (大量 prefs / state 注入 DoS 対策)
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 if os.environ.get("FLASK_ENV") == "production":
     app.config["SESSION_COOKIE_SECURE"] = True
+
+# Cloud Run の GFE プロキシを 1 段挟む想定で X-Forwarded-* を信頼
+# 信頼境界外で X-Forwarded-For を勝手に書ける構造を排除（H4 対策）
+try:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+except Exception as _e:
+    print(f"[warning] ProxyFix unavailable: {_e}")
 
 
 # ============================================================
@@ -59,6 +79,13 @@ if os.environ.get("FLASK_ENV") == "production":
 # ============================================================
 
 class _SQLiteStorage:
+    def transactional_update(self, fn):
+        # SQLite は単一プロセスなのでトランザクション簡略版で OK
+        current = self.get_state()
+        new_state = fn(current)
+        self.save_state(new_state)
+        return new_state
+
     def __init__(self):
         self._init()
 
@@ -170,6 +197,25 @@ class _FirestoreStorage:
     def save_state(self, state):
         self._state_ref.set({"data": state})
 
+    def transactional_update(self, fn):
+        """Firestore transaction で state を read-modify-write する。
+        fn(current_state_dict_or_None) -> new_state_dict
+        ロストアップデート防止 (Critical #4)。
+        """
+        from google.cloud import firestore as _fs
+        client = self._fs
+        ref = self._state_ref
+
+        @_fs.transactional
+        def _do(tx):
+            snap = ref.get(transaction=tx)
+            current = (snap.to_dict() or {}).get("data") if snap.exists else None
+            new_state = fn(current)
+            tx.set(ref, {"data": new_state})
+            return new_state
+
+        return _do(client.transaction())
+
     def reset(self):
         self._state_ref.delete()
         # Delete all tokens
@@ -242,6 +288,13 @@ def send_email(to_addr: str, subject: str, body: str, reply_to: str = None) -> b
     """Gmail SMTP で送信。GMAIL_APP_PASSWORD 未設定なら no-op."""
     if not GMAIL_APP_PASSWORD:
         print(f"[email] skipped (no GMAIL_APP_PASSWORD): to={to_addr} subject={subject}")
+        return False
+    # ヘッダ injection (CRLF) 防止
+    to_addr = (str(to_addr or "")).replace("\r", "").replace("\n", "")[:200]
+    subject = (str(subject or "")).replace("\r", " ").replace("\n", " ")[:200]
+    if reply_to:
+        reply_to = (str(reply_to)).replace("\r", "").replace("\n", "")[:200]
+    if not to_addr:
         return False
     try:
         import smtplib
@@ -324,7 +377,61 @@ LOCK_DURATION_SEC = 300
 
 
 def _client_ip():
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    # ProxyFix が ProxyFix(x_for=1) で 1 段だけの XFF を信頼するように補正済。
+    # Cloud Run の前段 GFE が信頼でき、それより外側の偽装ヘッダは捨てられる。
+    return (request.remote_addr or "?")
+
+
+# ============================================================
+# 公開エンドポイント用の汎用レート制限 (in-memory)
+# 攻撃面: /api/inquiry, /api/portal/{token}/message, /api/checkout/session
+# ============================================================
+_rate_buckets = {}  # key=(name, ip) -> [count, window_start]
+RATE_DEFAULTS = {
+    "inquiry": (5, 60),     # 60 秒に 5 回
+    "portal_msg": (10, 60), # 60 秒に 10 回
+    "checkout": (10, 60),   # 60 秒に 10 回
+}
+
+
+def _rate_check(name, limit_window=None):
+    """超過時 True を返す（=拒否）"""
+    if limit_window is None:
+        limit_window = RATE_DEFAULTS.get(name, (30, 60))
+    limit, window = limit_window
+    ip = _client_ip()
+    key = (name, ip)
+    now = _time.time()
+    rec = _rate_buckets.get(key)
+    if not rec or now - rec[1] > window:
+        _rate_buckets[key] = [1, now]
+        return False
+    rec[0] += 1
+    if rec[0] > limit:
+        return True
+    return False
+
+
+# ============================================================
+# メールヘッダ injection 防止
+# ============================================================
+def _safe_header(s, maxlen=200):
+    """件名・宛先などに使う文字列から CR/LF を除去"""
+    return (str(s or "")).replace("\r", " ").replace("\n", " ")[:maxlen]
+
+
+# ============================================================
+# 安全な JSON ペイロード取得
+# ============================================================
+def _get_json(silent=True, default=None):
+    """request.get_json の安全ラッパ。型が dict 以外なら default にフォールバック。"""
+    try:
+        v = request.get_json(force=True, silent=silent)
+        if isinstance(v, dict):
+            return v
+    except Exception:
+        pass
+    return default if default is not None else {}
 
 
 def _is_locked(ip):
@@ -373,7 +480,7 @@ def auth_status():
 def auth_setup():
     if storage.get_config("admin_pass_hash"):
         return jsonify({"error": "already_setup"}), 400
-    payload = request.get_json(force=True)
+    payload = _get_json()
     pwd = payload.get("password", "")
     if len(pwd) < 6:
         return jsonify({"error": "password_too_short", "minLength": 6}), 400
@@ -388,10 +495,16 @@ def auth_login():
     locked, remaining = _is_locked(ip)
     if locked:
         return jsonify({"error": "locked", "retryAfter": remaining}), 429
-    payload = request.get_json(force=True)
+    payload = _get_json()
     pwd = payload.get("password", "")
     stored = storage.get_config("admin_pass_hash")
-    if not stored or not check_password_hash(stored, pwd):
+    if not stored:
+        # 未セットアップでも bcrypt 計算を走らせて timing 一致させる（M3 対策）
+        check_password_hash("scrypt:32768:8:1$x$x" * 8, pwd)
+        _record_failure(ip)
+        rec = _login_attempts.get(ip, (0, 0))
+        return jsonify({"error": "setup_required", "attemptsLeft": max(0, LOCK_AFTER - rec[0])}), 401
+    if not check_password_hash(stored, pwd):
         _record_failure(ip)
         rec = _login_attempts.get(ip, (0, 0))
         return jsonify({
@@ -413,7 +526,7 @@ def auth_logout():
 @app.post("/api/auth/change-password")
 @require_auth
 def auth_change_pass():
-    payload = request.get_json(force=True)
+    payload = _get_json()
     cur = payload.get("current", "")
     new = payload.get("new", "")
     stored = storage.get_config("admin_pass_hash")
@@ -432,8 +545,16 @@ INTERNAL_SECRET_TOKEN = os.environ.get("SYNC_SECRET_TOKEN", "")
 
 
 def _check_internal_token():
-    """Cloud Scheduler のリクエストかチェック"""
-    return request.headers.get("X-Sync-Token", "") == INTERNAL_SECRET_TOKEN if INTERNAL_SECRET_TOKEN else True
+    """Cloud Scheduler のリクエストかチェック (deny-by-default)。
+    SYNC_SECRET_TOKEN 未設定時は常に拒否。本番で誤って公開されることを防ぐ。"""
+    if not INTERNAL_SECRET_TOKEN:
+        return False
+    # 定数時間比較
+    import hmac
+    return hmac.compare_digest(
+        request.headers.get("X-Sync-Token", ""),
+        INTERNAL_SECRET_TOKEN,
+    )
 
 
 @app.post("/internal/snapshot")
@@ -532,10 +653,12 @@ def api_restore_snapshot(date):
 @app.post("/api/portal/<token>/message")
 def api_portal_message(token):
     """スタッフポータルから店長への連絡"""
+    if _rate_check("portal_msg"):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
     staff_id = storage.lookup_staff_by_token(token)
     if not staff_id:
         return jsonify({"error": "invalid_token"}), 404
-    payload = request.get_json(force=True) or {}
+    payload = _get_json()
     msg = (payload.get("message") or "").strip()
     kind = (payload.get("kind") or "general").strip()  # general / change_request / question / report
     if not msg or len(msg) > 2000:
@@ -570,8 +693,8 @@ def api_portal_message(token):
     # 店長へメール通知
     KIND_LABEL = {"general": "連絡", "change_request": "シフト変更希望", "question": "質問", "report": "報告"}
     send_email(
-        to_addr=NOTIFY_TO,
-        subject=f"【Shifty】{KIND_LABEL.get(kind, '連絡')}: {staff.get('name', '?')}",
+        to_addr=_safe_header(NOTIFY_TO),
+        subject=_safe_header(f"【Shifty】{KIND_LABEL.get(kind, '連絡')}: {staff.get('name', '?')}"),
         body=f"スタッフ「{staff.get('name', '?')}」から{KIND_LABEL.get(kind, '連絡')}が届きました。\n\n{msg}\n\n---\n受信日時: {record['createdAt']}",
     )
     return jsonify({"ok": True})
@@ -628,10 +751,12 @@ def _stripe_client():
 @app.post("/api/checkout/session")
 def api_checkout_session():
     """LP の「無料トライアル」CTA から呼ばれる。Stripe Checkout Session を作成して URL を返す。"""
+    if _rate_check("checkout"):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
     stripe_lib = _stripe_client()
     if not stripe_lib:
         return jsonify({"error": "stripe_not_configured", "fallback": "/#contact"}), 503
-    payload = request.get_json(force=True) or {}
+    payload = _get_json()
     plan = payload.get("plan", "standard")
     price_id = STRIPE_PRICES.get(plan)
     if not price_id:
@@ -684,23 +809,32 @@ def api_stripe_webhook():
         "raw_event_id": event.get("id"),
         "received_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
     }
+    # 冪等性: 同じ event id がすでに保存済みなら再処理しない
+    event_id = event.get("id") or ""
     try:
         if STORAGE_BACKEND == "firestore":
             from google.cloud import firestore as _fs
             _client = _fs.Client()
-            _client.collection(COLL_PREFIX + "_subscriptions").add(record)
+            doc_ref = _client.collection(COLL_PREFIX + "_subscriptions").document(event_id or "evt_" + secrets.token_urlsafe(8))
+            if event_id and doc_ref.get().exists:
+                return jsonify({"ok": True, "duplicate": True})
+            doc_ref.set(record)
         else:
             with sqlite3.connect(DB_PATH) as c:
-                c.execute("CREATE TABLE IF NOT EXISTS subs (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, created_at TEXT DEFAULT (datetime('now')))")
-                c.execute("INSERT INTO subs (data) VALUES (?)", (json.dumps(record, ensure_ascii=False),))
+                c.execute("CREATE TABLE IF NOT EXISTS subs (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE, data TEXT, created_at TEXT DEFAULT (datetime('now')))")
+                # UNIQUE 制約で event_id が同じものは弾かれる
+                try:
+                    c.execute("INSERT INTO subs (event_id, data) VALUES (?, ?)", (event_id, json.dumps(record, ensure_ascii=False)))
+                except sqlite3.IntegrityError:
+                    return jsonify({"ok": True, "duplicate": True})
     except Exception as e:
         print(f"[stripe] persist failed: {e}")
 
     # 重要イベントなら通知
     if et in ("checkout.session.completed", "customer.subscription.deleted"):
         send_email(
-            to_addr=NOTIFY_TO,
-            subject=f"【Shifty/Stripe】{et}: {record['email']}",
+            to_addr=_safe_header(NOTIFY_TO),
+            subject=_safe_header(f"【Shifty/Stripe】{et}: {record['email']}"),
             body=f"Stripe イベント: {et}\nメール: {record['email']}\n顧客ID: {record['customerId']}\nstatus: {record['status']}\nmetadata: {record['metadata']}\n",
         )
 
@@ -714,7 +848,7 @@ def api_stripe_webhook():
 @require_auth
 def api_notify_shifts():
     """指定週のシフトを各スタッフ（email 設定者のみ）に送信。"""
-    payload = request.get_json(force=True) or {}
+    payload = _get_json()
     week_start = payload.get("weekStart")
     if not week_start:
         return jsonify({"error": "missing_weekStart"}), 400
@@ -788,8 +922,8 @@ def api_notify_shifts():
                 "ご質問は店長までお気軽にお声掛けください。",
             ]
         ok = send_email(
-            to_addr=email,
-            subject=f"【{restaurant}】{week_start} 週のシフトが確定しました",
+            to_addr=_safe_header(email),
+            subject=_safe_header(f"【{restaurant}】{week_start} 週のシフトが確定しました"),
             body="\n".join(body_lines),
         )
         if ok:
@@ -812,7 +946,16 @@ def api_get_state():
 @app.post("/api/state")
 @require_auth
 def api_save_state():
-    payload = request.get_json(force=True)
+    payload = request.get_json(force=True, silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "expected_object"}), 400
+    # 必須トップレベルキーの軽量チェック
+    if "meta" in payload and not isinstance(payload["meta"], dict):
+        return jsonify({"error": "invalid_meta"}), 400
+    if "staff" in payload and not isinstance(payload["staff"], list):
+        return jsonify({"error": "invalid_staff"}), 400
+    if "weeks" in payload and not isinstance(payload["weeks"], dict):
+        return jsonify({"error": "invalid_weeks"}), 400
     storage.save_state(payload)
     return jsonify({"ok": True})
 
@@ -860,12 +1003,17 @@ def api_restore():
 def api_gen_token(staff_id):
     # ?force=1 を渡すと旧トークンを失効させて新規発行（再発行 = 旧 URL の無効化）
     force = request.args.get("force", "").lower() in ("1", "true", "yes")
+    # staff_id の存在確認
+    state = storage.get_state() or {}
+    if not any(s.get("id") == staff_id for s in (state.get("staff") or [])):
+        return jsonify({"error": "staff_not_found"}), 404
     existing = storage.get_token(staff_id)
     if existing and not force:
         return jsonify({"token": existing, "created": False, "regenerated": False})
     if existing and force:
         storage.delete_token(staff_id)
-    token = secrets.token_urlsafe(10)
+    # 128 bit エントロピー (16 byte). 監査推奨値。
+    token = secrets.token_urlsafe(16)
     storage.add_token(staff_id, token)
     return jsonify({"token": token, "created": True, "regenerated": bool(existing)})
 
@@ -903,8 +1051,16 @@ def api_portal_get(token):
     week_data = weeks.get(current_wk, {})
     prefs = [p for p in week_data.get("preferences", []) if p["staffId"] == staff_id]
     assignments = [a for a in week_data.get("assignments", []) if a["staffId"] == staff_id]
+    # スタッフポータルに返すフィールドは限定（notes は店長プライベートメモなので除外）
+    public_staff = {
+        "id": staff.get("id"),
+        "name": staff.get("name"),
+        "position": staff.get("position"),
+        "hourlyWage": staff.get("hourlyWage"),  # 給与計算表示に使用
+        "email": staff.get("email", ""),
+    }
     return jsonify({
-        "staff": staff,
+        "staff": public_staff,
         "preferences": prefs,
         "assignments": assignments,
         "weekStart": current_wk,
@@ -921,26 +1077,63 @@ def api_portal_save_prefs(token):
     staff_id = storage.lookup_staff_by_token(token)
     if not staff_id:
         return jsonify({"error": "invalid_token"}), 404
-    new_prefs = request.get_json(force=True)
+    try:
+        new_prefs = request.get_json(force=True, silent=True)
+    except Exception:
+        return jsonify({"error": "invalid_json"}), 400
     if not isinstance(new_prefs, list):
         return jsonify({"error": "expected_list"}), 400
-    state = storage.get_state()
-    if state is None:
-        return jsonify({"error": "no_state"}), 404
-    meta = state.get("meta", {})
-    current_wk = meta.get("currentWeekStart")
-    weeks = state.setdefault("weeks", {})
-    week = weeks.get(current_wk)
-    if not week:
-        return jsonify({"error": "no_current_week"}), 404
-    if week.get("status") == "published":
-        return jsonify({"error": "week_published_readonly"}), 403
-    week["preferences"] = [p for p in week.get("preferences", []) if p["staffId"] != staff_id]
+    # サイズ・形式バリデーション (各 pref が dict / 必要項目 / 範囲チェック)
+    if len(new_prefs) > 100:  # 7 days × 10 sessions max + safety
+        return jsonify({"error": "too_many_preferences"}), 400
+    valid_priorities = {"must", "want", "avoid"}
+    cleaned = []
+    import re as _re
+    date_re = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    time_re = _re.compile(r"^\d{2}:\d{2}$")
     for p in new_prefs:
-        p["staffId"] = staff_id
-    week["preferences"].extend(new_prefs)
-    storage.save_state(state)
-    return jsonify({"ok": True, "saved": len(new_prefs)})
+        if not isinstance(p, dict): continue
+        if not date_re.match(str(p.get("date", ""))): continue
+        if not time_re.match(str(p.get("startTime", ""))): continue
+        if not time_re.match(str(p.get("endTime", ""))): continue
+        if p.get("priority") not in valid_priorities: continue
+        cleaned.append({
+            "id": str(p.get("id", ""))[:64] or ("p_" + secrets.token_urlsafe(6)),
+            "staffId": staff_id,  # 強制上書き (forge 防止)
+            "date": p["date"],
+            "startTime": p["startTime"],
+            "endTime": p["endTime"],
+            "priority": p["priority"],
+        })
+    # Firestore トランザクションで read-modify-write (lost update 防止)
+    state_after = {"published": False, "no_state": False, "no_week": False}
+
+    def _mutate(current):
+        if current is None:
+            state_after["no_state"] = True
+            return current or {}
+        meta = current.get("meta", {})
+        current_wk = meta.get("currentWeekStart")
+        weeks = current.setdefault("weeks", {})
+        week = weeks.get(current_wk)
+        if not week:
+            state_after["no_week"] = True
+            return current
+        if week.get("status") == "published":
+            state_after["published"] = True
+            return current
+        week["preferences"] = [p for p in week.get("preferences", []) if p.get("staffId") != staff_id]
+        week["preferences"].extend(cleaned)
+        return current
+
+    storage.transactional_update(_mutate)
+    if state_after["no_state"]:
+        return jsonify({"error": "no_state"}), 404
+    if state_after["no_week"]:
+        return jsonify({"error": "no_current_week"}), 404
+    if state_after["published"]:
+        return jsonify({"error": "week_published_readonly"}), 403
+    return jsonify({"ok": True, "saved": len(cleaned)})
 
 
 # ============================================================
@@ -949,7 +1142,9 @@ def api_portal_save_prefs(token):
 @app.post("/api/inquiry")
 def api_inquiry():
     """ランディングページからの問い合わせを Firestore / SQLite に保存"""
-    payload = request.get_json(force=True) or {}
+    if _rate_check("inquiry"):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
+    payload = _get_json()
     required = ["restaurantName", "contactName", "email"]
     if not all(payload.get(k) for k in required):
         return jsonify({"error": "missing_required_fields", "required": required}), 400
@@ -1002,10 +1197,10 @@ def api_inquiry():
         f"IP      : {record['ip']}\nUA      : {record['userAgent']}\n"
     )
     send_email(
-        to_addr=NOTIFY_TO,
-        subject=f"【Shifty】お問合せ: {record['restaurantName']} / {record['contactName']}",
+        to_addr=_safe_header(NOTIFY_TO),
+        subject=_safe_header(f"【Shifty】お問合せ: {record['restaurantName']} / {record['contactName']}"),
         body=notify_body,
-        reply_to=record["email"],
+        reply_to=_safe_header(record["email"]),
     )
 
     # 応募者へ自動返信
@@ -1152,11 +1347,21 @@ def algo_doc():
 
 @app.get("/healthz")
 def healthz():
+    # 偵察情報を漏らさない最小ヘルスチェック
+    return jsonify({"ok": True})
+
+
+@app.get("/internal/healthz")
+def internal_healthz():
+    """詳細版ヘルスチェック - SYNC_SECRET_TOKEN による保護"""
+    if not _check_internal_token():
+        return jsonify({"error": "unauthorized"}), 401
     return jsonify({
         "ok": True,
         "backend": STORAGE_BACKEND,
         "tenant": TENANT_NAME,
         "prefix": COLL_PREFIX,
+        "version": os.environ.get("APP_VERSION", "shifty"),
     })
 
 
