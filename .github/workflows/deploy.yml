@@ -42,7 +42,7 @@ jobs:
             --cpu=1 \
             --min-instances=0 \
             --max-instances=2 \
-            --set-env-vars="STORAGE_BACKEND=firestore,FLASK_ENV=production,SITE_URL=https://shifty.in-dx.jp,STORAGE_COLLECTION_PREFIX=shifty,TENANT_NAME=default,GMAIL_USER=admin@in-dx.jp,NOTIFY_TO=support@in-dx.jp,STRIPE_PRICE_STARTER=${{ vars.STRIPE_PRICE_STARTER }},STRIPE_PRICE_STANDARD=${{ vars.STRIPE_PRICE_STANDARD }},STRIPE_PRICE_PRO=${{ vars.STRIPE_PRICE_PRO }}" \
+            --set-env-vars="STORAGE_BACKEND=firestore,FLASK_ENV=production,SITE_URL=https://shifty.in-dx.jp,STORAGE_COLLECTION_PREFIX=shifty,TENANT_NAME=default,GMAIL_USER=admin@in-dx.jp,NOTIFY_TO=support@in-dx.jp,STRIPE_PRICE_STARTER=price_1TURefPMOh15qZRvzZp2ykZ8,STRIPE_PRICE_STANDARD=price_1TURfCPMOh15qZRvUOX2LUqM,STRIPE_PRICE_PRO=price_1TURfaPMOh15qZRvtikJ2O6o" \
             --set-secrets="SECRET_KEY=SHIFTY_SECRET_KEY:latest,GMAIL_APP_PASSWORD=GMAIL_APP_PASSWORD:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest" \
             --quiet
 
