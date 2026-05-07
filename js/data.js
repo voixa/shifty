@@ -53,7 +53,8 @@
     d.setDate(d.getDate() + n);
     return fmtDate(d);
   }
-  function dayOfWeek(dateStr) { return new Date(dateStr).getDay(); }
+  // 注: 明示的に T00:00:00 を付与してローカル時刻として解釈 (TZ ずれ防止)
+  function dayOfWeek(dateStr) { return new Date(dateStr + "T00:00:00").getDay(); }
   function timeToMin(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
   function calcHours(start, end) { return (timeToMin(end) - timeToMin(start)) / 60; }
   function timeOverlap(a, b) {

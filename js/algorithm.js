@@ -235,8 +235,9 @@
   }
 
   // ISO 週の月曜を返す（YYYY-MM-DD）— 同一週判定に使用
+  // 注: TZ 依存を避けるため明示的に T00:00:00 を付与してローカル日付として解釈
   function weekKey(dateStr) {
-    const d = new Date(dateStr);
+    const d = new Date(dateStr + "T00:00:00");
     const day = d.getDay();
     const diff = day === 0 ? -6 : 1 - day;
     d.setDate(d.getDate() + diff);
@@ -270,17 +271,25 @@
   // 各 unfilled スロットについて「なぜ埋まらなかったか」を人間可読に返す
   function explainUnfilled(slot, allStaff, state, lr, prefs) {
     const blockers = [];
+    let posMatchCount = 0;
     for (const s of allStaff) {
       const posMatch = s.position === slot.position || (s.canCover || []).includes(slot.position);
-      if (!posMatch) continue; // ポジション非適合者は候補外（理由表示しない）
+      if (!posMatch) continue;
+      posMatchCount++;
       const violatedIds = checkAllHardConstraints(s, slot, state, lr);
       const hasAvoid = hasAvoidPreference(s, slot, prefs);
       const labels = violatedIds.map(
         (v) => HARD_CONSTRAINTS.find((c) => c.id === v)?.label || v
       );
       if (hasAvoid) labels.push("回避希望");
-      if (labels.length === 0) continue; // 競合などで埋まらなかった単純例外
+      if (labels.length === 0) {
+        // ポジション適合・制約違反なし → なぜ埋まらないかの汎用ラベル
+        labels.push("他枠で既配置 / スコア劣位");
+      }
       blockers.push({ staffId: s.id, staffName: s.name, reasons: labels });
+    }
+    if (posMatchCount === 0) {
+      blockers.push({ staffId: null, staffName: "(該当ポジションのスタッフなし)", reasons: ["ポジション要件 " + slot.position + " を満たすスタッフがいません"] });
     }
     return blockers;
   }
@@ -428,8 +437,12 @@
           endTime: a.endTime,
         };
         const stateMinusA = removeAssignmentVirtual(state, a);
-        const eligible = staff.filter((s) => isEligible(s, slotLike, stateMinusA, laborRules));
-        if (eligible.length === 0) continue;
+        const eligibleAll = staff.filter((s) => isEligible(s, slotLike, stateMinusA, laborRules));
+        if (eligibleAll.length === 0) continue;
+        // avoid 2-pass フィルタを Phase 1 と同じく適用 (Phase 2 で巻き戻されるバグ防止)
+        const eligibleStrict = eligibleAll.filter((s) => !hasAvoidPreference(s, slotLike, preferences));
+        const eligible = eligibleStrict.length > 0 ? eligibleStrict : eligibleAll;
+        const stepAvoidRelaxed = eligibleStrict.length === 0 && eligibleAll.length > 0;
         const scored = eligible
           .map((s) => ({
             staff: s,
@@ -445,6 +458,7 @@
             cost: newCost,
             score: best.score,
             breakdown: best.breakdown,
+            avoidRelaxed: stepAvoidRelaxed || undefined,
             topCandidates: scored.slice(0, 3).map((x) => ({
               staffId: x.staff.id, name: x.staff.name, score: x.score,
             })),
@@ -482,14 +496,36 @@
             // sa が slotB に, sb が slotA に入れるか?
             if (!isEligible(sa, slotB, stateMinusBoth, laborRules)) continue;
             if (!isEligible(sb, slotA, stateMinusBoth, laborRules)) continue;
+            // avoid 2-pass: スワップで avoid 違反を新しく作るなら拒否
+            // (Phase 1 で avoid を尊重した配置を Phase 2 が壊さないように)
+            const swapWouldCreateAvoid =
+              hasAvoidPreference(sa, slotB, preferences) ||
+              hasAvoidPreference(sb, slotA, preferences);
+            // 既存 a/b が avoid 持ちなら緩和されている可能性あり、これは許容
+            const swapResolvesAvoid =
+              hasAvoidPreference(sa, slotA, preferences) ||
+              hasAvoidPreference(sb, slotB, preferences);
+            if (swapWouldCreateAvoid && !swapResolvesAvoid) continue;
             const newScoreA = scoreCandidate(sb, slotA, stateMinusBoth, preferences, laborRules, weights).score;
             const newScoreB = scoreCandidate(sa, slotB, stateMinusBoth, preferences, laborRules, weights).score;
             const oldSum = a.score + b.score;
             const newSum = newScoreA + newScoreB;
             if (newSum > oldSum + SWAP_THRESHOLD) {
-              // 入れ替え実行
-              const newA = { ...a, staffId: sb.id, cost: sb.hourlyWage * calcHours(a.startTime, a.endTime), score: newScoreA };
-              const newB = { ...b, staffId: sa.id, cost: sa.hourlyWage * calcHours(b.startTime, b.endTime), score: newScoreB };
+              // 入れ替え実行 — avoidRelaxed 状態を引き継ぐ
+              const newAvoidRelaxedA = hasAvoidPreference(sb, slotA, preferences);
+              const newAvoidRelaxedB = hasAvoidPreference(sa, slotB, preferences);
+              const newA = {
+                ...a, staffId: sb.id,
+                cost: sb.hourlyWage * calcHours(a.startTime, a.endTime),
+                score: newScoreA,
+                avoidRelaxed: newAvoidRelaxedA || undefined,
+              };
+              const newB = {
+                ...b, staffId: sa.id,
+                cost: sa.hourlyWage * calcHours(b.startTime, b.endTime),
+                score: newScoreB,
+                avoidRelaxed: newAvoidRelaxedB || undefined,
+              };
               state.byStaff[a.staffId] = state.byStaff[a.staffId].filter((x) => x.id !== a.id);
               state.byStaff[b.staffId] = state.byStaff[b.staffId].filter((x) => x.id !== b.id);
               state.hours[a.staffId] -= calcHours(a.startTime, a.endTime);
@@ -664,10 +700,11 @@
   function objectiveValue(metrics, weights) {
     const w = weights || DEFAULT_WEIGHTS;
     // coverage を最重要、希望充足、公平性 (1-cv)、コスト効率
+    // ?? を使うことで明示的な 0 を尊重 (UI で重みを 0 にできる)
     const wCov = 0.40;
-    const wPref = w.preference || 0.30;
-    const wFair = w.fairness || 0.15;
-    const wCost = w.cost || 0.10;
+    const wPref = w.preference ?? 0.30;
+    const wFair = w.fairness ?? 0.15;
+    const wCost = w.cost ?? 0.10;
     const fairnessScore = 1 - Math.min(1, metrics.fairness.cv);
     const costScore = 1; // コストはハード予算なら別途扱い、ここでは中立（生成内では最小化を scoreCandidate で実現）
     return (

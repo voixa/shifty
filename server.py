@@ -56,7 +56,8 @@ if not _secret_key:
     print("[warning] using insecure development SECRET_KEY (set FLASK_ENV=production for hard fail)")
 app.config["SECRET_KEY"] = _secret_key
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# Strict にして CSRF 攻撃を構造的に防ぐ (admin 操作はアプリ内クリックのみ)
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
 # セッション寿命を 7 日に短縮（デフォルト 31 日は長すぎる）
 from datetime import timedelta as _td
 app.config["PERMANENT_SESSION_LIFETIME"] = _td(days=7)
@@ -660,7 +661,10 @@ def api_portal_message(token):
         return jsonify({"error": "invalid_token"}), 404
     payload = _get_json()
     msg = (payload.get("message") or "").strip()
-    kind = (payload.get("kind") or "general").strip()  # general / change_request / question / report
+    kind = (payload.get("kind") or "general").strip()
+    # ホワイトリスト外は general に正規化（store-and-display 系 XSS 防止）
+    if kind not in {"general", "change_request", "question", "report"}:
+        kind = "general"
     if not msg or len(msg) > 2000:
         return jsonify({"error": "invalid_message"}), 400
 
@@ -750,7 +754,12 @@ def _stripe_client():
 
 @app.post("/api/checkout/session")
 def api_checkout_session():
-    """LP の「無料トライアル」CTA から呼ばれる。Stripe Checkout Session を作成して URL を返す。"""
+    """LP の「無料トライアル」CTA から呼ばれる。Stripe Checkout Session を作成して URL を返す。
+    LP の「クレカ不要・自動課金なし」表記と一致させるため:
+      - payment_method_collection="if_required" (カード入力スキップ可)
+      - trial_settings.end_behavior.missing_payment_method="cancel"
+        (トライアル終了時にカードがなければ自動解約・課金なし)
+    """
     if _rate_check("checkout"):
         return jsonify({"error": "rate_limited", "retry_after": 60}), 429
     stripe_lib = _stripe_client()
@@ -761,26 +770,44 @@ def api_checkout_session():
     price_id = STRIPE_PRICES.get(plan)
     if not price_id:
         return jsonify({"error": "invalid_plan"}), 400
+
+    # 入力サニタイズ (Stripe API への DoS / エラー詳細漏洩対策)
+    raw_email = (payload.get("email") or "").strip()[:254]
+    if raw_email and ("@" not in raw_email or "." not in raw_email.split("@")[-1]):
+        return jsonify({"error": "invalid_email"}), 400
+    restaurant = (payload.get("restaurantName") or "").strip()[:100]
+    contact = (payload.get("contactName") or "").strip()[:100]
+
     site = os.environ.get("SITE_URL", "https://shifty.in-dx.jp")
     try:
-        sess = stripe_lib.checkout.Session.create(
-            mode="subscription",
-            payment_method_types=["card"],
-            line_items=[{"price": price_id, "quantity": 1}],
-            subscription_data={"trial_period_days": 14},
-            success_url=site + "/app?welcome=1",
-            cancel_url=site + "/#pricing",
-            customer_email=payload.get("email"),
-            metadata={
-                "restaurantName": payload.get("restaurantName", ""),
-                "contactName": payload.get("contactName", ""),
+        sess_kwargs = {
+            "mode": "subscription",
+            "payment_method_types": ["card"],
+            "line_items": [{"price": price_id, "quantity": 1}],
+            "subscription_data": {
+                "trial_period_days": 14,
+                "trial_settings": {
+                    "end_behavior": {"missing_payment_method": "cancel"}
+                },
+            },
+            # クレカ未入力でもサインアップ可。LP の「クレカ不要・自動課金なし」と整合
+            "payment_method_collection": "if_required",
+            "success_url": site + "/app?welcome=1",
+            "cancel_url": site + "/#pricing",
+            "metadata": {
+                "restaurantName": restaurant,
+                "contactName": contact,
                 "plan": plan,
             },
-        )
+        }
+        if raw_email:
+            sess_kwargs["customer_email"] = raw_email
+        sess = stripe_lib.checkout.Session.create(**sess_kwargs)
         return jsonify({"url": sess.url})
     except Exception as e:
-        print(f"[stripe] checkout failed: {e}")
-        return jsonify({"error": "stripe_error", "detail": str(e)}), 500
+        # エラー詳細はクライアントへ漏らさない (内部ログのみ)
+        print(f"[stripe] checkout failed for plan={plan}: {e}")
+        return jsonify({"error": "stripe_error"}), 502
 
 
 @app.post("/api/stripe/webhook")
@@ -809,22 +836,29 @@ def api_stripe_webhook():
         "raw_event_id": event.get("id"),
         "received_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
     }
-    # 冪等性: 同じ event id がすでに保存済みなら再処理しない
+    # 冪等性: 同じ event id がすでに保存済みなら再処理しない (atomic create でレース防止)
     event_id = event.get("id") or ""
+    persisted = False
     try:
         if STORAGE_BACKEND == "firestore":
             from google.cloud import firestore as _fs
+            from google.api_core import exceptions as _gcexc
             _client = _fs.Client()
             doc_ref = _client.collection(COLL_PREFIX + "_subscriptions").document(event_id or "evt_" + secrets.token_urlsafe(8))
-            if event_id and doc_ref.get().exists:
+            try:
+                # create() は既存ドキュメントがあると AlreadyExists を投げる (atomic)
+                doc_ref.create(record)
+                persisted = True
+            except _gcexc.AlreadyExists:
+                # Stripe の retry / 二重配信 — 通知メールも再送しない
                 return jsonify({"ok": True, "duplicate": True})
-            doc_ref.set(record)
         else:
             with sqlite3.connect(DB_PATH) as c:
                 c.execute("CREATE TABLE IF NOT EXISTS subs (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE, data TEXT, created_at TEXT DEFAULT (datetime('now')))")
                 # UNIQUE 制約で event_id が同じものは弾かれる
                 try:
                     c.execute("INSERT INTO subs (event_id, data) VALUES (?, ?)", (event_id, json.dumps(record, ensure_ascii=False)))
+                    persisted = True
                 except sqlite3.IntegrityError:
                     return jsonify({"ok": True, "duplicate": True})
     except Exception as e:
@@ -943,21 +977,40 @@ def api_get_state():
     return jsonify(storage.get_state())
 
 
+class _ConflictError(Exception):
+    def __init__(self, current_version):
+        self.current_version = current_version
+
+
 @app.post("/api/state")
 @require_auth
 def api_save_state():
-    payload = request.get_json(force=True, silent=True)
-    if not isinstance(payload, dict):
+    payload = _get_json()
+    if not payload:
         return jsonify({"error": "expected_object"}), 400
-    # 必須トップレベルキーの軽量チェック
+    # 型バリデーション (任意のオブジェクトを受け取るので最低限の防衛)
     if "meta" in payload and not isinstance(payload["meta"], dict):
         return jsonify({"error": "invalid_meta"}), 400
     if "staff" in payload and not isinstance(payload["staff"], list):
         return jsonify({"error": "invalid_staff"}), 400
     if "weeks" in payload and not isinstance(payload["weeks"], dict):
         return jsonify({"error": "invalid_weeks"}), 400
-    storage.save_state(payload)
-    return jsonify({"ok": True})
+    if "staff" in payload and len(payload["staff"]) > 1000:
+        return jsonify({"error": "too_many_staff"}), 400
+    # クライアントのバージョン番号（楽観的ロック）。クライアントが送ってこない場合は強制上書き
+    expected_version = payload.get("_version")
+    # トランザクションでロストアップデート防止 (Critical #4 完全適用)
+    def _mutate(current):
+        if expected_version is not None and current and current.get("_version") != expected_version:
+            raise _ConflictError(current.get("_version"))
+        new_state = dict(payload)
+        new_state["_version"] = ((current or {}).get("_version", 0) + 1)
+        return new_state
+    try:
+        result = storage.transactional_update(_mutate)
+        return jsonify({"ok": True, "version": result.get("_version")})
+    except _ConflictError as ce:
+        return jsonify({"error": "version_conflict", "currentVersion": ce.current_version}), 409
 
 
 @app.post("/api/admin/reset")
@@ -1221,8 +1274,8 @@ def api_inquiry():
         f"https://shifty.in-dx.jp\n"
     )
     send_email(
-        to_addr=record["email"],
-        subject="【Shifty】お問合せありがとうございます（受付完了）",
+        to_addr=_safe_header(record["email"]),
+        subject=_safe_header("【Shifty】お問合せありがとうございます（受付完了）"),
         body=autoreply,
     )
     return jsonify({"ok": True}), 201

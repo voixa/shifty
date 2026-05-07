@@ -2480,6 +2480,36 @@ function hideAuthOverlay() {
 window.onAuthRequired = () => showAuthOverlay("login");
 
 async function bootApp() {
+  // Stripe Checkout 経由で初到達した新規顧客の着地ページ
+  // (multi-tenant 未実装のため /app は使えず、手動オンボに案内)
+  const params = new URLSearchParams(location.search);
+  if (params.get("welcome") === "1") {
+    document.getElementById("authOverlay").classList.add("hidden");
+    document.getElementById("main").innerHTML = `
+      <div class="max-w-md mx-auto mt-12 p-8 bg-white rounded-xl shadow-xl border text-center space-y-4">
+        <div class="text-5xl">🎉</div>
+        <h1 class="font-bold text-2xl">トライアルご登録ありがとうございます</h1>
+        <p class="text-sm text-slate-600">
+          飲DX チームから <strong>1 営業日以内</strong>に
+          <span class="font-mono">support@in-dx.jp</span> よりお店専用のセットアップ手順をメールでお送りします。
+        </p>
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 text-left">
+          📌 メールに記載の URL から「店長アカウント」を作成いただくと、
+          スタッフ登録 → 希望収集 → AI シフト生成 が即お試しいただけます。
+        </div>
+        <p class="text-xs text-slate-500">
+          14 日間の無料期間中はクレジットカード入力なしでご利用いただけます。<br>
+          自動課金はされません（期間内に解約 / 何もしなければ自動的に終了）。
+        </p>
+        <div class="pt-2 space-y-2">
+          <a href="/demo" class="block bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-2.5 text-sm font-semibold">
+            🎮 待っている間に機能を試す（デモ環境）
+          </a>
+          <a href="/" class="block text-xs text-slate-500 hover:text-slate-700">トップに戻る</a>
+        </div>
+      </div>`;
+    return;
+  }
   // Demo mode: skip auth entirely
   if (window.__SHIFTY_DEMO_MODE__) {
     hideAuthOverlay();
