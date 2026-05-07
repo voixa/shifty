@@ -42,8 +42,8 @@ jobs:
             --cpu=1 \
             --min-instances=0 \
             --max-instances=2 \
-            --set-env-vars="STORAGE_BACKEND=firestore,FLASK_ENV=production,SITE_URL=https://shifty-1028920472559.asia-northeast1.run.app,STORAGE_COLLECTION_PREFIX=shifty,TENANT_NAME=default,GMAIL_USER=admin@in-dx.jp,NOTIFY_TO=support@in-dx.jp" \
-            --set-secrets="SECRET_KEY=SHIFTY_SECRET_KEY:latest,GMAIL_APP_PASSWORD=GMAIL_APP_PASSWORD:latest" \
+            --set-env-vars="STORAGE_BACKEND=firestore,FLASK_ENV=production,SITE_URL=https://shifty.in-dx.jp,STORAGE_COLLECTION_PREFIX=shifty,TENANT_NAME=default,GMAIL_USER=admin@in-dx.jp,NOTIFY_TO=support@in-dx.jp,STRIPE_PRICE_STARTER=${{ vars.STRIPE_PRICE_STARTER }},STRIPE_PRICE_STANDARD=${{ vars.STRIPE_PRICE_STANDARD }},STRIPE_PRICE_PRO=${{ vars.STRIPE_PRICE_PRO }}" \
+            --set-secrets="SECRET_KEY=SHIFTY_SECRET_KEY:latest,GMAIL_APP_PASSWORD=GMAIL_APP_PASSWORD:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest" \
             --quiet
 
       - name: Run health check

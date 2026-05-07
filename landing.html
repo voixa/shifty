@@ -466,7 +466,7 @@
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>CSV エクスポート</li>
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>メールサポート</li>
           </ul>
-          <a href="#contact" class="block text-center w-full bg-slate-100 hover:bg-slate-200 rounded-lg py-3 font-semibold">無料で試す</a>
+          <a href="#contact" data-plan="starter" class="plan-cta block text-center w-full bg-slate-100 hover:bg-slate-200 rounded-lg py-3 font-semibold">無料で試す</a>
         </div>
 
         <!-- Standard -->
@@ -487,7 +487,7 @@
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>労務ルールカスタマイズ</li>
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>優先メールサポート</li>
           </ul>
-          <a href="#contact" class="block text-center w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 font-semibold">無料で試す</a>
+          <a href="#contact" data-plan="standard" class="plan-cta block text-center w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 font-semibold">無料で試す</a>
         </div>
 
         <!-- Pro -->
@@ -507,7 +507,7 @@
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>初期セットアップ無償サポート</li>
             <li class="flex gap-2"><span class="text-emerald-600">✓</span>電話サポート</li>
           </ul>
-          <a href="#contact" class="block text-center w-full bg-slate-100 hover:bg-slate-200 rounded-lg py-3 font-semibold">無料で試す</a>
+          <a href="#contact" data-plan="pro" class="plan-cta block text-center w-full bg-slate-100 hover:bg-slate-200 rounded-lg py-3 font-semibold">無料で試す</a>
         </div>
       </div>
 
@@ -767,6 +767,37 @@
         btn.disabled = false;
         btn.textContent = '無料トライアルを申し込む →';
       }
+    });
+
+    // Plan CTA → Stripe Checkout (price_id 未設定なら #contact フォールバック)
+    document.querySelectorAll('.plan-cta').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        const plan = el.getAttribute('data-plan');
+        if (!plan) return;
+        e.preventDefault();
+        const orig = el.textContent;
+        el.textContent = '読込中…';
+        el.style.pointerEvents = 'none';
+        try {
+          const r = await fetch('/api/checkout/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plan }),
+          });
+          const j = await r.json();
+          if (j.url) {
+            location.href = j.url;
+            return;
+          }
+          // フォールバック: 問合せフォームへ
+          location.hash = '#contact';
+        } catch (err) {
+          location.hash = '#contact';
+        } finally {
+          el.textContent = orig;
+          el.style.pointerEvents = '';
+        }
+      });
     });
   </script>
 </body>
