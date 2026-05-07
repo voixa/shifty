@@ -164,3 +164,4 @@ shift-ai/
 ## ⚖️ ライセンス
 
 Private — 飲DX 所有
+
