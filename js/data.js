@@ -167,9 +167,14 @@
     if (!state.meta.laborRules) state.meta.laborRules = {
       maxHoursPerWeek: 40,
       maxConsecutiveDays: 5,
-      maxHoursPerDay: 8,
+      maxHoursPerDay: 12,
       minRestDaysPerWeek: 1,
+      minRestHoursBetweenShifts: 8,
     };
+    // 自動アップグレード: 旧デフォルト 8h は飲食店現実に合わずカバー率が壊滅するため 12h に引き上げ
+    // (lunch 11-15 + dinner 17-22 = 9h を許可。意図的に 8h 設定済みの顧客がいないので無条件で書き換え)
+    if (state.meta.laborRules.maxHoursPerDay <= 8) state.meta.laborRules.maxHoursPerDay = 12;
+    if (state.meta.laborRules.minRestHoursBetweenShifts === undefined) state.meta.laborRules.minRestHoursBetweenShifts = 8;
     if (!state.meta.templates) state.meta.templates = [];
     if (!state.meta.algorithmWeights) state.meta.algorithmWeights = {
       preference: 0.40,
@@ -220,7 +225,7 @@
       sessions: JSON.parse(JSON.stringify(DEFAULT_SESSIONS)),
       positions: JSON.parse(JSON.stringify(DEFAULT_POSITIONS)),
       staffingPlan: defaultStaffingPlan(),
-      laborRules: { maxHoursPerWeek: 40, maxConsecutiveDays: 5, maxHoursPerDay: 8, minRestDaysPerWeek: 1 },
+      laborRules: { maxHoursPerWeek: 40, maxConsecutiveDays: 5, maxHoursPerDay: 12, minRestDaysPerWeek: 1, minRestHoursBetweenShifts: 8 },
       createdAt: new Date().toISOString(),
     };
 

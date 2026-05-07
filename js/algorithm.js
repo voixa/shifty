@@ -81,6 +81,36 @@
         return consecutiveDaysIfAdded(staff, slot, state) <= lr.maxConsecutiveDays;
       },
     },
+    {
+      id: "labor_min_rest_days_per_week",
+      label: "週最低休日",
+      rationale: "週あたり最低休日数を確保（労基34条準拠）",
+      check(staff, slot, state, lr) {
+        if (!lr || !lr.minRestDaysPerWeek) return true;
+        const wk = weekKey(slot.date);
+        const workedDays = new Set(
+          (state.byStaff[staff.id] || [])
+            .filter((a) => weekKey(a.date) === wk)
+            .map((a) => a.date)
+        );
+        workedDays.add(slot.date);
+        return 7 - workedDays.size >= lr.minRestDaysPerWeek;
+      },
+    },
+    {
+      id: "min_rest_hours_between_shifts",
+      label: "シフト間最低休息",
+      rationale: "前後シフトの間に最低休息時間を確保（労基インターバル制度）",
+      check(staff, slot, state, lr) {
+        const minRest = lr && lr.minRestHoursBetweenShifts;
+        if (!minRest) return true;
+        for (const a of state.byStaff[staff.id] || []) {
+          if (a.date === slot.date) continue; // 同日は labor_max_hours_day で扱う
+          if (hoursBetween(a, slot) < minRest) return false;
+        }
+        return true;
+      },
+    },
   ];
 
   function checkAllHardConstraints(staff, slot, state, lr) {
@@ -204,6 +234,57 @@
     );
   }
 
+  // ISO 週の月曜を返す（YYYY-MM-DD）— 同一週判定に使用
+  function weekKey(dateStr) {
+    const d = new Date(dateStr);
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  }
+
+  // 2 つのシフト間（同日 / 異日）の休息時間を時間単位で返す。重複時 0
+  function hoursBetween(a, b) {
+    const aStart = new Date(`${a.date}T${a.startTime}:00`).getTime();
+    const aEnd = new Date(`${a.date}T${a.endTime}:00`).getTime();
+    const bStart = new Date(`${b.date}T${b.startTime}:00`).getTime();
+    const bEnd = new Date(`${b.date}T${b.endTime}:00`).getTime();
+    if (aEnd <= bStart) return (bStart - aEnd) / 3600000;
+    if (bEnd <= aStart) return (aStart - bEnd) / 3600000;
+    return 0;
+  }
+
+  function hasAvoidPreference(staff, slot, prefs) {
+    return (prefs || []).some(
+      (p) =>
+        p.staffId === staff.id &&
+        p.date === slot.date &&
+        p.priority === "avoid" &&
+        timeOverlap(p, slot)
+    );
+  }
+
+  // 各 unfilled スロットについて「なぜ埋まらなかったか」を人間可読に返す
+  function explainUnfilled(slot, allStaff, state, lr, prefs) {
+    const blockers = [];
+    for (const s of allStaff) {
+      const posMatch = s.position === slot.position || (s.canCover || []).includes(slot.position);
+      if (!posMatch) continue; // ポジション非適合者は候補外（理由表示しない）
+      const violatedIds = checkAllHardConstraints(s, slot, state, lr);
+      const hasAvoid = hasAvoidPreference(s, slot, prefs);
+      const labels = violatedIds.map(
+        (v) => HARD_CONSTRAINTS.find((c) => c.id === v)?.label || v
+      );
+      if (hasAvoid) labels.push("回避希望");
+      if (labels.length === 0) continue; // 競合などで埋まらなかった単純例外
+      blockers.push({ staffId: s.id, staffName: s.name, reasons: labels });
+    }
+    return blockers;
+  }
+
   function consecutiveDaysIfAdded(staff, slot, state) {
     const dates = new Set((state.byStaff[staff.id] || []).map((a) => a.date));
     dates.add(slot.date);
@@ -251,22 +332,46 @@
       }
     }
 
-    // 困難度順ソート: 候補が少ないスロット先 → 同率はランダム
+    // 困難度順初期ソート: 候補が少ないスロット先 → 同率はランダム
+    const computeDifficulty = (sl) =>
+      staff.filter((s) => isEligible(s, sl, state, laborRules)).length;
     instances.sort((a, b) => {
-      const aCand = staff.filter((s) => isEligible(s, a, state, laborRules)).length;
-      const bCand = staff.filter((s) => isEligible(s, b, state, laborRules)).length;
+      const aCand = computeDifficulty(a);
+      const bCand = computeDifficulty(b);
       if (aCand !== bCand) return aCand - bCand;
       if (a.date !== b.date) return a.date.localeCompare(b.date);
       if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
       return a._r - b._r;
     });
 
-    for (const slot of instances) {
-      const eligible = staff.filter((s) => isEligible(s, slot, state, laborRules));
-      if (eligible.length === 0) {
-        state.unfilled.push(slot);
+    // 配置進行に応じて困難度を動的に再評価（25%, 50%, 75% の節目のみ）
+    const totalCount = instances.length;
+    const resortAt = new Set([
+      Math.floor(totalCount * 0.25),
+      Math.floor(totalCount * 0.5),
+      Math.floor(totalCount * 0.75),
+    ]);
+    let placedCount = 0;
+    let pending = instances;
+
+    while (pending.length > 0) {
+      const slot = pending.shift();
+      // ハード制約上の eligible 全集合
+      const eligibleAll = staff.filter((s) => isEligible(s, slot, state, laborRules));
+      if (eligibleAll.length === 0) {
+        state.unfilled.push({
+          ...slot,
+          reasons: explainUnfilled(slot, staff, state, laborRules, preferences),
+        });
         continue;
       }
+      // avoid 希望者を可能なら除外（候補が残るなら強制ハード化、残らないならソフト扱い）
+      const eligibleStrict = eligibleAll.filter(
+        (s) => !hasAvoidPreference(s, slot, preferences)
+      );
+      const eligible = eligibleStrict.length > 0 ? eligibleStrict : eligibleAll;
+      const isAvoidRelaxed = eligibleStrict.length === 0 && eligibleAll.length > 0;
+
       const scored = eligible
         .map((s) => ({
           staff: s,
@@ -287,6 +392,7 @@
         cost,
         score: picked.score,
         breakdown: picked.breakdown,
+        avoidRelaxed: isAvoidRelaxed || undefined,
         // 監査ログ: この時点での候補トップ3を記録
         topCandidates: scored.slice(0, 3).map((x) => ({
           staffId: x.staff.id,
@@ -297,6 +403,18 @@
       state.assignments.push(a);
       state.byStaff[picked.staff.id].push(a);
       state.hours[picked.staff.id] += calcHours(slot.startTime, slot.endTime);
+
+      placedCount++;
+      if (resortAt.has(placedCount) && pending.length > 1) {
+        pending.sort((x, y) => {
+          const xCand = computeDifficulty(x);
+          const yCand = computeDifficulty(y);
+          if (xCand !== yCand) return xCand - yCand;
+          if (x.date !== y.date) return x.date.localeCompare(y.date);
+          if (x.startTime !== y.startTime) return x.startTime.localeCompare(y.startTime);
+          return x._r - y._r;
+        });
+      }
     }
     return state;
   }
