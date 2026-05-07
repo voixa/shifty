@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Shifty 営業資料</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      body { font-size: 10.5pt; }
+      .no-print { display: none !important; }
+      .page { page-break-after: always; min-height: 95vh; }
+    }
+    body { font-family: "Hiragino Sans","Yu Gothic",Meiryo,system-ui,sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <div class="max-w-4xl mx-auto bg-white shadow-lg my-6 p-10">
+    <!-- 印刷ボタン -->
+    <div class="no-print fixed top-4 right-4 z-50">
+      <button onclick="window.print()" class="bg-indigo-600 text-white rounded-lg px-4 py-2 shadow-lg">🖨 PDF/印刷</button>
+    </div>
+
+    <!-- Header -->
+    <header class="border-b-4 border-indigo-600 pb-4 mb-8 flex items-end justify-between">
+      <div>
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-12 h-12 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-lg flex items-center justify-center text-white text-2xl font-bold">S</div>
+          <h1 class="text-4xl font-bold">Shifty</h1>
+        </div>
+        <p class="text-slate-600 text-lg">飲食店向け AI シフト自動作成 SaaS</p>
+      </div>
+      <div class="text-right text-sm text-slate-500">
+        <div class="font-semibold text-slate-700">飲DX</div>
+        <div>support@in-dx.jp</div>
+        <div>https://shifty.in-dx.jp</div>
+      </div>
+    </header>
+
+    <!-- Section 1: Hook -->
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-indigo-700">毎週シフト作成に <span class="text-3xl">4 時間</span>、使っていませんか？</h2>
+      <div class="bg-amber-50 border-l-4 border-amber-500 p-4">
+        <p class="text-slate-700 leading-relaxed">
+          スタッフから希望を集めて、Excelで組んで、LINEで送って、変更があったら作り直し…<br>
+          月 16 時間以上が「シフト作業」に消えていきます。<strong>その時間、本来の仕事に使えるはずです。</strong>
+        </p>
+      </div>
+    </section>
+
+    <!-- Section 2: Solution -->
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-indigo-700">Shifty は AI で <span class="text-3xl">5 分</span>に短縮します。</h2>
+      <div class="grid grid-cols-3 gap-4 mb-4">
+        <div class="border border-slate-200 rounded-lg p-4">
+          <div class="text-3xl mb-2">📱</div>
+          <div class="font-bold mb-1">①希望はスマホで</div>
+          <div class="text-sm text-slate-600">スタッフは LINE のリンクをタップ → 登録不要、3タップで希望提出</div>
+        </div>
+        <div class="border border-slate-200 rounded-lg p-4 bg-indigo-50">
+          <div class="text-3xl mb-2">🤖</div>
+          <div class="font-bold mb-1">②AIが5秒で生成</div>
+          <div class="text-sm text-slate-600">希望・スキル・労務ルールを総合判断、最適配置を自動算出</div>
+        </div>
+        <div class="border border-slate-200 rounded-lg p-4">
+          <div class="text-3xl mb-2">✅</div>
+          <div class="font-bold mb-1">③ボタン一つで通知</div>
+          <div class="text-sm text-slate-600">確定→LINE通知文を自動生成→一斉送信</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 3: 6 Features -->
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-indigo-700">6 つの主要機能</h2>
+      <div class="grid grid-cols-2 gap-3 text-sm">
+        <div class="border-l-4 border-indigo-500 pl-3">
+          <div class="font-bold">🤖 AI 自動シフト生成</div>
+          <div class="text-slate-600">7ハード制約・5ソフト要素で最適化。スコア説明付きで監査可能。</div>
+        </div>
+        <div class="border-l-4 border-indigo-500 pl-3">
+          <div class="font-bold">📱 モバイル希望収集</div>
+          <div class="text-slate-600">スタッフはアプリ不要、LINE URL から即入力。提出進捗を可視化。</div>
+        </div>
+        <div class="border-l-4 border-indigo-500 pl-3">
+          <div class="font-bold">🆘 代打推薦</div>
+          <div class="text-slate-600">急な欠勤時に AI が候補を 5 名スコア順表示、ワンクリック入替。</div>
+        </div>
+        <div class="border-l-4 border-indigo-500 pl-3">
+          <div class="font-bold">📅 複数週・テンプレート</div>
+          <div class="text-slate-600">先週コピー、テンプレ保存（夏休み等）、複数週並列管理。</div>
+        </div>
+        <div class="border-l-4 border-indigo-500 pl-3">
+          <div class="font-bold">⚖️ 労務ルール厳守</div>
+          <div class="text-slate-600">週・日上限、連勤、休日。AI が必ず守る（労基順守）。</div>
+        </div>
+        <div class="border-l-4 border-indigo-500 pl-3">
+          <div class="font-bold">📈 分析・人件費管理</div>
+          <div class="text-slate-600">予算ゲージ、過去週推移、月間ランキング、CSV エクスポート。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 4: Pricing -->
+    <section class="mb-8 page">
+      <h2 class="text-2xl font-bold mb-4 text-indigo-700">料金プラン</h2>
+      <div class="grid grid-cols-3 gap-3 mb-4">
+        <div class="border-2 border-slate-200 rounded-lg p-4">
+          <div class="text-sm text-slate-500">小規模</div>
+          <div class="font-bold text-xl">Starter</div>
+          <div class="text-3xl font-bold my-2">¥3,000<span class="text-sm font-normal">/月</span></div>
+          <div class="text-sm text-slate-600 mb-3">スタッフ 5 名まで</div>
+          <ul class="text-xs space-y-1 text-slate-700">
+            <li>✓ AI 自動生成</li>
+            <li>✓ モバイル希望収集</li>
+            <li>✓ LINE 通知</li>
+            <li>✓ 複数週管理</li>
+          </ul>
+        </div>
+        <div class="border-2 border-indigo-600 rounded-lg p-4 bg-indigo-50 relative">
+          <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">推奨</span>
+          <div class="text-sm text-indigo-700 font-semibold">中規模</div>
+          <div class="font-bold text-xl">Standard</div>
+          <div class="text-3xl font-bold my-2">¥6,000<span class="text-sm font-normal">/月</span></div>
+          <div class="text-sm text-slate-600 mb-3">スタッフ 15 名まで</div>
+          <ul class="text-xs space-y-1 text-slate-700">
+            <li>✓ Starterの全機能</li>
+            <li>✓ テンプレート保存</li>
+            <li>✓ 過去週分析</li>
+            <li>✓ ドラッグ&ドロップ編集</li>
+            <li>✓ 労務ルール詳細設定</li>
+          </ul>
+        </div>
+        <div class="border-2 border-slate-200 rounded-lg p-4">
+          <div class="text-sm text-slate-500">大規模</div>
+          <div class="font-bold text-xl">Pro</div>
+          <div class="text-3xl font-bold my-2">¥10,000<span class="text-sm font-normal">/月</span></div>
+          <div class="text-sm text-slate-600 mb-3">スタッフ 30 名まで</div>
+          <ul class="text-xs space-y-1 text-slate-700">
+            <li>✓ Standardの全機能</li>
+            <li>✓ カスタムドメイン</li>
+            <li>✓ 自動バックアップ</li>
+            <li>✓ API アクセス</li>
+            <li>✓ 電話サポート</li>
+          </ul>
+        </div>
+      </div>
+      <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm">
+        🎁 <strong>14 日間 無料トライアル</strong> / クレカ不要 / 自動課金なし
+        <span class="ml-3 text-emerald-700 font-semibold">VOIXA 併用で月 ¥1,500 OFF</span>
+      </div>
+    </section>
+
+    <!-- Section 5: Comparison -->
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-indigo-700">既存ツールとの比較</h2>
+      <table class="w-full text-sm border border-slate-200">
+        <thead class="bg-slate-100">
+          <tr>
+            <th class="text-left p-2 border border-slate-200">項目</th>
+            <th class="p-2 border border-slate-200 bg-indigo-50 text-indigo-700">Shifty</th>
+            <th class="p-2 border border-slate-200">Air シフト</th>
+            <th class="p-2 border border-slate-200">シフトボード</th>
+            <th class="p-2 border border-slate-200">Excel</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="p-2 border border-slate-200">AI 自動生成</td><td class="p-2 border border-slate-200 text-center text-indigo-600 font-bold">◎</td><td class="p-2 border border-slate-200 text-center">△</td><td class="p-2 border border-slate-200 text-center">×</td><td class="p-2 border border-slate-200 text-center">×</td></tr>
+          <tr><td class="p-2 border border-slate-200">スコア説明（透明性）</td><td class="p-2 border border-slate-200 text-center text-indigo-600 font-bold">◎</td><td class="p-2 border border-slate-200 text-center">×</td><td class="p-2 border border-slate-200 text-center">×</td><td class="p-2 border border-slate-200 text-center">×</td></tr>
+          <tr><td class="p-2 border border-slate-200">代打推薦</td><td class="p-2 border border-slate-200 text-center text-indigo-600 font-bold">◎</td><td class="p-2 border border-slate-200 text-center">×</td><td class="p-2 border border-slate-200 text-center">×</td><td class="p-2 border border-slate-200 text-center">×</td></tr>
+          <tr><td class="p-2 border border-slate-200">スマホ希望収集</td><td class="p-2 border border-slate-200 text-center text-indigo-600 font-bold">◎</td><td class="p-2 border border-slate-200 text-center">○</td><td class="p-2 border border-slate-200 text-center">○</td><td class="p-2 border border-slate-200 text-center">×</td></tr>
+          <tr><td class="p-2 border border-slate-200">月額（中規模）</td><td class="p-2 border border-slate-200 text-center text-indigo-600 font-bold">¥6,000</td><td class="p-2 border border-slate-200 text-center">¥0〜</td><td class="p-2 border border-slate-200 text-center">¥0</td><td class="p-2 border border-slate-200 text-center">¥0</td></tr>
+        </tbody>
+      </table>
+      <p class="text-xs text-slate-500 mt-2">※ 2026年5月時点の各社公開情報を元にした比較</p>
+    </section>
+
+    <!-- Section 6: Trust -->
+    <section class="mb-8">
+      <h2 class="text-2xl font-bold mb-4 text-indigo-700">信頼性・透明性</h2>
+      <div class="grid grid-cols-2 gap-3 text-sm">
+        <div class="bg-slate-50 rounded p-3"><strong>🔐 暗号化通信</strong><br>全通信HTTPS、データはGCP Firestore で暗号化保管</div>
+        <div class="bg-slate-50 rounded p-3"><strong>🛡️ 監査可能 AI</strong><br>判断基準を全公開、自動テストで違反ゼロを保証</div>
+        <div class="bg-slate-50 rounded p-3"><strong>💾 自動日次バックアップ</strong><br>30日間保持、任意の日に復元可能</div>
+        <div class="bg-slate-50 rounded p-3"><strong>⚖️ 労基順守</strong><br>週・日・連勤上限を AI が絶対守る（ハード制約）</div>
+      </div>
+    </section>
+
+    <!-- Section 7: Next Step -->
+    <section class="mb-4">
+      <h2 class="text-2xl font-bold mb-4 text-indigo-700">無料デモから始められます</h2>
+      <div class="bg-indigo-600 text-white rounded-lg p-5 flex items-center justify-between">
+        <div>
+          <div class="text-2xl font-bold mb-1">🎮 登録不要・即体験</div>
+          <div class="text-sm opacity-90">10名のサンプルスタッフ・1週分のシフトでアプリ全機能を試せます</div>
+        </div>
+        <div class="text-right">
+          <div class="bg-white text-indigo-700 rounded-lg px-4 py-2 font-mono text-sm">shifty.in-dx.jp/demo</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="mt-8 pt-4 border-t border-slate-200 text-xs text-slate-500 flex justify-between">
+      <div>
+        飲DX / 代表 柳下 征二郎<br>
+        〒150-0043 東京都渋谷区道玄坂1-10-8 渋谷道玄坂東急ビル2F-C
+      </div>
+      <div class="text-right">
+        Shifty 営業資料 v1.0 / 2026年5月版<br>
+        お問合せ: support@in-dx.jp
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
