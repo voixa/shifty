@@ -1345,8 +1345,9 @@ def algo_doc():
     return send_from_directory(str(ROOT / "docs"), "algorithm.md", mimetype="text/markdown; charset=utf-8")
 
 
-@app.get("/healthz")
-def healthz():
+# ヘルスチェック (Cloud Run の `/healthz` は GFE が予約しているため `/api/healthz` を使用)
+@app.get("/api/healthz")
+def api_healthz():
     # 偵察情報を漏らさない最小ヘルスチェック
     return jsonify({"ok": True})
 
