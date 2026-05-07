@@ -858,12 +858,16 @@ def api_restore():
 @app.post("/api/admin/staff/<staff_id>/token")
 @require_auth
 def api_gen_token(staff_id):
+    # ?force=1 を渡すと旧トークンを失効させて新規発行（再発行 = 旧 URL の無効化）
+    force = request.args.get("force", "").lower() in ("1", "true", "yes")
     existing = storage.get_token(staff_id)
-    if existing:
-        return jsonify({"token": existing, "created": False})
+    if existing and not force:
+        return jsonify({"token": existing, "created": False, "regenerated": False})
+    if existing and force:
+        storage.delete_token(staff_id)
     token = secrets.token_urlsafe(10)
     storage.add_token(staff_id, token)
-    return jsonify({"token": token, "created": True})
+    return jsonify({"token": token, "created": True, "regenerated": bool(existing)})
 
 
 @app.get("/api/admin/staff/tokens")

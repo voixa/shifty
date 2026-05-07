@@ -42,8 +42,9 @@
     }
 
     // Tokens
-    if (url.match(/\/api\/admin\/staff\/.+\/token$/) && method === "POST") {
-      return { token: "demo-" + uid(), created: true };
+    if (url.match(/\/api\/admin\/staff\/.+\/token(\?.*)?$/) && method === "POST") {
+      const forced = /[?&]force=1/.test(url);
+      return { token: "demo-" + uid(), created: true, regenerated: forced };
     }
     if (url === "/api/admin/staff/tokens") return {};
     if (url.match(/\/api\/admin\/staff\/.+\/token$/) && method === "DELETE") return { ok: true };
@@ -95,6 +96,8 @@
     // Tokens
     genStaffToken: (staffId) =>
       jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "POST" }),
+    regenerateStaffToken: (staffId) =>
+      jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token?force=1`, { method: "POST" }),
     listStaffTokens: () => jsonReq("/api/admin/staff/tokens"),
     revokeStaffToken: (staffId) =>
       jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "DELETE" }),

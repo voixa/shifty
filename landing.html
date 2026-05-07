@@ -11,7 +11,7 @@
 
   <!-- Open Graph -->
   <meta property="og:title" content="Shifty — 飲食店のシフト作成、AIで5分。" />
-  <meta property="og:description" content="希望収集→AI生成→確定通知まで完全自動化。月¥3,000〜・14日間無料・デモ即体験。" />
+  <meta property="og:description" content="希望収集→AI生成→通知文ワンタップ生成まで一気通貫。月¥3,000〜・14日間無料・デモ即体験。" />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="__SITE_URL__/" />
   <meta property="og:image" content="__SITE_URL__/og.png" />
@@ -23,7 +23,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Shifty — 飲食店のシフト作成、AIで5分。" />
-  <meta name="twitter:description" content="希望収集→AI生成→確定通知まで完全自動化。月¥3,000〜・14日間無料。" />
+  <meta name="twitter:description" content="希望収集→AI生成→通知文ワンタップ生成まで一気通貫。月¥3,000〜・14日間無料。" />
   <meta name="twitter:image" content="__SITE_URL__/og.png" />
 
   <!-- JSON-LD: SoftwareApplication -->
@@ -32,7 +32,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Shifty",
-    "description": "飲食店向けAIシフト自動作成SaaS。希望収集からシフト確定通知まで完全自動化。",
+    "description": "飲食店向けAIシフト自動作成SaaS。希望収集からシフト確定通知文の生成までワンタップで完結。",
     "applicationCategory": "BusinessApplication",
     "operatingSystem": "Web",
     "url": "https://shifty.in-dx.jp/",
@@ -134,7 +134,7 @@
       </nav>
       <div class="flex items-center gap-2">
         <a href="/app" class="hidden sm:inline-block text-sm text-slate-600 hover:text-brand-600 px-3 py-1.5">ログイン</a>
-        <a href="#contact" class="text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 py-2 font-semibold">14日間 無料で試す</a>
+        <a href="#contact" data-plan="standard" class="plan-cta text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 py-2 font-semibold">14日間 無料で試す</a>
       </div>
     </div>
   </header>
@@ -147,14 +147,14 @@
         飲食店のシフト作成、<br><span class="gradient-text">AI で 5 分。</span>
       </h1>
       <p class="text-lg md:text-xl text-slate-600 max-w-2xl mx-auto mb-10">
-        希望収集 → AI 自動生成 → 確定通知 まで完全自動化。<br>
+        希望収集 → AI 自動生成 → LINE 通知文ワンタップ生成 まで一気通貫。<br>
         毎週 4 時間かかっていた作業が、ボタン一つに。
       </p>
       <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
         <a href="/demo" onclick="if(window.gtag)gtag('event','demo_click');" class="bg-white hover:bg-slate-50 text-brand-600 border-2 border-brand-600 rounded-lg px-8 py-4 text-lg font-semibold shadow-lg">
           🎮 今すぐデモを触る（登録不要）
         </a>
-        <a href="#contact" onclick="if(window.gtag)gtag('event','trial_cta_hero');" class="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-8 py-4 text-lg font-semibold shadow-lg shadow-brand-600/30">
+        <a href="#contact" data-plan="standard" onclick="if(window.gtag)gtag('event','trial_cta_hero');" class="plan-cta bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-8 py-4 text-lg font-semibold shadow-lg shadow-brand-600/30">
           14日間 無料で試す →
         </a>
       </div>
@@ -435,7 +435,7 @@
         <div class="bg-white rounded-xl p-6 border border-slate-200 relative">
           <div class="absolute -top-3 -left-3 w-10 h-10 gradient-bg rounded-full flex items-center justify-center text-white font-bold">3</div>
           <h3 class="font-bold mb-3 mt-2">AI 生成 → 確定 → 通知</h3>
-          <p class="text-sm text-slate-600 mb-4">「AI 自動生成」→ 結果を確認 → 必要なら微調整 → 「確定」→ LINE 通知文を一斉送信。</p>
+          <p class="text-sm text-slate-600 mb-4">「AI 自動生成」→ 結果を確認 → 必要なら微調整 → 「確定」→ LINE 通知文がクリップボードに自動コピー。LINE グループに貼り付けて送信。</p>
           <div class="text-xs text-brand-600 font-semibold">所要時間: 5 分</div>
         </div>
       </div>
@@ -755,7 +755,9 @@
           body: JSON.stringify(data),
         });
         if (!r.ok) throw new Error('送信失敗');
-        msg.textContent = '✅ 送信ありがとうございます。1営業日以内に support@in-dx.jp からご連絡いたします。';
+        msg.innerHTML = '✅ 送信ありがとうございます。1営業日以内に support@in-dx.jp からご連絡いたします。<br><br>'
+          + '<span class="text-slate-700 font-normal">お返事をお待ちいただく間に、ぜひ機能を体験してください：</span><br>'
+          + '<a href="/demo" class="inline-block mt-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-2.5 text-sm">🎮 デモを触ってみる（登録不要）</a>';
         msg.className = 'text-sm text-center font-semibold text-emerald-600';
         msg.classList.remove('hidden');
         form.reset();

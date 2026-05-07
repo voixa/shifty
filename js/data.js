@@ -115,6 +115,14 @@
 
   // ===== Storage =====
   async function loadState() {
+    // 新規初期化時のシード関数を選択
+    // デモモード or sample=1 クエリ → 10名スタッフのサンプル
+    // 本番初回 → 空テナント
+    const wantsSample =
+      window.__SHIFTY_DEMO_MODE__ ||
+      /[?&]sample=1\b/.test(location.search);
+    const seedFn = wantsSample ? seedSampleData : seedState;
+
     try {
       const remote = await window.ShiftyAPI.getState();
       if (remote && remote.staff) return migrate(remote);
@@ -133,7 +141,7 @@
     } catch (e) {
       console.warn("localStorage parse failed", e);
     }
-    const fresh = seedState();
+    const fresh = seedFn();
     try { await window.ShiftyAPI.saveState(fresh); } catch (_) {}
     return fresh;
   }
@@ -147,9 +155,12 @@
     }
   }
 
-  async function resetState() {
+  async function resetState({ withSample } = {}) {
     try { await window.ShiftyAPI.resetServer(); } catch (_) {}
-    const fresh = seedState();
+    const useSample = withSample === undefined
+      ? (window.__SHIFTY_DEMO_MODE__ === true)
+      : !!withSample;
+    const fresh = useSample ? seedSampleData() : seedState();
     await saveState(fresh);
     return fresh;
   }
@@ -216,7 +227,37 @@
   }
 
   // ===== Seed =====
+  // デフォルトの新規テナントは「空っぽ」で起動。
+  // サンプルデータ（10名スタッフ + 希望サンプル）を試したい場合は seedSampleData() を呼ぶ。
   function seedState() {
+    const weekStart = fmtDate(todayMonday());
+    const meta = {
+      restaurantName: "（店舗名未設定）",
+      weeklyBudget: 380000,
+      currentWeekStart: weekStart,
+      sessions: JSON.parse(JSON.stringify(DEFAULT_SESSIONS)),
+      positions: JSON.parse(JSON.stringify(DEFAULT_POSITIONS)),
+      staffingPlan: defaultStaffingPlan(),
+      laborRules: { maxHoursPerWeek: 40, maxConsecutiveDays: 5, maxHoursPerDay: 12, minRestDaysPerWeek: 1, minRestHoursBetweenShifts: 8 },
+      createdAt: new Date().toISOString(),
+    };
+    return {
+      meta, staff: [],
+      weeks: {
+        [weekStart]: {
+          slots: buildSlots(meta, weekStart),
+          preferences: [],
+          assignments: [],
+          status: "draft",
+          publishedAt: null,
+          changeLog: [],
+        },
+      },
+    };
+  }
+
+  // サンプルデータ投入（オンボーディングで「サンプルで試す」を選んだ場合・demo モード）
+  function seedSampleData() {
     const weekStart = fmtDate(todayMonday());
     const meta = {
       restaurantName: "いざかや 縁",
@@ -227,6 +268,7 @@
       staffingPlan: defaultStaffingPlan(),
       laborRules: { maxHoursPerWeek: 40, maxConsecutiveDays: 5, maxHoursPerDay: 12, minRestDaysPerWeek: 1, minRestHoursBetweenShifts: 8 },
       createdAt: new Date().toISOString(),
+      isSampleData: true,
     };
 
     const staff = [
@@ -290,6 +332,6 @@
     uid, todayMonday, fmtDate, addDays, dayOfWeek,
     timeToMin, calcHours, timeOverlap, timeContains,
     buildSlots, newWeek, ensureWeek, listWeeks,
-    loadState, saveState, resetState, seedState, migrate,
+    loadState, saveState, resetState, seedState, seedSampleData, migrate,
   };
 })();

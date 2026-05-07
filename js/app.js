@@ -325,11 +325,14 @@ function viewDashboard() {
       quickAction("👥 スタッフ追加", () => { setTab("staff"); setTimeout(() => openStaffEdit(), 200); }),
       quickAction("⚙️ 店舗設定", () => setTab("settings")),
       quickAction("📤 シフト出力", () => setTab("export")),
-      quickAction("🔄 サンプル再投入", async () => {
-        if (!confirm("全データをリセットしてサンプルに戻しますか？")) return;
-        state = await resetState();
+      quickAction(state.staff.length === 0 ? "🎯 サンプルで試す" : "🔄 サンプル再投入", async () => {
+        const msg = state.staff.length === 0
+          ? "サンプルデータ（10名スタッフ・希望サンプル付き）を投入して動作を試しますか？"
+          : "現在のデータを破棄してサンプルデータに戻しますか？この操作は取り消せません。";
+        if (!confirm(msg)) return;
+        state = await resetState({ withSample: true });
         render();
-        toast("サンプルデータを再投入しました", "success");
+        toast("サンプルデータを投入しました。シフト編成タブで「🤖 AI自動生成」を試せます", "success");
       }),
     ]),
   ]));
@@ -716,7 +719,11 @@ function viewStaff() {
       <td class="px-3 py-2.5">${"★".repeat(s.skill)}<span class="text-slate-300">${"★".repeat(5 - s.skill)}</span></td>`;
     const td = el("td", { class: "px-3 py-2.5 text-right whitespace-nowrap" }, [
       el("button", { class: "text-xs text-emerald-600 hover:underline mr-2",
+        title: "希望入力ポータルの URL をコピー（既存があれば再利用）",
         onclick: () => copyStaffLink(s) }, "🔗 リンク"),
+      el("button", { class: "text-xs text-amber-600 hover:underline mr-2",
+        title: "URL を再発行して旧 URL を失効させる（退職者対応・URL流出時など）",
+        onclick: () => regenerateStaffLink(s) }, "🔄 再発行"),
       el("button", { class: "text-xs text-brand-600 hover:underline mr-2",
         onclick: () => openStaffEdit(s) }, "編集"),
       el("button", { class: "text-xs text-red-600 hover:underline",
@@ -728,7 +735,9 @@ function viewStaff() {
             wk.preferences = wk.preferences.filter(p => p.staffId !== s.id);
             wk.assignments = wk.assignments.filter(a => a.staffId !== s.id);
           }
-          persist(); render(); toast("削除しました", "success");
+          // トークンも失効
+          window.ShiftyAPI.revokeStaffToken(s.id).catch(() => {});
+          persist(); render(); toast("削除しました（リンクも失効）", "success");
         } }, "削除"),
     ]);
     tr.appendChild(td);
@@ -740,11 +749,34 @@ function viewStaff() {
 
 async function copyStaffLink(s) {
   try {
-    const { token } = await window.ShiftyAPI.genStaffToken(s.id);
-    const url = `${location.origin}/staff?t=${token}`;
+    const r = await window.ShiftyAPI.genStaffToken(s.id);
+    const url = `${location.origin}/staff?t=${r.token}`;
     await navigator.clipboard.writeText(url);
-    toast(`${s.name} のリンクをコピーしました`, "success");
+    if (r.created) {
+      toast(`${s.name} の新しいリンクを発行・コピーしました`, "success");
+    } else {
+      toast(`${s.name} の既存リンクをコピーしました`, "info");
+    }
   } catch (e) { toast("リンク生成失敗: " + e.message, "error"); }
+}
+
+async function regenerateStaffLink(s) {
+  if (!confirm(
+    `${s.name} の URL を再発行しますか？\n\n` +
+    `この操作で旧 URL は無効化されます（旧 URL を持つ人はアクセス不可になります）。\n` +
+    `退職者対応や URL の流出時にご利用ください。`
+  )) return;
+  try {
+    const r = await window.ShiftyAPI.regenerateStaffToken(s.id);
+    const url = `${location.origin}/staff?t=${r.token}`;
+    await navigator.clipboard.writeText(url);
+    toast(
+      r.regenerated
+        ? `${s.name}: 旧 URL を失効、新 URL をコピーしました`
+        : `${s.name}: 新規リンクを発行・コピーしました`,
+      "success"
+    );
+  } catch (e) { toast("再発行失敗: " + e.message, "error"); }
 }
 
 async function copyAllStaffLinks() {
@@ -2353,7 +2385,7 @@ function showOnboarding() {
             el("li", {}, "確定 → スタッフへ通知"),
           ]),
           el("p", { class: "bg-blue-50 border border-blue-200 rounded p-3 text-blue-900" },
-            "サンプルデータが入っているので、すぐに触って試せます。"),
+            "次のステップで「実データで始める」か「サンプルデータで試す」か選べます。"),
         ]);
       },
     },
@@ -2390,15 +2422,30 @@ function showOnboarding() {
     },
     {
       title: "👥 スタッフ登録",
-      desc: "サンプルで 10 名のスタッフが入っています。実際のスタッフに置き換える場合は次のステップ後にスタッフタブから編集してください。",
+      desc: "実スタッフ情報の登録はあとからスタッフタブで行えます。まずは試してみたい場合は「サンプルを投入」を選んでください。",
       content() {
+        const staffCount = state.staff.length;
         return el("div", { class: "text-sm space-y-3" }, [
           el("div", { class: "bg-slate-50 rounded p-3" }, [
-            el("div", { class: "font-semibold mb-1" }, `現在のスタッフ: ${state.staff.length}名`),
-            el("div", { class: "text-xs text-slate-600" }, state.staff.slice(0, 5).map(s => s.name).join(" / ") + (state.staff.length > 5 ? ` 他${state.staff.length - 5}名` : "")),
+            el("div", { class: "font-semibold mb-1" }, `現在のスタッフ: ${staffCount}名`),
+            staffCount > 0
+              ? el("div", { class: "text-xs text-slate-600" }, state.staff.slice(0, 5).map(s => s.name).join(" / ") + (staffCount > 5 ? ` 他${staffCount - 5}名` : ""))
+              : el("div", { class: "text-xs text-slate-500" }, "（まだ登録されていません）"),
           ]),
-          el("div", { class: "text-xs text-slate-500" },
-            "💡 サンプルを使ってまず動作を確認 → 後でスタッフタブの「データリセット」やCSV取込で実データに切替できます。"),
+          staffCount === 0 ? el("div", { class: "grid grid-cols-1 gap-2" }, [
+            el("button", {
+              class: "w-full bg-amber-500 hover:bg-amber-600 text-white rounded-md px-4 py-2.5 text-sm font-semibold",
+              onclick: async () => {
+                if (!confirm("サンプルデータ（10名スタッフ + 希望サンプル）を投入しますか？\n後でスタッフタブから自由に編集・削除できます。")) return;
+                state = await resetState({ withSample: true });
+                toast("サンプルデータを投入しました", "success");
+                closeModal();
+                render();
+                setTimeout(showOnboarding, 300);
+              }
+            }, "🎯 サンプルデータで試す（10名）"),
+            el("div", { class: "text-xs text-slate-500 text-center" }, "または完了後にスタッフタブから手動追加・CSV取込もできます"),
+          ]) : el("div", { class: "text-xs text-slate-500" }, "💡 完了後にスタッフタブで「+ 追加」「CSV 取込」で編集できます。"),
         ]);
       },
     },
@@ -2422,12 +2469,15 @@ function showOnboarding() {
       title: "🎉 セットアップ完了",
       desc: "これで使い始められます！",
       content() {
+        const hasStaff = state.staff.length > 0;
         return el("div", { class: "text-sm space-y-3" }, [
-          el("p", {}, "シフト編成タブの「🤖 AI 自動生成」ボタンで、サンプルスタッフ・サンプル希望からシフトが自動生成されます。"),
+          el("p", {}, hasStaff
+            ? "シフト編成タブの「🤖 AI 自動生成」ボタンで、登録済みスタッフ・希望からシフトが自動生成されます。"
+            : "まずスタッフタブからスタッフを追加してください。希望収集 → AI生成 → 確定通知の流れで進みます。"),
           el("ul", { class: "list-disc pl-5 space-y-1 text-slate-600" }, [
             el("li", {}, "結果を確認 → 「確定する」"),
-            el("li", {}, "「💬 LINE通知文」でテンプレ生成"),
-            el("li", {}, "「📧 メール一斉送信」で自動配信"),
+            el("li", {}, "「💬 LINE 通知文を生成」でクリップボードにコピー"),
+            el("li", {}, "LINE グループに貼り付けて送信"),
           ]),
           el("p", { class: "text-xs text-slate-500 pt-2 border-t" },
             "わからないことがあれば右上の「ヘルプ」をクリック。"),

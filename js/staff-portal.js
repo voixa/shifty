@@ -9,6 +9,24 @@
   let data = null;
   let prefs = {};
   let dirty = false;
+  const DRAFT_KEY = `shifty.portal.draft.${token || "anon"}`;
+
+  function saveDraft() {
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ prefs, savedAt: Date.now() })); } catch (_) {}
+  }
+  function loadDraft() {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return null;
+      const j = JSON.parse(raw);
+      // 14 日以上前のドラフトは廃棄
+      if (Date.now() - (j.savedAt || 0) > 14 * 86400000) return null;
+      return j;
+    } catch (_) { return null; }
+  }
+  function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch (_) {}
+  }
 
   function toast(msg, type = "") {
     const t = document.createElement("div");
@@ -46,27 +64,38 @@
     if (data.weekStatus === "published") {
       renderPublished();
     } else {
-      // load existing prefs
+      // load existing prefs from server
       for (const p of (data.preferences || [])) {
         const sess = (data.sessions || []).find(s => s.startTime === p.startTime && s.endTime === p.endTime);
         if (sess) prefs[`${p.date}|${sess.id}`] = p.priority;
+      }
+      // restore localStorage draft if newer
+      const draft = loadDraft();
+      if (draft && Object.keys(draft.prefs || {}).length > 0) {
+        const keys = Object.keys(draft.prefs);
+        const hasUnsavedChange = keys.some(k => draft.prefs[k] !== prefs[k]);
+        if (hasUnsavedChange && confirm(
+          "前回未送信の入力があります。復元しますか？\n\n" +
+          "「キャンセル」を押すと送信済みの内容を表示します。"
+        )) {
+          prefs = { ...prefs, ...draft.prefs };
+          dirty = true;
+        } else {
+          clearDraft();
+        }
       }
       renderDraft();
     }
   }
 
   // ===== Draft mode (希望入力) =====
-  function priorityNext(cur) {
-    const order = ["want", "must", "avoid", null];
-    const i = order.indexOf(cur ?? null);
-    return order[(i + 1) % 4];
-  }
-  function priorityStyle(p) {
-    if (p === "must")  return { cls: "bg-red-100 border-red-300 text-red-800",                        label: "必須",   sub: "絶対入りたい" };
-    if (p === "want")  return { cls: "bg-emerald-100 border-emerald-300 text-emerald-800",            label: "希望",   sub: "入れたら入りたい" };
-    if (p === "avoid") return { cls: "bg-slate-200 border-slate-300 text-slate-600 line-through",     label: "不可",   sub: "避けたい" };
-    return                     { cls: "bg-white border-slate-300 text-slate-400",                     label: "未入力", sub: "タップで切替" };
-  }
+  // 4 ボタン並列方式 (must/want/avoid/null) — タップ 1 回で確定
+  const PRIORITIES = [
+    { id: "must",  label: "必須", emoji: "🔥",   activeCls: "bg-red-500 text-white border-red-500",       inactiveCls: "bg-white text-red-600 border-red-200" },
+    { id: "want",  label: "希望", emoji: "✅",   activeCls: "bg-emerald-500 text-white border-emerald-500", inactiveCls: "bg-white text-emerald-600 border-emerald-200" },
+    { id: "avoid", label: "不可", emoji: "🚫",   activeCls: "bg-slate-600 text-white border-slate-600",   inactiveCls: "bg-white text-slate-500 border-slate-200" },
+    { id: null,    label: "未定", emoji: "—",    activeCls: "bg-slate-100 text-slate-500 border-slate-300", inactiveCls: "bg-white text-slate-400 border-slate-200" },
+  ];
 
   function renderDraft() {
     const days = Array.from({ length: 7 }, (_, i) => addDays(data.weekStart, i));
@@ -87,13 +116,13 @@
           </div>
           <div class="gauge-bar"><div style="width:${progress}%;background:#4f46e5"></div></div>
         </div>
-        <div class="text-xs text-slate-500 mt-3">タップで <span class="text-emerald-700 font-semibold">希望</span> → <span class="text-red-700 font-semibold">必須</span> → <span class="text-slate-500 font-semibold line-through">不可</span> → 未入力 を切替</div>
+        <div class="text-xs text-slate-500 mt-3">各セッションの 4 ボタンから希望を選択（必須＝絶対入りたい / 希望＝入れたら入りたい / 不可＝避けたい / 未定＝任せる）</div>
       </div>
       <div id="grid" class="space-y-3"></div>
-      <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 shadow-2xl">
+      <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 shadow-2xl pb-safe">
         <div class="max-w-md mx-auto">
           <button id="saveBtn" class="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 font-semibold disabled:bg-slate-300">送信</button>
-          <div id="dirtyHint" class="text-center text-xs text-slate-500 mt-1 hidden">未送信の変更があります</div>
+          <div id="dirtyHint" class="text-center text-xs text-slate-500 mt-1 hidden">未送信の変更があります（自動下書き保存中）</div>
         </div>
       </div>`;
 
@@ -106,32 +135,42 @@
       dayCard.className = "bg-white rounded-xl border border-slate-200 overflow-hidden";
       dayCard.innerHTML = `
         <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 ${dowColor} font-semibold text-sm">${fmtDate(date)} (${dayLabel})</div>
-        <div class="p-3 space-y-2"></div>`;
+        <div class="p-3 space-y-3"></div>`;
       const inner = dayCard.querySelector(".p-3");
       for (const sess of sessions) {
         const key = `${date}|${sess.id}`;
         const cur = prefs[key] || null;
-        const sty = priorityStyle(cur);
-        const btn = document.createElement("button");
-        btn.className = `w-full text-left flex items-center justify-between gap-2 px-4 py-3 rounded-lg border transition ${sty.cls}`;
-        btn.innerHTML = `
-          <span class="flex items-center gap-2">
-            <span class="text-xl">${sess.icon || ""}</span>
-            <span>
-              <span class="font-medium block">${escapeHtml(sess.label)}</span>
-              <span class="text-[11px] block opacity-70">${sess.startTime}〜${sess.endTime}</span>
-            </span>
-          </span>
-          <span class="text-right">
-            <span class="text-sm font-semibold block">${sty.label}</span>
-            <span class="text-[10px] opacity-60 block">${sty.sub}</span>
-          </span>`;
-        btn.onclick = () => {
-          prefs[key] = priorityNext(cur);
-          dirty = true;
-          renderDraft();
-        };
-        inner.appendChild(btn);
+
+        const sessRow = document.createElement("div");
+        sessRow.className = "border border-slate-100 rounded-lg p-2";
+        sessRow.innerHTML = `
+          <div class="flex items-center gap-2 mb-2 px-1">
+            <span class="text-lg">${sess.icon || ""}</span>
+            <div class="flex-1">
+              <span class="font-medium text-sm">${escapeHtml(sess.label)}</span>
+              <span class="text-xs text-slate-500 ml-2">${sess.startTime}〜${sess.endTime}</span>
+            </div>
+          </div>
+          <div class="grid grid-cols-4 gap-1.5"></div>`;
+        const btnRow = sessRow.querySelector(".grid");
+        for (const p of PRIORITIES) {
+          const isActive = (cur ?? null) === p.id;
+          const btn = document.createElement("button");
+          btn.className = `text-xs font-semibold py-2.5 rounded-md border-2 transition active:scale-95 ${isActive ? p.activeCls : p.inactiveCls}`;
+          btn.innerHTML = `<div class="text-base leading-none">${p.emoji}</div><div class="mt-0.5">${p.label}</div>`;
+          btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+          btn.setAttribute("aria-label", `${escapeHtml(sess.label)} を「${p.label}」に設定`);
+          btn.onclick = () => {
+            // 同じものを再度押した場合は未定にトグル（誤タップで戻せる）
+            if ((cur ?? null) === p.id && p.id !== null) prefs[key] = null;
+            else prefs[key] = p.id;
+            dirty = true;
+            saveDraft();
+            renderDraft();
+          };
+          btnRow.appendChild(btn);
+        }
+        inner.appendChild(sessRow);
       }
       grid.appendChild(dayCard);
     }
@@ -160,6 +199,7 @@
         btn.textContent = "✓ 送信完了 (もう一度送信できます)";
         btn.disabled = false;
         dirty = false;
+        clearDraft();
         $("#dirtyHint").classList.add("hidden");
       } catch (e) {
         btn.textContent = "送信失敗 - 再試行";
