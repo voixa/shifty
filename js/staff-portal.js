@@ -143,12 +143,13 @@
 
         const sessRow = document.createElement("div");
         sessRow.className = "border border-slate-100 rounded-lg p-2";
+        // 全ユーザ入力 (sess.icon, sess.startTime/endTime) を escape して XSS を防ぐ
         sessRow.innerHTML = `
           <div class="flex items-center gap-2 mb-2 px-1">
-            <span class="text-lg">${sess.icon || ""}</span>
+            <span class="text-lg">${escapeHtml(sess.icon || "")}</span>
             <div class="flex-1">
               <span class="font-medium text-sm">${escapeHtml(sess.label)}</span>
-              <span class="text-xs text-slate-500 ml-2">${sess.startTime}〜${sess.endTime}</span>
+              <span class="text-xs text-slate-500 ml-2">${escapeHtml(sess.startTime || "")}〜${escapeHtml(sess.endTime || "")}</span>
             </div>
           </div>
           <div class="grid grid-cols-4 gap-1.5"></div>`;
@@ -273,12 +274,14 @@
           const h = calcHours(a.startTime, a.endTime);
           const div = document.createElement("div");
           div.className = "border-l-4 pl-3 py-2";
-          div.style.borderColor = pos.color;
+          // pos.color は管理者入力 — style に直接埋めるとCSS injection 余地。色形式チェック
+          const safeColor = /^#[0-9a-fA-F]{3,8}$/.test(pos.color || "") ? pos.color : "#64748b";
+          div.style.borderColor = safeColor;
           div.innerHTML = `
             <div class="flex items-center justify-between">
               <div>
                 <div class="text-base font-semibold">${escapeHtml(pos.label)}</div>
-                <div class="text-sm text-slate-700">${a.startTime}〜${a.endTime} <span class="text-xs text-slate-500">(${h.toFixed(1)}h)</span></div>
+                <div class="text-sm text-slate-700">${escapeHtml(a.startTime || "")}〜${escapeHtml(a.endTime || "")} <span class="text-xs text-slate-500">(${h.toFixed(1)}h)</span></div>
               </div>
               <div class="text-right text-xs text-slate-500">${fmtYen(a.cost || (data.staff.hourlyWage * h))}</div>
             </div>`;

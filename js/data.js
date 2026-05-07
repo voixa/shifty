@@ -114,6 +114,9 @@
     return Object.keys(state.weeks || {}).sort();
   }
 
+  // 直近に取得・保存した state version (楽観的ロック用)
+  let _lastVersion = null;
+
   // ===== Storage =====
   async function loadState() {
     // 新規初期化時のシード関数を選択
@@ -126,7 +129,10 @@
 
     try {
       const remote = await window.ShiftyAPI.getState();
-      if (remote && remote.staff) return migrate(remote);
+      if (remote && remote.staff) {
+        if (typeof remote._version === "number") _lastVersion = remote._version;
+        return migrate(remote);
+      }
     } catch (e) {
       // 401 などはここで再スロー（呼び出し側で auth 処理）
       if (String(e.message).includes("401") || String(e.message).includes("unauthenticated")) throw e;
@@ -151,14 +157,28 @@
   }
 
   async function saveState(state) {
-    // デモモードでは本番側 STORAGE_KEY に書かない（クロス汚染防止）。
-    // デモは window.ShiftyAPI.saveState 経由で DEMO_KEY (api.js 内) のみに書かれる
     if (!window.__SHIFTY_DEMO_MODE__) {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
     }
-    try { await window.ShiftyAPI.saveState(state); }
-    catch (e) {
+    // 楽観的ロック: 直近取得した _version を含めて送信
+    const stateForSend = _lastVersion !== null ? { ...state, _version: _lastVersion } : state;
+    try {
+      const r = await window.ShiftyAPI.saveState(stateForSend);
+      if (r && typeof r.version === "number") _lastVersion = r.version;
+    } catch (e) {
       if (String(e.message).includes("401") || String(e.message).includes("unauthenticated")) throw e;
+      // 409 conflict: 他のタブが先に保存した場合
+      if (String(e.message).includes("409") || String(e.message).includes("version_conflict")) {
+        if (typeof window.toast === "function") {
+          window.toast("⚠ 他のタブで変更がありました。リロードしてください", "error", 6000);
+        } else {
+          console.warn("Version conflict — reload required");
+          if (confirm("他のタブで変更が保存されました。最新を取得するためにリロードしますか？")) {
+            location.reload();
+          }
+        }
+        throw e;
+      }
       console.warn("API saveState failed (kept local backup)", e);
     }
   }

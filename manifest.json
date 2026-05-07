@@ -2,7 +2,7 @@
   "name": "Shifty - AIシフト自動作成",
   "short_name": "Shifty",
   "description": "飲食店向けAIシフト自動作成・スタッフ希望収集・複数週管理",
-  "start_url": "/app",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",

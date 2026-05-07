@@ -376,6 +376,9 @@ _login_attempts = {}
 LOCK_AFTER = 5
 LOCK_DURATION_SEC = 300
 
+# 未セットアップ時の timing 等化用ダミーハッシュ (起動時に 1 回計算)
+_DUMMY_PASS_HASH = generate_password_hash("__shifty_timing_equalize_dummy__")
+
 
 def _client_ip():
     # ProxyFix が ProxyFix(x_for=1) で 1 段だけの XFF を信頼するように補正済。
@@ -500,8 +503,8 @@ def auth_login():
     pwd = payload.get("password", "")
     stored = storage.get_config("admin_pass_hash")
     if not stored:
-        # 未セットアップでも bcrypt 計算を走らせて timing 一致させる（M3 対策）
-        check_password_hash("scrypt:32768:8:1$x$x" * 8, pwd)
+        # 真の bcrypt 計算で timing 一致させる（不正フォーマット dummy では即 False で時間漏洩する）
+        check_password_hash(_DUMMY_PASS_HASH, pwd)
         _record_failure(ip)
         rec = _login_attempts.get(ip, (0, 0))
         return jsonify({"error": "setup_required", "attemptsLeft": max(0, LOCK_AFTER - rec[0])}), 401
@@ -863,9 +866,11 @@ def api_stripe_webhook():
                     return jsonify({"ok": True, "duplicate": True})
     except Exception as e:
         print(f"[stripe] persist failed: {e}")
+        # 永続失敗時は 500 を返して Stripe の再送に任せる（メール二重発信を防止）
+        return jsonify({"error": "persist_failed"}), 500
 
-    # 重要イベントなら通知
-    if et in ("checkout.session.completed", "customer.subscription.deleted"):
+    # 重要イベントなら通知 (persisted=True のときのみ)
+    if persisted and et in ("checkout.session.completed", "customer.subscription.deleted"):
         send_email(
             to_addr=_safe_header(NOTIFY_TO),
             subject=_safe_header(f"【Shifty/Stripe】{et}: {record['email']}"),

@@ -623,7 +623,7 @@
         </details>
         <details class="bg-white border border-slate-200 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">途中でプラン変更・解約できますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
-          <p class="text-slate-600 text-sm mt-3">はい、いつでも変更・解約できます。違約金等は一切発生しません。解約後もデータは 30 日間保持し、再開時に復元可能です。</p>
+          <p class="text-slate-600 text-sm mt-3">はい、いつでも変更・解約できます。プラン変更・解約は <code>support@in-dx.jp</code> までメールにてお申し出ください（24 時間以内に処理いたします）。違約金等は一切発生しません。解約後もデータは 30 日間保持し、再開時に復元可能です。</p>
         </details>
       </div>
     </div>
@@ -772,34 +772,104 @@
       }
     });
 
-    // Plan CTA → Stripe Checkout (price_id 未設定なら #contact フォールバック)
+    // Plan CTA → 店舗情報を取得してから Stripe Checkout
+    function showSignupModal(plan, originalCtaEl) {
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4';
+      overlay.innerHTML = `
+        <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
+          <div class="flex justify-between items-start">
+            <div>
+              <h3 class="font-bold text-lg">無料トライアル登録</h3>
+              <p class="text-xs text-slate-500 mt-1">14 日間・クレカ不要・自動課金なし</p>
+            </div>
+            <button id="su-close" class="text-slate-400 hover:text-slate-600 text-xl leading-none" aria-label="閉じる">×</button>
+          </div>
+          <div class="space-y-3 text-sm">
+            <label class="block">
+              <span class="text-slate-700 font-medium">店舗名 <span class="text-red-500">*</span></span>
+              <input id="su-restaurant" type="text" required maxlength="100"
+                class="mt-1 w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                placeholder="例: いざかや 縁">
+            </label>
+            <label class="block">
+              <span class="text-slate-700 font-medium">ご担当者名 <span class="text-red-500">*</span></span>
+              <input id="su-contact" type="text" required maxlength="100"
+                class="mt-1 w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                placeholder="例: 田中 太郎">
+            </label>
+            <label class="block">
+              <span class="text-slate-700 font-medium">メールアドレス <span class="text-red-500">*</span></span>
+              <input id="su-email" type="email" required maxlength="200"
+                class="mt-1 w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none"
+                placeholder="contact@example.com">
+              <span class="text-xs text-slate-500 mt-1 block">セットアップ手順の送付先になります</span>
+            </label>
+          </div>
+          <button id="su-submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 text-sm font-semibold disabled:opacity-50">
+            次へ：決済画面へ進む（${plan === 'starter' ? 'Starter ¥3,000' : plan === 'pro' ? 'Pro ¥10,000' : 'Standard ¥6,000'}/月）
+          </button>
+          <p id="su-error" class="text-xs text-red-600 hidden"></p>
+          <p class="text-[11px] text-slate-500 text-center">
+            この情報は決済セッションに添付され、サポートチームがお店ごとのセットアップを準備するために使用します。
+          </p>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const close = () => overlay.remove();
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+      overlay.querySelector('#su-close').onclick = close;
+      const restaurant = overlay.querySelector('#su-restaurant');
+      const contact = overlay.querySelector('#su-contact');
+      const email = overlay.querySelector('#su-email');
+      const errEl = overlay.querySelector('#su-error');
+      setTimeout(() => restaurant.focus(), 50);
+
+      overlay.querySelector('#su-submit').onclick = async () => {
+        errEl.classList.add('hidden');
+        const r = restaurant.value.trim();
+        const c = contact.value.trim();
+        const e2 = email.value.trim();
+        if (!r || !c || !e2) {
+          errEl.textContent = 'すべての項目をご入力ください';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        if (!e2.includes('@')) {
+          errEl.textContent = 'メールアドレスの形式が正しくありません';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        const btn = overlay.querySelector('#su-submit');
+        btn.disabled = true; btn.textContent = '読込中…';
+        try {
+          const resp = await fetch('/api/checkout/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plan, restaurantName: r, contactName: c, email: e2 }),
+          });
+          const j = await resp.json();
+          if (j.url) {
+            location.href = j.url;
+            return;
+          }
+          errEl.textContent = '決済セッションの作成に失敗しました。問合せフォームをご利用ください。';
+          errEl.classList.remove('hidden');
+          btn.disabled = false; btn.textContent = '次へ：決済画面へ進む';
+        } catch (e) {
+          errEl.textContent = '通信に失敗しました。問合せフォームをご利用ください。';
+          errEl.classList.remove('hidden');
+          btn.disabled = false; btn.textContent = '次へ：決済画面へ進む';
+        }
+      };
+    }
+
     document.querySelectorAll('.plan-cta').forEach(el => {
       el.addEventListener('click', async (e) => {
         const plan = el.getAttribute('data-plan');
         if (!plan) return;
         e.preventDefault();
-        const orig = el.textContent;
-        el.textContent = '読込中…';
-        el.style.pointerEvents = 'none';
-        try {
-          const r = await fetch('/api/checkout/session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ plan }),
-          });
-          const j = await r.json();
-          if (j.url) {
-            location.href = j.url;
-            return;
-          }
-          // フォールバック: 問合せフォームへ
-          location.hash = '#contact';
-        } catch (err) {
-          location.hash = '#contact';
-        } finally {
-          el.textContent = orig;
-          el.style.pointerEvents = '';
-        }
+        showSignupModal(plan, el);
       });
     });
   </script>

@@ -480,10 +480,13 @@
       for (const a of state.assignments) {
         (byDate[a.date] = byDate[a.date] || []).push(a);
       }
+      // H6 fix: 同日内 swap が成立したら次の round 全体を再開（stale 参照防止）
+      let stepBSwapped = false;
       for (const date of Object.keys(byDate)) {
+        if (stepBSwapped) break;
         const dayAss = byDate[date];
-        for (let i = 0; i < dayAss.length; i++) {
-          for (let j = i + 1; j < dayAss.length; j++) {
+        for (let i = 0; i < dayAss.length && !stepBSwapped; i++) {
+          for (let j = i + 1; j < dayAss.length && !stepBSwapped; j++) {
             const a = dayAss[i], b = dayAss[j];
             if (a.staffId === b.staffId) continue;
             // 両方の状態から自分を抜いた仮想 state
@@ -539,6 +542,7 @@
               if (ia >= 0) state.assignments[ia] = newA;
               if (ib >= 0) state.assignments[ib] = newB;
               improved = true;
+              stepBSwapped = true; // 1 swap で round を抜けて再構築
             }
           }
         }
@@ -834,13 +838,20 @@
       startTime: target.startTime,
       endTime: target.endTime,
     };
-    const eligible = staffWithCost.filter(
+    const eligibleAll = staffWithCost.filter(
       (s) => s.id !== target.staffId && isEligible(s, slotLike, state, laborRules)
     );
+    // avoid 2-pass: 候補が他にいる場合は avoid 持ちを除外
+    const eligibleStrict = eligibleAll.filter(
+      (s) => !hasAvoidPreference(s, slotLike, preferences)
+    );
+    const eligible = eligibleStrict.length > 0 ? eligibleStrict : eligibleAll;
+    const isAvoidRelaxed = eligibleStrict.length === 0 && eligibleAll.length > 0;
     return eligible
       .map((s) => ({
         staff: s,
         ...scoreCandidate(s, slotLike, state, preferences, laborRules, weights),
+        avoidRelaxed: isAvoidRelaxed && hasAvoidPreference(s, slotLike, preferences),
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 5);

@@ -1,5 +1,6 @@
 // Shifty Service Worker v3 — HTML はキャッシュせず常に network、静的アセットのみキャッシュ
-const CACHE = "shifty-v4";
+// CACHE 名を bump すると activate 時に旧キャッシュを削除する
+const CACHE = "shifty-v5";
 const STATIC_ASSETS = [
   "/styles.css",
   "/manifest.json",
