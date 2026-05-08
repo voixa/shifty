@@ -574,9 +574,21 @@
           const h = calcHours(a.startTime, a.endTime);
           const div = document.createElement("div");
           div.className = "border-l-4 pl-3 py-2";
-          // pos.color は管理者入力 — style に直接埋めるとCSS injection 余地。色形式チェック
           const safeColor = /^#[0-9a-fA-F]{3,8}$/.test(pos.color || "") ? pos.color : "#64748b";
           div.style.borderColor = safeColor;
+
+          // 同シフトメンバー (Round 5)
+          const cws = (data.coworkers || {})[a.id] || [];
+          const cwHtml = cws.length ? `
+            <div class="mt-1.5 text-[11px] bg-blue-50 border border-blue-100 rounded px-2 py-1">
+              <span class="text-blue-700 font-semibold">👥 同シフト:</span>
+              ${cws.map(c => {
+                const cpos = (data.positions || []).find(p => p.id === c.position) || { label: c.position };
+                return `<span class="inline-block bg-white border border-blue-200 rounded px-1.5 py-0.5 ml-1">${escapeHtml(c.name)}<span class="text-blue-500 text-[10px]"> (${escapeHtml(cpos.label)})</span></span>`;
+              }).join("")}
+            </div>` : `
+            <div class="mt-1 text-[11px] text-slate-400">👥 この時間帯はあなた一人です</div>`;
+
           div.innerHTML = `
             <div class="flex items-center justify-between">
               <div>
@@ -584,7 +596,8 @@
                 <div class="text-sm text-slate-700">${escapeHtml(a.startTime || "")}〜${escapeHtml(a.endTime || "")} <span class="text-xs text-slate-500">(${h.toFixed(1)}h)</span></div>
               </div>
               <div class="text-right text-xs text-slate-500">${fmtYen(a.cost || (data.staff.hourlyWage * h))}</div>
-            </div>`;
+            </div>
+            ${cwHtml}`;
           inner.appendChild(div);
         }
       }

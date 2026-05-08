@@ -262,6 +262,90 @@ function viewDashboard() {
         { staff: state.staff, slots: curSlots(), preferences: curPrefs() })
     : null;
 
+  // ダッシュボード警告サマリ (Round 5) — 注意点を一覧化
+  const alerts = [];
+  // 1. 希望未提出
+  const notSub = state.staff.filter(s => !curPrefs().some(p => p.staffId === s.id));
+  if (notSub.length > 0 && curStatus() === "draft") {
+    alerts.push({
+      level: "warn", emoji: "📝", text: `希望未提出 ${notSub.length} 名`,
+      detail: notSub.slice(0, 3).map(s => s.name).join("・") + (notSub.length > 3 ? ` 他${notSub.length - 3}名` : ""),
+      action: () => { setTab("preferences"); }, actionLabel: "希望収集タブへ",
+    });
+  }
+  // 2. 不足ポジション
+  if (assignments.length > 0) {
+    const unfilledN = curSlots().reduce((sum, sl) => {
+      const filled = assignments.filter(a => a.date === sl.date && a.position === sl.position && a.startTime === sl.startTime).length;
+      return sum + Math.max(0, sl.requiredCount - filled);
+    }, 0);
+    if (unfilledN > 0) {
+      alerts.push({
+        level: "error", emoji: "⚠️", text: `${unfilledN} 枠が不足`,
+        detail: "AI 自動生成で埋まらなかった枠があります",
+        action: () => { setTab("schedule"); }, actionLabel: "シフト編成へ",
+      });
+    }
+  }
+  // 3. 予算超過
+  if (metrics && metrics.totalCost > state.meta.weeklyBudget) {
+    const over = metrics.totalCost - state.meta.weeklyBudget;
+    alerts.push({
+      level: "warn", emoji: "💸", text: `予算超過 ${fmtYen(over)}`,
+      detail: `予算 ${fmtYen(state.meta.weeklyBudget)} → 実績 ${fmtYen(metrics.totalCost)}`,
+      action: () => { setTab("schedule"); }, actionLabel: "シフト編成へ",
+    });
+  }
+  // 4. 労務違反
+  const lr = state.meta.laborRules || {};
+  const overLimit = state.staff.filter(s => {
+    const h = aggregateHours()[s.id] || 0;
+    return h > Math.min(s.maxHoursPerWeek || Infinity, lr.maxHoursPerWeek || Infinity);
+  });
+  if (overLimit.length > 0) {
+    alerts.push({
+      level: "error", emoji: "⚖️", text: `労務上限超過 ${overLimit.length} 名`,
+      detail: overLimit.slice(0, 2).map(s => s.name).join("・"),
+      action: () => { setTab("schedule"); }, actionLabel: "確認",
+    });
+  }
+  // 5. メール未登録 (確定時に通知できないリスク)
+  if (state.staff.length > 0 && curStatus() === "draft") {
+    const noEmail = state.staff.filter(s => !(s.email || "").trim()).length;
+    if (noEmail > 0) {
+      alerts.push({
+        level: "info", emoji: "📧", text: `メール未登録 ${noEmail} 名`,
+        detail: "確定通知は LINE 通知文をご利用ください",
+        action: () => { setTab("staff"); }, actionLabel: "スタッフ編集",
+      });
+    }
+  }
+
+  if (alerts.length > 0) {
+    const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+    card.appendChild(el("div", { class: "font-semibold text-sm text-slate-700 mb-2" }, `⚠️ 注意事項 ${alerts.length} 件`));
+    const list = el("div", { class: "space-y-1.5" });
+    for (const a of alerts) {
+      const cls = a.level === "error" ? "bg-red-50 border-red-200 text-red-900"
+        : a.level === "warn" ? "bg-amber-50 border-amber-200 text-amber-900"
+        : "bg-blue-50 border-blue-200 text-blue-900";
+      const row = el("div", { class: `flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm ${cls}` });
+      row.appendChild(el("div", { class: "flex-1" }, [
+        el("span", { class: "font-semibold" }, `${a.emoji} ${a.text}`),
+        el("span", { class: "text-xs ml-2 opacity-80" }, a.detail),
+      ]));
+      if (a.action) {
+        row.appendChild(el("button", {
+          class: "text-xs bg-white border border-current rounded px-2 py-1 font-semibold",
+          onclick: a.action,
+        }, a.actionLabel || "確認 →"));
+      }
+      list.appendChild(row);
+    }
+    card.appendChild(list);
+    wrap.appendChild(card);
+  }
+
   const kpis = el("div", { class: "grid grid-cols-2 md:grid-cols-4 gap-3" });
   kpis.appendChild(kpiCard("スタッフ", state.staff.length + "名", "👥"));
   kpis.appendChild(kpiCard("シフト枠", curSlots().reduce((s, x) => s + x.requiredCount, 0) + "枠", "🪑"));
@@ -2270,9 +2354,11 @@ function viewExport() {
 
   wrap.appendChild(el("div", { class: "flex gap-2 no-print flex-wrap" }, [
     el("button", { class: "text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-md px-3 py-1.5",
-      onclick: downloadCsv }, "📄 CSVダウンロード"),
+      onclick: downloadCsv, title: "週次のシフト表（汎用）" }, "📄 シフト CSV (週次)"),
+    el("button", { class: "text-sm bg-emerald-700 hover:bg-emerald-800 text-white rounded-md px-3 py-1.5",
+      onclick: () => openPayrollCsvDialog(), title: "月次の給与計算用 CSV" }, "💴 給与計算 CSV"),
     el("button", { class: "text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-md px-3 py-1.5",
-      onclick: () => window.print() }, "🖨 印刷ビュー"),
+      onclick: openPrintView }, "🖨 印刷ビュー"),
     el("button", { class: "text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-1.5",
       onclick: openLineNotificationDialog }, "💬 LINE通知文を作成"),
   ]));
@@ -2302,6 +2388,123 @@ function viewExport() {
   tbl.innerHTML = html;
   wrap.appendChild(tbl);
   return wrap;
+}
+
+// 給与計算用 CSV ダイアログ (Round 5)
+function openPayrollCsvDialog() {
+  const w0 = state.meta.currentWeekStart;
+  const monthKey = w0.slice(0, 7);  // YYYY-MM
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "💴 給与計算 CSV エクスポート"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    "確定済シフトのみ集計します。月次の合計時間・給与・各日明細を出力。"));
+
+  body.appendChild(el("label", { class: "block text-sm" }, [
+    el("span", { class: "text-slate-600" }, "対象月"),
+    el("input", { id: "pcsv-month", type: "month", class: "mt-1 w-full border rounded-md px-3 py-2", value: monthKey }),
+  ]));
+
+  body.appendChild(el("label", { class: "block text-sm" }, [
+    el("span", { class: "text-slate-600" }, "形式"),
+    el("select", { id: "pcsv-format", class: "mt-1 w-full border rounded-md px-3 py-2" }, [
+      el("option", { value: "summary" }, "サマリ（スタッフ × 合計時間 + 給与）"),
+      el("option", { value: "detail" }, "明細（日付 × スタッフ × 時間）"),
+      el("option", { value: "yayoi" }, "弥生給与 互換 (汎用 CSV)"),
+      el("option", { value: "freee" }, "freee 人事労務 互換 (時間単位の従業員別)"),
+    ]),
+  ]));
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-3" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-md font-semibold",
+      onclick: () => {
+        const month = $("#pcsv-month").value;
+        const format = $("#pcsv-format").value;
+        downloadPayrollCsv(month, format);
+        closeModal();
+      },
+    }, "ダウンロード"),
+  ]));
+  modal(body);
+}
+
+function downloadPayrollCsv(monthKey, format) {
+  // 当月の確定済 assignments を全 weeks から集約
+  const allWeeks = state.weeks || {};
+  const monthAssignments = [];
+  for (const wk of Object.values(allWeeks)) {
+    if (wk.status !== "published") continue;
+    for (const a of (wk.assignments || [])) {
+      if ((a.date || "").startsWith(monthKey)) monthAssignments.push(a);
+    }
+  }
+  if (!monthAssignments.length) {
+    toast(`${monthKey} の確定済シフトがありません`, "error");
+    return;
+  }
+
+  // スタッフ別集計
+  const byStaff = {};
+  for (const a of monthAssignments) {
+    if (!byStaff[a.staffId]) byStaff[a.staffId] = { hours: 0, pay: 0, days: [] };
+    const h = calcHours(a.startTime, a.endTime);
+    byStaff[a.staffId].hours += h;
+    byStaff[a.staffId].pay += a.cost;
+    byStaff[a.staffId].days.push(a);
+  }
+
+  let csv = "";
+  let filename = `payroll_${monthKey}_${format}.csv`;
+
+  if (format === "summary") {
+    csv = "スタッフID,氏名,本職,時給,合計時間(h),合計給与(円)\n";
+    for (const s of state.staff) {
+      const r = byStaff[s.id];
+      if (!r) continue;
+      csv += [s.id, s.name, posCfg(s.position).label, s.hourlyWage, r.hours.toFixed(2), Math.round(r.pay)]
+        .map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
+    }
+  } else if (format === "detail") {
+    csv = "日付,曜日,スタッフID,氏名,開始,終了,時間(h),ポジション,給与(円)\n";
+    monthAssignments.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+    for (const a of monthAssignments) {
+      const s = state.staff.find(x => x.id === a.staffId);
+      if (!s) continue;
+      const h = calcHours(a.startTime, a.endTime);
+      const dow = DAY_LABELS[dayOfWeek(a.date)];
+      csv += [a.date, dow, s.id, s.name, a.startTime, a.endTime, h.toFixed(2), posCfg(a.position).label, Math.round(a.cost)]
+        .map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
+    }
+  } else if (format === "yayoi") {
+    // 弥生給与の汎用取込形式 (社員番号,氏名,勤務時間,合計支給額)
+    csv = "社員番号,氏名,勤務時間,基本給(時給×時間)\n";
+    for (const s of state.staff) {
+      const r = byStaff[s.id];
+      if (!r) continue;
+      csv += [s.id, s.name, r.hours.toFixed(2), Math.round(r.pay)]
+        .map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
+    }
+    filename = `yayoi_${monthKey}.csv`;
+  } else if (format === "freee") {
+    // freee 人事労務の取込形式 (従業員番号,氏名,労働時間,時給,給与)
+    csv = "従業員番号,従業員氏名,労働時間,時給,給与額\n";
+    for (const s of state.staff) {
+      const r = byStaff[s.id];
+      if (!r) continue;
+      csv += [s.id, s.name, r.hours.toFixed(2), s.hourlyWage, Math.round(r.pay)]
+        .map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
+    }
+    filename = `freee_${monthKey}.csv`;
+  }
+
+  const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast(`${filename} をダウンロード (${Object.keys(byStaff).length} 名分)`, "success");
 }
 
 function downloadCsv() {

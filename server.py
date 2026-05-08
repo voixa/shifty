@@ -1797,6 +1797,25 @@ def api_t_portal_get(slug, token):
     prefs = [p for p in week_data.get("preferences", []) if p["staffId"] == staff_id]
     assignments = [a for a in week_data.get("assignments", []) if a["staffId"] == staff_id]
     comments = (week_data.get("staffComments", {}) or {}).get(staff_id, {})
+
+    # 同シフトメンバー (Round 5) — 自分の各 assignment と時間が重なる他スタッフ
+    coworkers = {}  # assignment_id -> [{staffId, name, position}, ...]
+    other_assignments = [a for a in week_data.get("assignments", []) if a.get("staffId") != staff_id]
+    def _ovl(a, b):
+        try:
+            def _t(s): h, m = s.split(":"); return int(h) * 60 + int(m)
+            return a.get("date") == b.get("date") and _t(a["startTime"]) < _t(b["endTime"]) and _t(b["startTime"]) < _t(a["endTime"])
+        except Exception:
+            return False
+    staff_lookup = {s["id"]: s for s in (state.get("staff") or [])}
+    for ma in assignments:
+        ows = []
+        for oa in other_assignments:
+            if _ovl(ma, oa):
+                cs = staff_lookup.get(oa.get("staffId"))
+                if cs:
+                    ows.append({"name": cs.get("name"), "position": cs.get("position"), "startTime": oa.get("startTime"), "endTime": oa.get("endTime")})
+        coworkers[ma.get("id")] = ows
     public_staff = {
         "id": staff.get("id"),
         "name": staff.get("name"),
@@ -1873,6 +1892,7 @@ def api_t_portal_get(slug, token):
         "preferences": prefs,
         "comments": comments,
         "assignments": assignments,
+        "coworkers": coworkers,
         "weekStart": current_wk,
         "weekStatus": week_data.get("status", "draft"),
         "publishedAt": week_data.get("publishedAt"),
