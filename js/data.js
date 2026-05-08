@@ -279,6 +279,12 @@
       minRestDaysPerWeek: 1,
       minRestHoursBetweenShifts: 8,
     };
+    // 深夜手当設定 (Round 14)
+    if (state.meta.payrollSettings === undefined) state.meta.payrollSettings = {
+      nightAllowanceEnabled: false,  // 深夜手当 ON/OFF
+      nightStartHour: 22,            // 深夜開始 (時)
+      nightRate: 1.25,               // 倍率
+    };
     // 自動アップグレード: 旧デフォルト 8h は飲食店現実に合わずカバー率が壊滅するため 12h に引き上げ
     // (lunch 11-15 + dinner 17-22 = 9h を許可。意図的に 8h 設定済みの顧客がいないので無条件で書き換え)
     if (state.meta.laborRules.maxHoursPerDay <= 8) state.meta.laborRules.maxHoursPerDay = 12;

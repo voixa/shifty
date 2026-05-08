@@ -1880,6 +1880,7 @@ def api_t_portal_get(slug, token):
                         "position": a.get("position"),
                         "hours": round(eff_hours, 2),
                         "pay": int(pay),
+                        "note": a.get("note", ""),
                     })
     history_assignments.sort(key=lambda x: (x.get("date", ""), x.get("startTime", "")), reverse=True)
     history_assignments = history_assignments[:30]

@@ -278,15 +278,18 @@
           <summary class="text-sm font-semibold cursor-pointer select-none">📜 過去シフト履歴（直近 ${data.history.length} 件）</summary>
           <div class="mt-2 space-y-1 text-xs">
             ${data.history.map(h => `
-              <div class="flex items-center justify-between bg-slate-50 rounded p-1.5">
-                <div>
-                  <span class="font-mono">${escapeHtml(h.date)}</span>
-                  <span class="text-slate-600">${escapeHtml(h.startTime)}〜${escapeHtml(h.endTime)}</span>
+              <div class="bg-slate-50 rounded p-1.5">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <span class="font-mono">${escapeHtml(h.date)}</span>
+                    <span class="text-slate-600">${escapeHtml(h.startTime)}〜${escapeHtml(h.endTime)}</span>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-slate-700">${h.hours}h</div>
+                    <div class="text-[10px] text-slate-500">${fmtYen(h.pay)}</div>
+                  </div>
                 </div>
-                <div class="text-right">
-                  <div class="text-slate-700">${h.hours}h</div>
-                  <div class="text-[10px] text-slate-500">${fmtYen(h.pay)}</div>
-                </div>
+                ${(h.note && h.note.trim()) ? `<div class="mt-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">📝 ${escapeHtml(h.note.trim())}</div>` : ""}
               </div>`).join("")}
           </div>
         </details>
@@ -646,12 +649,18 @@
       }
       const pos = (data.positions || []).find(p => p.id === next.position) || { label: next.position };
       const dowLabel = ["日","月","火","水","木","金","土"][next.dt.getDay()];
+      const nextNote = (next.note && next.note.trim()) ? `
+          <div class="mt-2 bg-white/20 backdrop-blur-sm rounded px-2 py-1 text-xs flex items-start gap-1">
+            <span class="font-semibold">📝</span>
+            <span class="whitespace-pre-wrap">${escapeHtml(next.note.trim())}</span>
+          </div>` : "";
       nextShiftCard = `
         <div class="bg-gradient-to-br from-blue-500 to-brand-600 rounded-xl p-4 mb-3 text-white shadow-lg">
           <div class="text-xs opacity-90">⏰ 次のシフト</div>
           <div class="font-bold text-lg mt-1">${next.date.slice(5)} (${dowLabel}) ${escapeHtml(next.startTime || "")}〜${escapeHtml(next.endTime || "")}</div>
           <div class="text-sm opacity-90 mt-0.5">${escapeHtml(pos.label)}</div>
           <div class="text-2xl font-bold mt-2">${countdown}</div>
+          ${nextNote}
         </div>`;
     }
 
@@ -689,15 +698,18 @@
           <summary class="text-sm font-semibold cursor-pointer select-none">📜 過去シフト履歴（直近 ${data.history.length} 件）</summary>
           <div class="mt-2 space-y-1 text-xs">
             ${data.history.map(h => `
-              <div class="flex items-center justify-between bg-slate-50 rounded p-1.5">
-                <div>
-                  <span class="font-mono">${escapeHtml(h.date)}</span>
-                  <span class="text-slate-600">${escapeHtml(h.startTime)}〜${escapeHtml(h.endTime)}</span>
+              <div class="bg-slate-50 rounded p-1.5">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <span class="font-mono">${escapeHtml(h.date)}</span>
+                    <span class="text-slate-600">${escapeHtml(h.startTime)}〜${escapeHtml(h.endTime)}</span>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-slate-700">${h.hours}h</div>
+                    <div class="text-[10px] text-slate-500">${fmtYen(h.pay)}</div>
+                  </div>
                 </div>
-                <div class="text-right">
-                  <div class="text-slate-700">${h.hours}h</div>
-                  <div class="text-[10px] text-slate-500">${fmtYen(h.pay)}</div>
-                </div>
+                ${(h.note && h.note.trim()) ? `<div class="mt-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">📝 ${escapeHtml(h.note.trim())}</div>` : ""}
               </div>`).join("")}
           </div>
         </details>
@@ -761,6 +773,13 @@
               ⛔ 今日休みたい（緊急連絡）
             </button>` : "";
 
+          // 個別シフトメモ (Round 14 TOP 3) — 店長が設定した申し送り
+          const noteHtml = (a.note && a.note.trim()) ? `
+            <div class="mt-2 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 text-[12px] text-amber-900 flex items-start gap-1.5">
+              <span class="font-semibold whitespace-nowrap">📝 店長から:</span>
+              <span class="whitespace-pre-wrap">${escapeHtml(a.note.trim())}</span>
+            </div>` : "";
+
           div.innerHTML = `
             <div class="flex items-center justify-between">
               <div>
@@ -769,6 +788,7 @@
               </div>
               <div class="text-right text-xs text-slate-500">${fmtYen(a.cost || (data.staff.hourlyWage * h))}</div>
             </div>
+            ${noteHtml}
             ${cwHtml}
             ${emergencyBtn}`;
           inner.appendChild(div);
@@ -971,7 +991,7 @@
         `DTEND;TZID=Asia/Tokyo:${dtJst(a.date, a.endTime)}`,
         `SUMMARY:${escapeIcs(restaurant + " " + (pos.label || ""))}`,
         `LOCATION:${escapeIcs(restaurant)}`,
-        `DESCRIPTION:${escapeIcs(`${staffName} さんのシフト\\n${restaurant}\\n\\n勤務時間: ${a.startTime}〜${a.endTime}\\nポジション: ${pos.label}`)}`,
+        `DESCRIPTION:${escapeIcs(`${staffName} さんのシフト\\n${restaurant}\\n\\n勤務時間: ${a.startTime}〜${a.endTime}\\nポジション: ${pos.label}${a.note ? `\\n\\n📝 店長メモ: ${a.note}` : ""}`)}`,
         "BEGIN:VALARM",
         "ACTION:DISPLAY",
         "DESCRIPTION:出勤の 1 時間前です",

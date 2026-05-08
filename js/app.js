@@ -1039,6 +1039,9 @@ function viewStaff() {
       el("button", { class: "text-xs text-emerald-600 hover:underline mr-2",
         title: "希望入力ポータルの URL をコピー（既存があれば再利用）",
         onclick: () => copyStaffLink(s) }, "🔗 リンク"),
+      el("button", { class: "text-xs text-blue-600 hover:underline mr-2",
+        title: "QR コード表示（紙印刷で渡せる）",
+        onclick: () => showStaffQR(s) }, "📱 QR"),
       el("button", { class: "text-xs text-amber-600 hover:underline mr-2",
         title: "URL を再発行して旧 URL を失効させる（退職者対応・URL流出時など）",
         onclick: () => regenerateStaffLink(s) }, "🔄 再発行"),
@@ -1084,6 +1087,76 @@ async function copyStaffLink(s) {
       toast(`${s.name} の既存リンクをコピーしました`, "info");
     }
   } catch (e) { toast("リンク生成失敗: " + e.message, "error"); }
+}
+
+// スタッフ QR コード表示 (Round 14)
+async function showStaffQR(s) {
+  let token;
+  try {
+    const r = await window.ShiftyAPI.genStaffToken(s.id);
+    token = r.token;
+  } catch (e) { toast("リンク生成失敗: " + e.message, "error"); return; }
+  const url = _staffPortalUrl(token);
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, `📱 ${s.name} さんの QR コード`));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    "印刷してスタッフに直接渡せます。スマホでスキャンするとポータルが開きます。"));
+
+  const qrWrap = el("div", { id: "qr-wrap", class: "flex justify-center bg-white p-4 border-2 border-slate-300 rounded" });
+  body.appendChild(qrWrap);
+
+  body.appendChild(el("div", { class: "bg-slate-50 rounded p-2 text-xs font-mono break-all" }, url));
+
+  body.appendChild(el("div", { class: "flex gap-2 justify-end" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md font-semibold",
+      onclick: () => {
+        const canvas = qrWrap.querySelector("canvas");
+        if (canvas) {
+          const link = document.createElement("a");
+          link.download = `qr_${s.name}.png`;
+          link.href = canvas.toDataURL();
+          document.body.appendChild(link); link.click(); link.remove();
+          toast("QR コードをダウンロード", "success");
+        }
+      },
+    }, "💾 PNG ダウンロード"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-slate-700 text-white rounded-md font-semibold",
+      onclick: () => {
+        // 印刷用ウィンドウ
+        const canvas = qrWrap.querySelector("canvas");
+        if (canvas) {
+          const w = window.open("", "_blank");
+          if (w) {
+            w.document.write(`<html><head><title>QR - ${s.name}</title>
+              <style>body{font-family:system-ui;text-align:center;padding:20mm}img{width:60mm;height:60mm}h1{font-size:14pt}p{font-size:10pt;color:#555;word-break:break-all}</style>
+              </head><body><h1>${s.name} さんのシフト希望提出 URL</h1>
+              <img src="${canvas.toDataURL()}"><p>${url}</p>
+              <p style="font-size:8pt">※ スマホでスキャン or URL 直接入力</p>
+              </body></html>`);
+            setTimeout(() => w.print(), 500);
+          }
+        }
+      },
+    }, "🖨 印刷"),
+  ]));
+  modal(body);
+
+  // QR 描画
+  setTimeout(() => {
+    if (typeof QRCode !== "undefined") {
+      const cv = document.createElement("canvas");
+      qrWrap.appendChild(cv);
+      QRCode.toCanvas(cv, url, { width: 240, margin: 2 }, (err) => {
+        if (err) qrWrap.innerHTML = `<div class="text-red-600 text-sm">QR 生成失敗</div>`;
+      });
+    } else {
+      qrWrap.innerHTML = `<div class="text-amber-600 text-sm">QR ライブラリ読込待ち...</div>`;
+    }
+  }, 100);
 }
 
 async function regenerateStaffLink(s) {
@@ -1680,7 +1753,7 @@ function viewSchedule() {
       el("summary", { class: "text-sm font-semibold cursor-pointer select-none" },
         `📜 変更履歴 (${changeLog.length} 件)`),
       el("div", { class: "mt-3 space-y-1 text-xs max-h-80 overflow-y-auto" }, changeLog.slice().reverse().map(log => {
-        const TYPE_EMOJI = { publish: "✅", unpublish: "📝", delete: "🗑", swap: "🔄", substitute: "🆘", add: "➕", autogenerate: "🤖" };
+        const TYPE_EMOJI = { publish: "✅", unpublish: "📝", delete: "🗑", swap: "🔄", substitute: "🆘", add: "➕", autogenerate: "🤖", note: "📝" };
         const emoji = TYPE_EMOJI[log.type] || "📌";
         const ts = log.at ? new Date(log.at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
         const row = el("div", { class: "flex items-start gap-2 bg-slate-50 rounded p-2" });
@@ -1707,7 +1780,7 @@ function renderChangeLog() {
   summary.innerHTML = `<span>📜 変更履歴 <span class="text-xs text-slate-500 font-normal">(${log.length}件)</span></span><span class="text-xs text-slate-400">クリックで開閉 ▾</span>`;
   card.appendChild(summary);
   const list = el("div", { class: "mt-3 space-y-1.5 text-xs" });
-  const TYPE_LABEL = { publish: "✅ 確定", unpublish: "📝 下書きに戻す", delete: "🗑 削除", swap: "🔄 入替", substitute: "🆘 代打", add: "➕ 追加", autogenerate: "🤖 AI生成" };
+  const TYPE_LABEL = { publish: "✅ 確定", unpublish: "📝 下書きに戻す", delete: "🗑 削除", swap: "🔄 入替", substitute: "🆘 代打", add: "➕ 追加", autogenerate: "🤖 AI生成", note: "📝 メモ更新" };
   sorted.forEach(entry => {
     const at = new Date(entry.at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
     const row = el("div", { class: "flex items-start gap-2 border-b border-slate-100 pb-1.5" });
@@ -1973,7 +2046,8 @@ function renderCalendar() {
             ondrop: editable ? (e) => { chip.classList.remove("drop-target"); handleChipDrop(e, a); } : null,
             ondragend: () => $$(".assignment-chip").forEach(c => c.classList.remove("drop-target", "dragging")),
           });
-          chip.innerHTML = `<div class="name">${escapeHtml(s?.name || "?")}</div>
+          const memoBadge = a.note ? `<span title="${escapeAttr(a.note)}" class="inline-block ml-1 text-[10px] bg-amber-200 text-amber-900 rounded px-1">📝</span>` : "";
+          chip.innerHTML = `<div class="name">${escapeHtml(s?.name || "?")}${memoBadge}</div>
             <div class="time">${escapeHtml(cfg.label)} ${a.startTime.slice(0,5)}〜${a.endTime.slice(0,5)}</div>`;
           cell.appendChild(chip);
         });
@@ -2051,7 +2125,8 @@ function openPrintView() {
         } else {
           const lines = cellAss.map(a => {
             const s = state.staff.find(x => x.id === a.staffId);
-            return `<span class="print-staff-name">${escapeHtml(s?.name || "?")}</span>`;
+            const memoMark = a.note ? `<span title="${escapeAttr(a.note)}" style="font-size:7pt;color:#b45309;">📝</span>` : "";
+            return `<span class="print-staff-name">${escapeHtml(s?.name || "?")}${memoMark}</span>`;
           }).join("");
           html += `<td class="${cellAss.length > 1 ? "print-cell-multi" : ""}">${lines}</td>`;
         }
@@ -2369,8 +2444,9 @@ function renderCalendarMobile(days) {
             ondrop: editable ? (e) => { chip.classList.remove("drop-target"); handleChipDrop(e, a); } : null,
             ondragend: () => $$(".assignment-chip").forEach(c => c.classList.remove("drop-target", "dragging")),
           });
+          const memoBadge2 = a.note ? `<span title="${escapeAttr(a.note)}" class="inline-block ml-1 text-[10px] bg-amber-200 text-amber-900 rounded px-1">📝</span>` : "";
           chip.innerHTML = `
-            <span><span class="name font-semibold">${escapeHtml(s?.name || "?")}</span> <span class="text-[10px] text-slate-500">${escapeHtml(cfg.label)}</span></span>
+            <span><span class="name font-semibold">${escapeHtml(s?.name || "?")}</span>${memoBadge2} <span class="text-[10px] text-slate-500">${escapeHtml(cfg.label)}</span></span>
             <span class="text-[10px] text-slate-500">${a.startTime.slice(0,5)}〜${a.endTime.slice(0,5)}</span>
           `;
           list.appendChild(chip);
@@ -2454,6 +2530,44 @@ function openAssignmentDetail(a) {
     body.appendChild(tbl);
   }
 
+  // 個別シフトメモ (Round 14 TOP 3) — draft / published 両方で編集可
+  const memoCard = el("div", { class: "bg-amber-50 border border-amber-200 rounded-md p-3 space-y-2" });
+  memoCard.appendChild(el("div", { class: "text-xs font-semibold text-amber-900 flex items-center gap-1" }, [
+    el("span", {}, "📝 このシフトのメモ"),
+    el("span", { class: "text-[10px] text-amber-700 font-normal" }, "（スタッフポータルにも表示されます）"),
+  ]));
+  const memoInput = el("textarea", {
+    id: "asgn-note-input",
+    class: "w-full border border-amber-300 rounded-md px-2 py-1.5 text-sm",
+    rows: "2",
+    placeholder: "例: 新人さんと一緒なのでフォロー多めでお願いします / 18:00 から食材の納品あり",
+    maxlength: "200",
+  }, a.note || "");
+  memoCard.appendChild(memoInput);
+  memoCard.appendChild(el("div", { class: "flex justify-end gap-2" }, [
+    el("button", {
+      class: "text-xs bg-amber-600 hover:bg-amber-700 text-white rounded px-3 py-1",
+      onclick: async () => {
+        const newNote = (memoInput.value || "").trim().slice(0, 200);
+        const oldNote = a.note || "";
+        if (newNote === oldNote) { toast("変更ありません", "info"); return; }
+        const idx = curAssignments().findIndex(x => x.id === a.id);
+        if (idx < 0) { toast("対象が見つかりません", "error"); return; }
+        curAssignments()[idx] = { ...a, note: newNote };
+        a.note = newNote; // モーダル内表示の整合性
+        const verb = newNote ? "更新" : "削除";
+        logChange("note", `${a.date} ${a.startTime}〜 ${posCfg(a.position).label} (${s?.name || "?"}) のメモを${verb}`);
+        await persist(); render();
+        toast(newNote ? "メモを保存しました" : "メモを削除しました", "success");
+        // 確定済の場合、対象スタッフに変更通知
+        if (curStatus() === "published") {
+          await notifyShiftChanges([a.staffId]);
+        }
+      },
+    }, "💾 メモを保存"),
+  ]));
+  body.appendChild(memoCard);
+
   if (curStatus() === "draft") {
     body.appendChild(el("button", { class: "w-full text-sm bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-md py-2 font-semibold",
       onclick: () => showSubstitutes(a) }, "🆘 欠勤想定 → 代打推薦"));
@@ -2470,7 +2584,7 @@ function openAssignmentDetail(a) {
       el("button", { class: "flex-1 text-sm bg-slate-200 rounded-md py-1.5", onclick: closeModal }, "閉じる"),
     ]));
   } else {
-    body.appendChild(el("div", { class: "text-xs text-slate-500" }, "確定済の週は編集不可（下書きに戻すと編集できます）"));
+    body.appendChild(el("div", { class: "text-xs text-slate-500" }, "確定済の週は編集不可（下書きに戻すと編集できます）。メモは確定後でも追加可能です。"));
     body.appendChild(el("button", { class: "w-full text-sm bg-slate-200 rounded-md py-1.5", onclick: closeModal }, "閉じる"));
   }
   modal(body);
@@ -3173,19 +3287,38 @@ function downloadPayrollCsv(monthKey, format) {
     return;
   }
 
-  // スタッフ別集計 (Round 10: 休憩時間を控除)
+  // スタッフ別集計 (Round 10: 休憩控除 + Round 14: 深夜手当)
   const byStaff = {};
+  const ps = state.meta.payrollSettings || {};
+  const nightOn = ps.nightAllowanceEnabled;
+  const nightStart = ps.nightStartHour || 22;
+  const nightRate = ps.nightRate || 1.25;
+  function _t(s) { const [h, m] = s.split(":").map(Number); return h * 60 + m; }
   for (const a of monthAssignments) {
-    if (!byStaff[a.staffId]) byStaff[a.staffId] = { hours: 0, pay: 0, days: [] };
+    if (!byStaff[a.staffId]) byStaff[a.staffId] = { hours: 0, nightHours: 0, pay: 0, days: [] };
     const staffRec = state.staff.find(s => s.id === a.staffId);
     const breakMin = (staffRec && staffRec.breakMinutes) || 0;
     let h = calcHours(a.startTime, a.endTime);
-    // 6h 超勤務の場合は休憩時間を控除（労基準拠の慣習）
-    if (h > 6 && breakMin > 0) {
-      h -= breakMin / 60;
+    if (h > 6 && breakMin > 0) h -= breakMin / 60;
+
+    // 深夜時間の計算
+    let nightH = 0;
+    if (nightOn && staffRec) {
+      const startMin = _t(a.startTime);
+      const endMin = _t(a.endTime);
+      const nightStartMin = nightStart * 60;
+      // シフトが深夜時間帯と重なるか
+      if (endMin > nightStartMin) {
+        const overlap = Math.max(0, Math.min(endMin, 24*60) - Math.max(startMin, nightStartMin));
+        nightH = overlap / 60;
+      }
     }
+    const dayH = h - nightH;
+    const wage = staffRec ? staffRec.hourlyWage : 1100;
+    const pay = (wage * dayH) + (wage * nightRate * nightH);
     byStaff[a.staffId].hours += h;
-    byStaff[a.staffId].pay += staffRec ? (staffRec.hourlyWage * h) : a.cost;
+    byStaff[a.staffId].nightHours += nightH;
+    byStaff[a.staffId].pay += pay;
     byStaff[a.staffId].days.push(a);
   }
 
@@ -3193,42 +3326,79 @@ function downloadPayrollCsv(monthKey, format) {
   let filename = `payroll_${monthKey}_${format}.csv`;
 
   if (format === "summary") {
-    csv = "スタッフID,氏名,本職,時給,合計時間(h),合計給与(円)\n";
+    const head = nightOn
+      ? "スタッフID,氏名,本職,時給,通常時間(h),深夜時間(h),合計時間(h),合計給与(円)\n"
+      : "スタッフID,氏名,本職,時給,合計時間(h),合計給与(円)\n";
+    csv = head;
     for (const s of state.staff) {
       const r = byStaff[s.id];
       if (!r) continue;
-      csv += [s.id, s.name, posCfg(s.position).label, s.hourlyWage, r.hours.toFixed(2), Math.round(r.pay)]
-        .map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
+      const dayH = (r.hours - r.nightHours);
+      const row = nightOn
+        ? [s.id, s.name, posCfg(s.position).label, s.hourlyWage, dayH.toFixed(2), r.nightHours.toFixed(2), r.hours.toFixed(2), Math.round(r.pay)]
+        : [s.id, s.name, posCfg(s.position).label, s.hourlyWage, r.hours.toFixed(2), Math.round(r.pay)];
+      csv += row.map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
     }
   } else if (format === "detail") {
-    csv = "日付,曜日,スタッフID,氏名,開始,終了,時間(h),ポジション,給与(円)\n";
+    const head = nightOn
+      ? "日付,曜日,スタッフID,氏名,開始,終了,時間(h),うち深夜(h),ポジション,給与(円),メモ\n"
+      : "日付,曜日,スタッフID,氏名,開始,終了,時間(h),ポジション,給与(円),メモ\n";
+    csv = head;
     monthAssignments.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
     for (const a of monthAssignments) {
       const s = state.staff.find(x => x.id === a.staffId);
       if (!s) continue;
-      const h = calcHours(a.startTime, a.endTime);
+      const breakMin = (s.breakMinutes) || 0;
+      let h = calcHours(a.startTime, a.endTime);
+      if (h > 6 && breakMin > 0) h -= breakMin / 60;
+      // 深夜時間を再計算
+      let nightH = 0;
+      if (nightOn) {
+        const startMin = _t(a.startTime);
+        const endMin = _t(a.endTime);
+        const nightStartMin = nightStart * 60;
+        if (endMin > nightStartMin) {
+          const overlap = Math.max(0, Math.min(endMin, 24*60) - Math.max(startMin, nightStartMin));
+          nightH = overlap / 60;
+        }
+      }
+      const dayH = h - nightH;
+      const pay = (s.hourlyWage * dayH) + (s.hourlyWage * nightRate * nightH);
       const dow = DAY_LABELS[dayOfWeek(a.date)];
-      csv += [a.date, dow, s.id, s.name, a.startTime, a.endTime, h.toFixed(2), posCfg(a.position).label, Math.round(a.cost)]
-        .map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
+      const memo = a.note || "";
+      const row = nightOn
+        ? [a.date, dow, s.id, s.name, a.startTime, a.endTime, h.toFixed(2), nightH.toFixed(2), posCfg(a.position).label, Math.round(pay), memo]
+        : [a.date, dow, s.id, s.name, a.startTime, a.endTime, h.toFixed(2), posCfg(a.position).label, Math.round(pay), memo];
+      csv += row.map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
     }
   } else if (format === "yayoi") {
     // 弥生給与の汎用取込形式 (社員番号,氏名,勤務時間,合計支給額)
-    csv = "社員番号,氏名,勤務時間,基本給(時給×時間)\n";
+    const head = nightOn
+      ? "社員番号,氏名,勤務時間,うち深夜時間,基本給(時給×時間+深夜割増)\n"
+      : "社員番号,氏名,勤務時間,基本給(時給×時間)\n";
+    csv = head;
     for (const s of state.staff) {
       const r = byStaff[s.id];
       if (!r) continue;
-      csv += [s.id, s.name, r.hours.toFixed(2), Math.round(r.pay)]
-        .map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
+      const row = nightOn
+        ? [s.id, s.name, r.hours.toFixed(2), r.nightHours.toFixed(2), Math.round(r.pay)]
+        : [s.id, s.name, r.hours.toFixed(2), Math.round(r.pay)];
+      csv += row.map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
     }
     filename = `yayoi_${monthKey}.csv`;
   } else if (format === "freee") {
     // freee 人事労務の取込形式 (従業員番号,氏名,労働時間,時給,給与)
-    csv = "従業員番号,従業員氏名,労働時間,時給,給与額\n";
+    const head = nightOn
+      ? "従業員番号,従業員氏名,労働時間,うち深夜時間,時給,給与額\n"
+      : "従業員番号,従業員氏名,労働時間,時給,給与額\n";
+    csv = head;
     for (const s of state.staff) {
       const r = byStaff[s.id];
       if (!r) continue;
-      csv += [s.id, s.name, r.hours.toFixed(2), s.hourlyWage, Math.round(r.pay)]
-        .map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
+      const row = nightOn
+        ? [s.id, s.name, r.hours.toFixed(2), r.nightHours.toFixed(2), s.hourlyWage, Math.round(r.pay)]
+        : [s.id, s.name, r.hours.toFixed(2), s.hourlyWage, Math.round(r.pay)];
+      csv += row.map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
     }
     filename = `freee_${monthKey}.csv`;
   }
@@ -3493,6 +3663,42 @@ function viewSettings() {
       persist(); render(); toast("労務ルールを保存（次回 AI 生成から適用）", "success");
     } }, "保存"));
   wrap.appendChild(laborCard);
+
+  // 給与計算オプション (Round 14)
+  const payCard = el("div", { id: "set-payroll", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  payCard.appendChild(el("div", { class: "font-semibold" }, "給与計算オプション"));
+  payCard.appendChild(el("div", { class: "text-xs text-slate-500" },
+    "深夜手当 (22時以降の時給割増) を給与計算 CSV に反映します。労働基準法では 22:00〜翌5:00 の労働は通常時給の 25% 増し以上が必要です。"));
+  const ps = state.meta.payrollSettings || {};
+  const payGrid = el("div", { class: "space-y-2 text-sm" });
+  payGrid.innerHTML = `
+    <label class="inline-flex items-center gap-2">
+      <input type="checkbox" id="ps-night-on" ${ps.nightAllowanceEnabled ? "checked" : ""}>
+      <span>深夜手当を有効にする</span>
+    </label>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block"><span class="text-slate-600 text-xs">深夜開始時刻</span>
+        <select id="ps-night-start" class="mt-1 w-full border rounded-md px-3 py-2 text-sm">
+          ${[20,21,22,23].map(h => `<option value="${h}" ${(ps.nightStartHour||22)===h?"selected":""}>${h}:00</option>`).join("")}
+        </select></label>
+      <label class="block"><span class="text-slate-600 text-xs">割増倍率</span>
+        <select id="ps-night-rate" class="mt-1 w-full border rounded-md px-3 py-2 text-sm">
+          <option value="1.25" ${(ps.nightRate||1.25)===1.25?"selected":""}>1.25 倍 (労基準拠)</option>
+          <option value="1.30" ${(ps.nightRate||1.25)===1.30?"selected":""}>1.30 倍</option>
+          <option value="1.50" ${(ps.nightRate||1.25)===1.50?"selected":""}>1.50 倍</option>
+        </select></label>
+    </div>`;
+  payCard.appendChild(payGrid);
+  payCard.appendChild(el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
+    onclick: () => {
+      state.meta.payrollSettings = {
+        nightAllowanceEnabled: $("#ps-night-on").checked,
+        nightStartHour: Number($("#ps-night-start").value),
+        nightRate: Number($("#ps-night-rate").value),
+      };
+      persist(); render(); toast("給与計算オプションを保存", "success");
+    } }, "保存"));
+  wrap.appendChild(payCard);
 
   // 希望提出締切設定 (Round 4)
   const dlCard = el("div", { id: "set-deadline", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
