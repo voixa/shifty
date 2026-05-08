@@ -2582,13 +2582,29 @@ function downloadCsv() {
 
 // ===== View: Settings =====
 function viewSettings() {
-  const wrap = el("div", { class: "space-y-6" });
+  const wrap = el("div", { class: "space-y-3" });
   wrap.appendChild(el("h2", { class: "text-xl font-bold" }, "⚙️ 店舗設定"));
   wrap.appendChild(el("div", { class: "text-sm text-slate-600" },
     "ここで設定した内容に基づいて、シフト枠（必要人数マトリクス）が生成されます。"));
 
+  // 設定セクション目次 (Round 7) — モバイルで縦スクロール時のジャンプ
+  const toc = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3 sticky top-2 z-10" });
+  toc.innerHTML = `
+    <div class="text-xs font-semibold text-slate-700 mb-1.5">📌 設定項目に飛ぶ</div>
+    <div class="flex flex-wrap gap-1 text-xs">
+      <a href="#set-basic" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">基本情報</a>
+      <a href="#set-positions" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">ポジション</a>
+      <a href="#set-sessions" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">営業時間</a>
+      <a href="#set-staffing" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">必要人数</a>
+      <a href="#set-labor" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">労務ルール</a>
+      <a href="#set-deadline" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">提出締切</a>
+      <a href="#set-algo" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">AI 重み</a>
+      <a href="#set-backup" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">バックアップ</a>
+    </div>`;
+  wrap.appendChild(toc);
+
   // Basic
-  const basic = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const basic = el("div", { id: "set-basic", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
   basic.appendChild(el("div", { class: "font-semibold" }, "1. 基本情報"));
   const grid1 = el("div", { class: "grid grid-cols-1 md:grid-cols-3 gap-3 text-sm" });
   grid1.innerHTML = `
@@ -2643,7 +2659,7 @@ function viewSettings() {
   wrap.appendChild(passCard);
 
   // Positions
-  const posCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const posCard = el("div", { id: "set-positions", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
   posCard.appendChild(el("div", { class: "flex items-center justify-between" }, [
     el("div", { class: "font-semibold" }, "3. ポジション"),
     el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
@@ -2677,7 +2693,7 @@ function viewSettings() {
   wrap.appendChild(posCard);
 
   // Sessions
-  const sessCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const sessCard = el("div", { id: "set-sessions", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
   sessCard.appendChild(el("div", { class: "flex items-center justify-between" }, [
     el("div", { class: "font-semibold" }, "4. 営業セッション（時間帯）"),
     el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
@@ -2709,7 +2725,7 @@ function viewSettings() {
   wrap.appendChild(sessCard);
 
   // Staffing matrix
-  const matrixCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const matrixCard = el("div", { id: "set-staffing", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
   const matrixHeader = el("div", { class: "font-semibold" });
   matrixHeader.innerHTML = `5. 必要人数マトリクス${helpIcon("staffing-matrix")}`;
   matrixCard.appendChild(matrixHeader);
@@ -2766,7 +2782,7 @@ function viewSettings() {
   wrap.appendChild(matrixCard);
 
   // Labor rules
-  const laborCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const laborCard = el("div", { id: "set-labor", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
   const laborHeader = el("div", { class: "font-semibold" });
   laborHeader.innerHTML = `6. 労務ルール（労基順守）${helpIcon("labor-rules")}`;
   laborCard.appendChild(laborHeader);
@@ -2797,8 +2813,8 @@ function viewSettings() {
   wrap.appendChild(laborCard);
 
   // 希望提出締切設定 (Round 4)
-  const dlCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
-  dlCard.appendChild(el("div", { class: "font-semibold" }, "希望提出締切"));
+  const dlCard = el("div", { id: "set-deadline", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  dlCard.appendChild(el("div", { class: "font-semibold" }, "7. 希望提出締切"));
   dlCard.appendChild(el("div", { class: "text-xs text-slate-500" },
     "スタッフポータルにカウントダウン表示されます。シフト編成の前日設定が一般的です。"));
   const dl = state.meta.preferenceDeadline || { daysBefore: 3, hour: 18 };
@@ -2830,7 +2846,7 @@ function viewSettings() {
   wrap.appendChild(dlCard);
 
   // Algorithm weights
-  const algoCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const algoCard = el("div", { id: "set-algo", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
   const algoHeader = el("div", { class: "flex items-center justify-between flex-wrap gap-2" });
   const algoTitle = el("div", { class: "font-semibold" });
   algoTitle.innerHTML = `7. アルゴリズム重み調整${helpIcon("algo-weights")}`;
@@ -2950,8 +2966,8 @@ function viewSettings() {
   setTimeout(loadStaffMessages, 100);
 
   // Backup
-  const backupCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
-  backupCard.appendChild(el("div", { class: "font-semibold" }, "8. データバックアップ"));
+  const backupCard = el("div", { id: "set-backup", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  backupCard.appendChild(el("div", { class: "font-semibold" }, "9. データバックアップ"));
   backupCard.appendChild(el("div", { class: "text-xs text-slate-500" },
     "全データ（店舗・スタッフ・全週・トークン）を JSON でエクスポート/インポートできます。定期的にダウンロードして保管推奨。"));
   backupCard.appendChild(el("div", { class: "flex gap-2 flex-wrap" }, [

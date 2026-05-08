@@ -507,7 +507,40 @@
         </div>
       </div>` : "";
 
+    // 次の出勤カウントダウン (Round 7)
+    const upcomingShifts = (data.assignments || [])
+      .map(a => ({ ...a, dt: new Date(`${a.date}T${a.startTime}:00`) }))
+      .filter(a => a.dt > new Date())
+      .sort((a, b) => a.dt - b.dt);
+    let nextShiftCard = "";
+    if (upcomingShifts.length > 0) {
+      const next = upcomingShifts[0];
+      const diffMs = next.dt - new Date();
+      const diffH = Math.floor(diffMs / 3600000);
+      const diffMin = Math.floor((diffMs % 3600000) / 60000);
+      const days = Math.floor(diffH / 24);
+      const remainH = diffH % 24;
+      let countdown;
+      if (days > 0) {
+        countdown = `あと ${days} 日 ${remainH} 時間`;
+      } else if (diffH > 0) {
+        countdown = `あと ${diffH} 時間 ${diffMin} 分`;
+      } else {
+        countdown = `あと ${diffMin} 分 ⚡ 出勤前`;
+      }
+      const pos = (data.positions || []).find(p => p.id === next.position) || { label: next.position };
+      const dowLabel = ["日","月","火","水","木","金","土"][next.dt.getDay()];
+      nextShiftCard = `
+        <div class="bg-gradient-to-br from-blue-500 to-brand-600 rounded-xl p-4 mb-3 text-white shadow-lg">
+          <div class="text-xs opacity-90">⏰ 次のシフト</div>
+          <div class="font-bold text-lg mt-1">${next.date.slice(5)} (${dowLabel}) ${escapeHtml(next.startTime || "")}〜${escapeHtml(next.endTime || "")}</div>
+          <div class="text-sm opacity-90 mt-0.5">${escapeHtml(pos.label)}</div>
+          <div class="text-2xl font-bold mt-2">${countdown}</div>
+        </div>`;
+    }
+
     $("#app").innerHTML = `
+      ${nextShiftCard}
       ${monthCard}
       <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>
@@ -580,6 +613,9 @@
           const safeColor = /^#[0-9a-fA-F]{3,8}$/.test(pos.color || "") ? pos.color : "#64748b";
           div.style.borderColor = safeColor;
 
+          // 当日かつ未来かどうか (Round 7)
+          const isToday = a.date === new Date().toISOString().slice(0,10);
+          const isFuture = new Date(`${a.date}T${a.endTime}:00`) > new Date();
           // 同シフトメンバー (Round 5)
           const cws = (data.coworkers || {})[a.id] || [];
           const cwHtml = cws.length ? `
@@ -592,6 +628,15 @@
             </div>` : `
             <div class="mt-1 text-[11px] text-slate-400">👥 この時間帯はあなた一人です</div>`;
 
+          // 緊急休み申請ボタン (Round 7) — 当日かつ未来のシフトのみ
+          const emergencyBtn = (isToday && isFuture) ? `
+            <button class="emergency-absence-btn mt-2 text-xs bg-red-50 border border-red-300 hover:bg-red-100 text-red-700 rounded-md px-3 py-1.5 font-semibold w-full"
+              data-shift-id="${escapeAttr(a.id)}"
+              data-shift-time="${escapeAttr(a.startTime + "〜" + a.endTime)}"
+              aria-label="今日のシフトを緊急で休みたい">
+              ⛔ 今日休みたい（緊急連絡）
+            </button>` : "";
+
           div.innerHTML = `
             <div class="flex items-center justify-between">
               <div>
@@ -600,7 +645,8 @@
               </div>
               <div class="text-right text-xs text-slate-500">${fmtYen(a.cost || (data.staff.hourlyWage * h))}</div>
             </div>
-            ${cwHtml}`;
+            ${cwHtml}
+            ${emergencyBtn}`;
           inner.appendChild(div);
         }
       }
@@ -614,6 +660,77 @@
     // iCal ダウンロードボタン (Round 6)
     const icalBtn = document.getElementById("icalBtn");
     if (icalBtn) icalBtn.onclick = () => downloadIcs();
+
+    // 緊急休み申請ボタン (Round 7)
+    document.querySelectorAll(".emergency-absence-btn").forEach(btn => {
+      btn.onclick = () => {
+        const shiftTime = btn.getAttribute("data-shift-time");
+        if (!confirm(
+          `今日のシフト (${shiftTime}) を緊急で休みたい旨を店長にメールします。\n\n` +
+          `件名に「【緊急】当日休み連絡」が付きます。\n` +
+          `送信前に LINE / 電話でも直接連絡することをお勧めします。`
+        )) return;
+        openEmergencyAbsenceDialog(shiftTime);
+      };
+    });
+  }
+
+  // 緊急休み申請ダイアログ (Round 7)
+  function openEmergencyAbsenceDialog(shiftTime) {
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4";
+    overlay.innerHTML = `
+      <div class="bg-white rounded-t-2xl sm:rounded-xl w-full max-w-md p-5 space-y-3">
+        <h3 class="font-bold text-lg text-red-700">⛔ 今日のシフト休み申請</h3>
+        <p class="text-sm text-slate-600">対象シフト: <strong>${escapeHtml(shiftTime)}</strong></p>
+        <label class="block text-sm">
+          <span class="text-slate-700 font-medium">理由を選択</span>
+          <select id="abs-reason" class="mt-1 w-full border rounded-md px-3 py-2">
+            <option value="">選択してください</option>
+            <option>体調不良（発熱・倦怠感等）</option>
+            <option>家族の急病・介護</option>
+            <option>交通機関の遅延・運休</option>
+            <option>事故・けが</option>
+            <option>その他緊急事情</option>
+          </select>
+        </label>
+        <label class="block text-sm">
+          <span class="text-slate-700 font-medium">補足（任意）</span>
+          <textarea id="abs-detail" maxlength="500" class="mt-1 w-full border rounded-md px-3 py-2 h-20"
+            placeholder="例: 朝から熱があり病院に行きます / 電車が運転見合わせ"></textarea>
+        </label>
+        <div class="bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-900">
+          ⚠️ メール送信後も、念のため LINE / 電話でも店長にご連絡ください。
+        </div>
+        <div class="flex gap-2 justify-end">
+          <button id="abs-cancel" class="px-3 py-1.5 text-sm">キャンセル</button>
+          <button id="abs-send" class="px-4 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-md font-semibold">送信</button>
+        </div>
+        <div id="abs-status" class="text-xs text-center hidden"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#abs-cancel").onclick = () => overlay.remove();
+    overlay.querySelector("#abs-send").onclick = async () => {
+      const reason = overlay.querySelector("#abs-reason").value;
+      const detail = overlay.querySelector("#abs-detail").value.trim();
+      if (!reason) { toast("理由を選んでください", "error"); return; }
+      const message = `【緊急】当日休み連絡\n対象: ${shiftTime}\n理由: ${reason}` + (detail ? `\n補足: ${detail}` : "");
+      const status = overlay.querySelector("#abs-status");
+      const btn = overlay.querySelector("#abs-send");
+      btn.disabled = true; btn.textContent = "送信中…";
+      try {
+        await window.ShiftyAPI.portalSendMessage(token, "report", message);
+        status.textContent = "✅ 送信完了。店長から確認のご連絡があります。LINE/電話でも念のためご連絡を。";
+        status.className = "text-xs text-center text-emerald-600";
+        status.classList.remove("hidden");
+        setTimeout(() => overlay.remove(), 3500);
+      } catch (e) {
+        status.textContent = "送信失敗: " + e.message + "（LINE/電話でご連絡ください）";
+        status.className = "text-xs text-center text-red-600";
+        status.classList.remove("hidden");
+        btn.disabled = false; btn.textContent = "送信";
+      }
+    };
   }
 
   // .ics ファイル生成 (RFC 5545 準拠の最小限) — Round 6
