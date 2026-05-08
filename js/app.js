@@ -391,6 +391,57 @@ function viewDashboard() {
     wrap.appendChild(chartCard);
   }
 
+  // 本日の出勤者カード (Round 13) — 朝開店前の確認用
+  const todayStr = new Date().toISOString().slice(0,10);
+  // 今週の中で今日が含まれていれば、今週の assignments から、そうでなければ全 weeks から該当日を探す
+  let todayAssignments = curAssignments().filter(a => a.date === todayStr);
+  if (todayAssignments.length === 0 && state.weeks) {
+    for (const wk of Object.values(state.weeks)) {
+      const found = (wk.assignments || []).filter(a => a.date === todayStr);
+      if (found.length) { todayAssignments = found; break; }
+    }
+  }
+  if (todayAssignments.length > 0) {
+    const todayCard = el("div", { class: "bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-300 rounded-xl p-3" });
+    const dow = ["日","月","火","水","木","金","土"][new Date(todayStr + "T00:00:00").getDay()];
+    todayCard.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
+      el("div", { class: "font-semibold text-sm text-amber-900" }, `☀ 本日の出勤者 (${todayStr.slice(5)} ${dow}曜)`),
+      el("span", { class: "text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded" }, `${todayAssignments.length} シフト`),
+    ]));
+    // 時間順ソート
+    const sortedAss = todayAssignments.slice().sort((a,b) => a.startTime.localeCompare(b.startTime));
+    // 時間帯別 (session) にグループ化
+    const sessGroups = {};
+    for (const a of sortedAss) {
+      const key = `${a.startTime}-${a.endTime}`;
+      if (!sessGroups[key]) sessGroups[key] = [];
+      sessGroups[key].push(a);
+    }
+    const sessList = el("div", { class: "space-y-1.5" });
+    for (const [timeKey, list] of Object.entries(sessGroups)) {
+      const row = el("div", { class: "bg-white/60 rounded p-2 text-xs" });
+      const sessLabel = (state.meta.sessions || []).find(s => `${s.startTime}-${s.endTime}` === timeKey)?.label || timeKey;
+      row.innerHTML = `<div class="font-semibold text-amber-900 mb-1">⏰ ${escapeHtml(timeKey.replace("-", "〜"))} <span class="text-[10px] text-slate-500">(${escapeHtml(sessLabel)})</span></div>`;
+      const staffList = el("div", { class: "flex flex-wrap gap-1" });
+      for (const a of list) {
+        const s = state.staff.find(x => x.id === a.staffId);
+        if (!s) continue;
+        const cfg = posCfg(a.position);
+        const chip = el("span", {
+          class: "inline-flex items-center gap-1 bg-white border rounded px-2 py-0.5 text-[11px]",
+          style: { borderColor: cfg.color },
+          title: `${s.name} (${cfg.label}) ${s.email ? '・' + s.email : ''}`,
+        });
+        chip.innerHTML = `<span style="color:${cfg.color}">●</span><strong>${escapeHtml(s.name)}</strong><span class="text-slate-500">(${escapeHtml(cfg.label)})</span>`;
+        staffList.appendChild(chip);
+      }
+      row.appendChild(staffList);
+      sessList.appendChild(row);
+    }
+    todayCard.appendChild(sessList);
+    wrap.appendChild(todayCard);
+  }
+
   if (alerts.length > 0) {
     const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
     card.appendChild(el("div", { class: "font-semibold text-sm text-slate-700 mb-2" }, `⚠️ 注意事項 ${alerts.length} 件`));
@@ -1082,9 +1133,11 @@ function openStaffEdit(s = null) {
     id: uid("s_"), name: "", position: state.meta.positions[0]?.id || "hall", canCover: [],
     hourlyWage: 1100, maxHoursPerWeek: 28, minHoursPerWeek: 10,
     fixedDayOff: [], skill: 3, notes: "",
-    breakMinutes: 0,  // Round 10: 6h 超勤務時の休憩時間（分）
+    breakMinutes: 0,
+    fixedShifts: [],  // Round 13: 固定出勤 [{dow: 1, sessionId: "lunch"}]
   };
   if (data.breakMinutes === undefined) data.breakMinutes = 0;
+  if (!Array.isArray(data.fixedShifts)) data.fixedShifts = [];
   const body = el("div", { class: "p-6 space-y-4" });
   body.innerHTML = `<h3 class="font-bold text-lg mb-3">${isNew ? "新規スタッフ追加" : "スタッフ編集"}</h3>`;
   const form = el("div", { class: "space-y-3 text-sm" });
@@ -1123,6 +1176,22 @@ function openStaffEdit(s = null) {
             ${d}</label>`).join("")}
       </div>
     </div>
+    <div>
+      <span class="text-slate-600 block mb-1">固定出勤 <span class="text-[10px] text-slate-400">(チェックの曜日×セッションは AI が必ず配置)</span></span>
+      <div class="space-y-1">
+        ${state.meta.sessions.map(sess => `
+          <div class="flex items-center gap-2 text-xs">
+            <span class="w-16 text-slate-600">${escapeHtml(sess.label)}:</span>
+            ${DAY_LABELS.map((d, i) => {
+              const isFixed = data.fixedShifts.some(f => f.dow === i && f.sessionId === sess.id);
+              return `<label class="inline-flex items-center gap-0.5 cursor-pointer">
+                <input type="checkbox" data-fixed-dow="${i}" data-fixed-sess="${sess.id}" ${isFixed ? "checked" : ""}>
+                <span class="ml-0.5">${d}</span>
+              </label>`;
+            }).join("")}
+          </div>`).join("")}
+      </div>
+    </div>
     <div class="grid grid-cols-2 gap-3">
       <label class="block"><span class="text-slate-600">休憩(分) <span class="text-[10px] text-slate-400">6h 超勤務時に控除</span></span>
         <select data-k="breakMinutes" class="mt-1 w-full border rounded-md px-3 py-2">
@@ -1147,6 +1216,11 @@ function openStaffEdit(s = null) {
       });
       data.canCover = $$("input[data-cover]", form).filter(i => i.checked).map(i => i.dataset.cover);
       data.fixedDayOff = $$("input[data-off]", form).filter(i => i.checked).map(i => Number(i.dataset.off));
+      // Round 13: 固定出勤の収集
+      data.fixedShifts = $$("input[data-fixed-dow]", form).filter(i => i.checked).map(i => ({
+        dow: Number(i.dataset.fixedDow),
+        sessionId: i.dataset.fixedSess,
+      }));
       if (!data.name) { toast("名前を入力してください", "error"); return; }
       if (isNew) state.staff.push(data);
       else state.staff = state.staff.map(x => x.id === data.id ? data : x);
@@ -1458,6 +1532,11 @@ function viewSchedule() {
         onclick: openPrintView,
         title: "店内掲示用 / 紙シフトの印刷",
       }, "🖨️ 印刷") : null,
+      el("button", {
+        class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50 " + (multiWeekView ? "bg-blue-500 text-white border-blue-500" : ""),
+        onclick: toggleMultiWeekView,
+        title: "今週 + 翌3週 を一覧表示",
+      }, multiWeekView ? "📆 4週表示 ON" : "📆 4週表示"),
       el("button", { class: "text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md px-3 py-1.5",
         onclick: autoGenerate }, "🤖 AI自動生成"),
     ]),
@@ -1586,7 +1665,11 @@ function viewSchedule() {
     }
   }
 
-  wrap.appendChild(renderCalendar());
+  if (multiWeekView) {
+    wrap.appendChild(renderMultiWeekView());
+  } else {
+    wrap.appendChild(renderCalendar());
+  }
   if (curAssignments().length) wrap.appendChild(renderStaffSummary());
 
   // 変更履歴 (Round 11) — このタブで一覧表示
@@ -1779,6 +1862,67 @@ async function openLineNotificationDialog() {
     } }, "📋 クリップボードにコピー"),
   ]));
   modal(body);
+}
+
+// 複数週まとめ表示 (Round 13) — 今週 + 翌 3 週分のサマリ
+function renderMultiWeekView() {
+  const wrap = el("div", { class: "space-y-3" });
+  wrap.appendChild(el("div", { class: "bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900" },
+    "📆 4 週まとめ表示中。各週カードをクリックでその週に切替。"));
+
+  const w0 = state.meta.currentWeekStart;
+  for (let i = 0; i < 4; i++) {
+    const wkStart = addDays(w0, i * 7);
+    const wkEnd = addDays(wkStart, 6);
+    const week = (state.weeks || {})[wkStart];
+    const isCurrent = wkStart === w0;
+    const card = el("div", {
+      class: `bg-white border rounded-xl p-3 ${isCurrent ? "border-brand-500 shadow" : "border-slate-200"} cursor-pointer hover:shadow`,
+      onclick: () => goToWeek(wkStart),
+    });
+    const header = el("div", { class: "flex items-center justify-between mb-2" });
+    header.appendChild(el("div", {}, [
+      el("span", { class: "font-bold text-sm" }, `${wkStart.slice(5)} 〜 ${wkEnd.slice(5)}`),
+      isCurrent ? el("span", { class: "ml-2 text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded" }, "今週") : null,
+    ]));
+    if (week) {
+      const status = week.status || "draft";
+      header.appendChild(el("span", {
+        class: `text-xs px-2 py-1 rounded ${status === "published" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`,
+      }, status === "published" ? "✓ 確定済" : "📝 下書き"));
+    } else {
+      header.appendChild(el("span", { class: "text-xs text-slate-400" }, "未作成"));
+    }
+    card.appendChild(header);
+
+    if (week && week.assignments && week.assignments.length > 0) {
+      const assN = week.assignments.length;
+      const totalH = week.assignments.reduce((s, a) => s + calcHours(a.startTime, a.endTime), 0);
+      const totalCost = week.assignments.reduce((s, a) => s + (a.cost || 0), 0);
+      const slots = week.slots || [];
+      const reqN = slots.reduce((s, x) => s + x.requiredCount, 0);
+      const cov = reqN ? (assN / reqN * 100).toFixed(0) : 0;
+      card.appendChild(el("div", { class: "grid grid-cols-4 gap-2 text-center" }, [
+        el("div", {}, [el("div", { class: "text-[10px] text-slate-500" }, "アサイン"), el("div", { class: "text-base font-bold" }, `${assN}/${reqN}`)]),
+        el("div", {}, [el("div", { class: "text-[10px] text-slate-500" }, "カバー"), el("div", { class: "text-base font-bold text-emerald-600" }, `${cov}%`)]),
+        el("div", {}, [el("div", { class: "text-[10px] text-slate-500" }, "時間"), el("div", { class: "text-base font-bold" }, `${totalH.toFixed(0)}h`)]),
+        el("div", {}, [el("div", { class: "text-[10px] text-slate-500" }, "人件費"), el("div", { class: "text-base font-bold text-brand-700" }, fmtYen(totalCost))]),
+      ]));
+
+      // 該当週の希望未提出スタッフ
+      const submitted = state.staff.filter(s => (week.preferences || []).some(p => p.staffId === s.id));
+      const notSub = state.staff.filter(s => !submitted.includes(s));
+      if (notSub.length > 0) {
+        card.appendChild(el("div", { class: "mt-2 text-[11px] text-amber-700" },
+          `📝 希望未提出: ${notSub.length} 名 (${notSub.slice(0,3).map(s => s.name).join("・")}${notSub.length > 3 ? ` 他${notSub.length-3}名` : ""})`));
+      }
+    } else {
+      card.appendChild(el("div", { class: "text-xs text-slate-500 py-2 text-center" },
+        week ? "シフト未生成" : "週未作成（クリックで作成）"));
+    }
+    wrap.appendChild(card);
+  }
+  return wrap;
 }
 
 function renderCalendar() {
@@ -2534,6 +2678,9 @@ let swapModeSourceId = null;
 // シフト編成のスタッフ別フィルタ (Round 8)
 let staffFilter = "all"; // "all" | staffId
 function setStaffFilter(v) { staffFilter = v; render(); }
+// 複数週まとめ表示 (Round 13)
+let multiWeekView = false;
+function toggleMultiWeekView() { multiWeekView = !multiWeekView; render(); }
 
 function toggleSwapMode() {
   if (curStatus() === "published") {
@@ -2853,8 +3000,36 @@ function autoGenerate() {
   // 実際の生成は requestIdleCallback / setTimeout で UI ブロック回避
   setTimeout(() => {
     try {
+      // Round 13: 固定出勤を must preferences として注入
+      const w0 = state.meta.currentWeekStart;
+      const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+      const syntheticPrefs = [];
+      for (const s of state.staff) {
+        if (!s.fixedShifts || !s.fixedShifts.length) continue;
+        for (const fs of s.fixedShifts) {
+          const sess = state.meta.sessions.find(x => x.id === fs.sessionId);
+          if (!sess) continue;
+          for (const d of days) {
+            if (dayOfWeek(d) !== fs.dow) continue;
+            // 既存希望と衝突しないよう、既存の同 staff/date/time の must が無い場合のみ追加
+            const existing = curPrefs().find(p =>
+              p.staffId === s.id && p.date === d &&
+              p.startTime === sess.startTime && p.endTime === sess.endTime);
+            if (!existing) {
+              syntheticPrefs.push({
+                id: `_fixed_${s.id}_${d}_${fs.sessionId}`,
+                staffId: s.id, date: d,
+                startTime: sess.startTime, endTime: sess.endTime,
+                priority: "must",
+              });
+            }
+          }
+        }
+      }
+      const allPrefs = [...curPrefs(), ...syntheticPrefs];
+
       const result = generateShift({
-        staff: state.staff, slots: curSlots(), preferences: curPrefs(),
+        staff: state.staff, slots: curSlots(), preferences: allPrefs,
         laborRules: state.meta.laborRules,
         weights: state.meta.algorithmWeights,
         randomStarts: state.meta.randomStarts || 5,
