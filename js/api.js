@@ -122,9 +122,12 @@
       ? jsonReq(`${tenantPrefix}/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "DELETE" })
       : jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "DELETE" }),
 
-    // Notification (admin)
-    notifyShifts: (weekStart) =>
-      jsonReq("/api/admin/notify_shifts", { method: "POST", body: JSON.stringify({ weekStart }) }),
+    // Notification (admin) — staffIds 指定で限定送信、subjectPrefix で件名カスタム
+    notifyShifts: (weekStart, options = {}) =>
+      jsonReq("/api/admin/notify_shifts", {
+        method: "POST",
+        body: JSON.stringify({ weekStart, ...options }),
+      }),
 
     // Snapshots (admin)
     listSnapshots: () => jsonReq("/api/admin/snapshots"),

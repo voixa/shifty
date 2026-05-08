@@ -1273,6 +1273,35 @@ function viewSchedule() {
   ]);
   wrap.appendChild(headerRow);
 
+  // スタッフ別フィルタ (Round 8) — シフトが生成済みのとき
+  if (curAssignments().length > 0 && state.staff.length > 1) {
+    const filterRow = el("div", { class: "bg-white border border-slate-200 rounded-lg p-2 flex items-center gap-2 flex-wrap text-sm" });
+    filterRow.appendChild(el("span", { class: "text-xs text-slate-600 font-semibold" }, "🔍 表示フィルタ:"));
+    const sel = el("select", {
+      class: "border rounded px-2 py-1 text-sm",
+      onchange: (e) => setStaffFilter(e.target.value),
+    });
+    sel.appendChild(el("option", { value: "all" }, `全スタッフ (${state.staff.length} 名)`));
+    state.staff.forEach(s => {
+      const opt = el("option", { value: s.id }, s.name);
+      if (staffFilter === s.id) opt.setAttribute("selected", "");
+      sel.appendChild(opt);
+    });
+    filterRow.appendChild(sel);
+    if (staffFilter !== "all") {
+      const filterStaff = state.staff.find(s => s.id === staffFilter);
+      const myAss = curAssignments().filter(a => a.staffId === staffFilter);
+      const myH = myAss.reduce((sum, a) => sum + calcHours(a.startTime, a.endTime), 0);
+      filterRow.appendChild(el("span", { class: "text-xs text-slate-700" },
+        `${filterStaff?.name}: ${myAss.length} シフト・${myH.toFixed(1)}h`));
+      filterRow.appendChild(el("button", {
+        class: "ml-auto text-xs text-slate-500 hover:text-slate-700 underline",
+        onclick: () => setStaffFilter("all"),
+      }, "✕ クリア"));
+    }
+    wrap.appendChild(filterRow);
+  }
+
   if (swapModeActive) {
     wrap.appendChild(el("div", { class: "bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900" }, [
       el("div", { class: "font-semibold" }, "🔁 入替モード"),
@@ -1540,8 +1569,9 @@ function renderCalendar() {
           const cfg = posCfg(pos.id);
           const editable = curStatus() === "draft";
           const isSwapSource = swapModeActive && swapModeSourceId === a.id;
+          const isFilteredOut = staffFilter !== "all" && a.staffId !== staffFilter;
           const chip = el("div", {
-            class: "assignment-chip" + (editable ? " editable" : "") + (isSwapSource ? " swap-source" : "") + (swapModeActive ? " swap-mode" : ""),
+            class: "assignment-chip" + (editable ? " editable" : "") + (isSwapSource ? " swap-source" : "") + (swapModeActive ? " swap-mode" : "") + (isFilteredOut ? " opacity-25" : ""),
             draggable: (editable && !swapModeActive) ? "true" : "false",
             "data-assignment-id": a.id,
             style: { borderColor: cfg.color },
@@ -1959,16 +1989,20 @@ function showSubstitutes(targetA) {
           <div class="text-xs text-slate-600">スコア ${Math.round(cand.score)} / ${fmtYen(s.hourlyWage)}/h</div>
         </div>`;
       const btn = el("button", { class: "text-xs bg-brand-600 text-white rounded px-3 py-1.5",
-        onclick: () => {
+        onclick: async () => {
           const idx = curAssignments().findIndex(x => x.id === a.id);
           if (idx >= 0) {
-            const oldStaff = state.staff.find(x => x.id === a.staffId);
+            const oldStaffId = a.staffId;
+            const newStaffId = s.id;
+            const oldStaff = state.staff.find(x => x.id === oldStaffId);
             curAssignments()[idx] = {
-              ...a, staffId: s.id, cost: s.hourlyWage * calcHours(a.startTime, a.endTime),
+              ...a, staffId: newStaffId, cost: s.hourlyWage * calcHours(a.startTime, a.endTime),
               reasons: cand.reasons, score: cand.score, breakdown: cand.breakdown,
             };
             logChange("substitute", `${oldStaff?.name || "?"} → ${s.name} に代打入替（${a.date} ${a.startTime}〜 ${posCfg(a.position).label}）`);
-            persist(); closeModal(); render(); toast("代打を割当てました", "success");
+            await persist(); closeModal(); render(); toast("代打を割当てました", "success");
+            // Round 8: 確定後の変更ならメール再通知
+            await notifyShiftChanges([oldStaffId, newStaffId]);
           }
         } }, "入替");
       row.appendChild(btn);
@@ -2115,6 +2149,9 @@ function renderStaffSummary() {
 let draggedAssignment = null;
 let swapModeActive = false;
 let swapModeSourceId = null;
+// シフト編成のスタッフ別フィルタ (Round 8)
+let staffFilter = "all"; // "all" | staffId
+function setStaffFilter(v) { staffFilter = v; render(); }
 
 function toggleSwapMode() {
   if (curStatus() === "published") {
@@ -2167,6 +2204,26 @@ function handleChipDragStart(e, a) {
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", a.id);
   e.target.classList.add("dragging");
+}
+
+async function notifyShiftChanges(staffIds) {
+  // Round 8: 確定後の変更があった場合、該当スタッフのみに再通知メール送信
+  if (curStatus() !== "published") return; // 下書きなら通知しない
+  const withEmail = state.staff.filter(s => staffIds.includes(s.id) && (s.email || "").trim());
+  if (withEmail.length === 0) return;
+  if (!confirm(
+    `シフト変更に伴い、影響を受ける ${withEmail.length} 名のスタッフ (${withEmail.map(s => s.name).join("・")}) にメール再送しますか？\n` +
+    `件名に【シフト変更】と付きます。`
+  )) return;
+  try {
+    const r = await window.ShiftyAPI.notifyShifts(state.meta.currentWeekStart, {
+      staffIds: withEmail.map(s => s.id),
+      subjectPrefix: "【シフト変更】",
+    });
+    toast(`✉️ ${r.sent || 0} 名に変更通知を送信`, "success");
+  } catch (e) {
+    toast("変更通知失敗: " + e.message, "error");
+  }
 }
 
 function handleChipDrop(e, target) {

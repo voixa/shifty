@@ -1534,9 +1534,14 @@ def api_stripe_webhook():
 @app.post("/api/admin/notify_shifts")
 @require_auth
 def api_notify_shifts():
-    """指定週のシフトを各スタッフ（email 設定者のみ）に送信。"""
+    """指定週のシフトを各スタッフ（email 設定者のみ）に送信。
+    payload.staffIds: 配列で渡すと該当スタッフのみに限定送信 (Round 8 変更通知用)
+    payload.subjectPrefix: 件名 prefix を追加 (例: '【シフト変更】')
+    """
     payload = _get_json()
     week_start = payload.get("weekStart")
+    target_staff_ids = payload.get("staffIds")  # None = 全員
+    subject_prefix = payload.get("subjectPrefix", "")
     if not week_start:
         return jsonify({"error": "missing_weekStart"}), 400
     state = storage.get_state()
@@ -1564,6 +1569,9 @@ def api_notify_shifts():
 
     sent, skipped, errors = 0, 0, []
     for s in state.get("staff", []):
+        # 限定送信モード: target_staff_ids 指定があれば該当スタッフ以外スキップ
+        if target_staff_ids and s["id"] not in target_staff_ids:
+            continue
         email = (s.get("email") or "").strip()
         if not email:
             skipped += 1
@@ -1610,7 +1618,7 @@ def api_notify_shifts():
             ]
         ok = send_email(
             to_addr=_safe_header(email),
-            subject=_safe_header(f"【{restaurant}】{week_start} 週のシフトが確定しました"),
+            subject=_safe_header(f"{subject_prefix}【{restaurant}】{week_start} 週のシフトが確定しました"),
             body="\n".join(body_lines),
         )
         if ok:

@@ -25,6 +25,15 @@
   let comments = {};    // {date: text}
   let dirty = false;
   const DRAFT_KEY = `shifty.portal.draft.${token || "anon"}`;
+  // 希望テンプレート (Round 8) — 曜日 × セッション の優先度をローカル保存
+  // {`${dow}|${sessId}`: priority}
+  const PREF_TEMPLATE_KEY = `shifty.portal.template.${token || "anon"}`;
+  function loadPrefTemplate() {
+    try { const raw = localStorage.getItem(PREF_TEMPLATE_KEY); return raw ? JSON.parse(raw) : null; } catch (_) { return null; }
+  }
+  function savePrefTemplate(tpl) {
+    try { localStorage.setItem(PREF_TEMPLATE_KEY, JSON.stringify(tpl)); } catch (_) {}
+  }
 
   function saveDraft() {
     try {
@@ -157,6 +166,30 @@
         <div class="text-[10px] text-slate-500 mt-1.5">※ 給与は時給×時間の概算です。実際の支給額とは異なる場合があります</div>
       </div>` : "";
 
+    // 希望テンプレートカード (Round 8)
+    const tpl = loadPrefTemplate();
+    const tplCard = `
+      <div class="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+        <details>
+          <summary class="text-sm font-semibold cursor-pointer select-none">⚡ 希望テンプレート (毎週同じパターンの方向け)</summary>
+          <div class="mt-2 flex flex-col sm:flex-row gap-2">
+            <button id="tpl-apply" class="text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-md px-3 py-2 font-semibold ${tpl ? "" : "hidden"}">
+              📋 保存済テンプレを当週に適用
+            </button>
+            <button id="tpl-save" class="text-xs bg-blue-500 hover:bg-blue-600 text-white rounded-md px-3 py-2 font-semibold">
+              💾 今の入力をテンプレ保存
+            </button>
+            <button id="tpl-clear" class="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-md px-3 py-2 ${tpl ? "" : "hidden"}">
+              🗑 テンプレを削除
+            </button>
+          </div>
+          <div class="text-[10px] text-slate-500 mt-2">
+            テンプレは「曜日 × セッション」単位で保存されます。例: 「毎週月曜のランチ希望」など。<br>
+            保存はお使いのブラウザに保管されます (送信時にサーバへは送られません)。
+          </div>
+        </details>
+      </div>`;
+
     // 希望提出締切 (Round 4)
     let deadlineCard = "";
     if (data.preferenceDeadline) {
@@ -190,6 +223,7 @@
 
     $("#app").innerHTML = `
       ${deadlineCard}
+      ${tplCard}
       ${monthCard}
       <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>
@@ -343,6 +377,55 @@
         openTimeAdjustModal(key, sessStart, sessEnd);
       };
     });
+
+    // 希望テンプレート操作 (Round 8)
+    const tplApplyBtn = document.getElementById("tpl-apply");
+    const tplSaveBtn = document.getElementById("tpl-save");
+    const tplClearBtn = document.getElementById("tpl-clear");
+    if (tplApplyBtn) tplApplyBtn.onclick = () => {
+      const t = loadPrefTemplate();
+      if (!t) return;
+      if (!confirm("保存されたテンプレートを当週に適用しますか？\n現在の希望入力は上書きされます (送信していなければ復元可能)。")) return;
+      const days = Array.from({ length: 7 }, (_, i) => addDays(data.weekStart, i));
+      let applied = 0;
+      for (const date of days) {
+        const dow = dayOfWeek(date);
+        for (const sess of (data.sessions || [])) {
+          const tplKey = `${dow}|${sess.id}`;
+          if (t[tplKey]) {
+            const k = `${date}|${sess.id}`;
+            prefs[k] = t[tplKey];
+            applied++;
+          }
+        }
+      }
+      dirty = true; saveDraft(); renderDraft();
+      toast(`テンプレート適用: ${applied} 件の希望を設定`, "success");
+    };
+    if (tplSaveBtn) tplSaveBtn.onclick = () => {
+      // 当週の入力を曜日 × セッション に圧縮 (同じ曜日に複数日があれば最初の値を採用)
+      const tpl = {};
+      for (const [key, prio] of Object.entries(prefs)) {
+        if (!prio) continue;
+        const [date, sessId] = key.split("|");
+        const dow = dayOfWeek(date);
+        const tplKey = `${dow}|${sessId}`;
+        if (!tpl[tplKey]) tpl[tplKey] = prio; // 最初の値を採用
+      }
+      if (Object.keys(tpl).length === 0) {
+        toast("先に希望を入力してから保存してください", "error");
+        return;
+      }
+      savePrefTemplate(tpl);
+      toast(`テンプレートを保存しました (${Object.keys(tpl).length} 件)`, "success");
+      renderDraft();
+    };
+    if (tplClearBtn) tplClearBtn.onclick = () => {
+      if (!confirm("保存済テンプレートを削除しますか？")) return;
+      try { localStorage.removeItem(PREF_TEMPLATE_KEY); } catch (_) {}
+      toast("テンプレートを削除しました", "info");
+      renderDraft();
+    };
 
     // コメント入力 (debounce 保存)
     let commentTimer;
