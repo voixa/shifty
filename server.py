@@ -1851,7 +1851,22 @@ def api_t_portal_get(slug, token):
                         "pay": int(pay),
                     })
     history_assignments.sort(key=lambda x: (x.get("date", ""), x.get("startTime", "")), reverse=True)
-    history_assignments = history_assignments[:30]  # 直近 30 件まで
+    history_assignments = history_assignments[:30]
+
+    # 希望提出締切の計算 (Round 4)
+    deadline_iso = None
+    deadline_setting = meta.get("preferenceDeadline")
+    if isinstance(deadline_setting, dict) and current_wk:
+        try:
+            wk_dt = _dt.datetime.strptime(current_wk, "%Y-%m-%d")
+            days_before = int(deadline_setting.get("daysBefore", 3))
+            hour = int(deadline_setting.get("hour", 18))
+            deadline_dt = wk_dt - _dt.timedelta(days=days_before)
+            deadline_dt = deadline_dt.replace(hour=hour, minute=0, second=0)
+            # JST タイムゾーン情報を含めた ISO
+            deadline_iso = deadline_dt.isoformat() + "+09:00"
+        except Exception:
+            pass
 
     return jsonify({
         "staff": public_staff,
@@ -1861,6 +1876,7 @@ def api_t_portal_get(slug, token):
         "weekStart": current_wk,
         "weekStatus": week_data.get("status", "draft"),
         "publishedAt": week_data.get("publishedAt"),
+        "preferenceDeadline": deadline_iso,
         "restaurantName": meta.get("restaurantName", ""),
         "sessions": meta.get("sessions", []),
         "positions": meta.get("positions", []),

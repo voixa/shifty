@@ -1126,6 +1126,11 @@ function viewSchedule() {
         onclick: toggleSwapMode,
         title: "タップでスタッフ入替（モバイル対応）",
       }, swapModeActive ? "🔁 入替モード ON" : "🔁 入替モード"),
+      curAssignments().length > 0 ? el("button", {
+        class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50",
+        onclick: openPrintView,
+        title: "店内掲示用 / 紙シフトの印刷",
+      }, "🖨️ 印刷") : null,
       el("button", { class: "text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md px-3 py-1.5",
         onclick: autoGenerate }, "🤖 AI自動生成"),
     ]),
@@ -1438,6 +1443,88 @@ function renderCalendar() {
     }
   }
   return grid;
+}
+
+// 印刷ビュー (Round 4)
+function openPrintView() {
+  // 既存印刷 DOM を削除して再生成
+  document.querySelectorAll(".print-only").forEach(e => e.remove());
+
+  const w0 = state.meta.currentWeekStart;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  const sessions = state.meta.sessions || [];
+  const positions = state.meta.positions || [];
+  const restaurant = state.meta.restaurantName || "店舗";
+
+  // テーブル構築: 行 = ポジション × セッション、列 = 日付
+  const wrap = document.createElement("div");
+  wrap.className = "print-only";
+  let html = `
+    <div class="print-header">${escapeHtml(restaurant)} シフト表</div>
+    <div class="print-meta">${w0} 〜 ${addDays(w0, 6)} (確定: ${(curWeek().publishedAt || "—").slice(0, 16)})</div>
+    <table class="print-shift">
+      <thead>
+        <tr>
+          <th rowspan="2" style="min-width:80px">時間帯</th>
+          <th rowspan="2" style="min-width:60px">ポジション</th>`;
+  for (const d of days) {
+    const dow = ["日","月","火","水","木","金","土"][dayOfWeek(d)];
+    const holiday = window.ShiftyData.getHoliday ? window.ShiftyData.getHoliday(d) : null;
+    html += `<th>${d.slice(5)} (${dow}${holiday ? "🎌" : ""})</th>`;
+  }
+  html += `</tr></thead><tbody>`;
+
+  for (const sess of sessions) {
+    for (let pi = 0; pi < positions.length; pi++) {
+      const pos = positions[pi];
+      html += `<tr>`;
+      if (pi === 0) {
+        html += `<td rowspan="${positions.length}" style="vertical-align:middle">${escapeHtml(sess.label)}<br><span style="font-size:8pt;color:#555">${sess.startTime}〜${sess.endTime}</span></td>`;
+      }
+      html += `<td class="print-pos-cell">${escapeHtml(pos.label)}</td>`;
+      for (const d of days) {
+        const cellAss = curAssignments().filter(a =>
+          a.date === d && a.position === pos.id && a.startTime === sess.startTime);
+        if (!cellAss.length) {
+          // 必要数あるけどアサイン無しなら "—"、必要無しならブランク
+          const slot = curSlots().find(s => s.date === d && s.position === pos.id && s.startTime === sess.startTime);
+          html += slot ? `<td class="print-empty">—</td>` : `<td></td>`;
+        } else {
+          const lines = cellAss.map(a => {
+            const s = state.staff.find(x => x.id === a.staffId);
+            return `<span class="print-staff-name">${escapeHtml(s?.name || "?")}</span>`;
+          }).join("");
+          html += `<td class="${cellAss.length > 1 ? "print-cell-multi" : ""}">${lines}</td>`;
+        }
+      }
+      html += `</tr>`;
+    }
+  }
+  html += `</tbody></table>`;
+
+  // スタッフ別合計時間
+  const hours = aggregateHours();
+  if (Object.keys(hours).length > 0) {
+    html += `
+      <div style="margin-top: 6mm;">
+        <table class="print-shift" style="width: auto;">
+          <thead><tr><th>スタッフ</th><th>合計時間</th></tr></thead>
+          <tbody>`;
+    for (const s of state.staff) {
+      const h = hours[s.id] || 0;
+      if (h > 0) html += `<tr><td style="text-align:left">${escapeHtml(s.name)}</td><td>${h.toFixed(1)}h</td></tr>`;
+    }
+    html += `</tbody></table>
+      </div>`;
+  }
+
+  wrap.innerHTML = html;
+  document.getElementById("main").appendChild(wrap);
+
+  // 印刷ダイアログ呼び出し
+  setTimeout(() => {
+    window.print();
+  }, 100);
 }
 
 // 未提出スタッフへの催促 LINE 文生成 (Round 3)
@@ -2453,6 +2540,39 @@ function viewSettings() {
       persist(); render(); toast("労務ルールを保存（次回 AI 生成から適用）", "success");
     } }, "保存"));
   wrap.appendChild(laborCard);
+
+  // 希望提出締切設定 (Round 4)
+  const dlCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  dlCard.appendChild(el("div", { class: "font-semibold" }, "希望提出締切"));
+  dlCard.appendChild(el("div", { class: "text-xs text-slate-500" },
+    "スタッフポータルにカウントダウン表示されます。シフト編成の前日設定が一般的です。"));
+  const dl = state.meta.preferenceDeadline || { daysBefore: 3, hour: 18 };
+  const dlGrid = el("div", { class: "grid grid-cols-3 gap-3 text-sm items-end" });
+  dlGrid.innerHTML = `
+    <label class="block col-span-2"><span class="text-slate-600">週開始の何日前？</span>
+      <select id="dl-days" class="mt-1 w-full border rounded-md px-3 py-2">
+        <option value="0" ${dl.daysBefore === 0 ? "selected" : ""}>当日</option>
+        <option value="1" ${dl.daysBefore === 1 ? "selected" : ""}>1 日前 (前日)</option>
+        <option value="2" ${dl.daysBefore === 2 ? "selected" : ""}>2 日前</option>
+        <option value="3" ${dl.daysBefore === 3 ? "selected" : ""}>3 日前 (推奨)</option>
+        <option value="4" ${dl.daysBefore === 4 ? "selected" : ""}>4 日前</option>
+        <option value="5" ${dl.daysBefore === 5 ? "selected" : ""}>5 日前</option>
+        <option value="7" ${dl.daysBefore === 7 ? "selected" : ""}>1 週間前</option>
+      </select></label>
+    <label class="block"><span class="text-slate-600">時刻</span>
+      <select id="dl-hour" class="mt-1 w-full border rounded-md px-3 py-2">
+        ${Array.from({ length: 24 }, (_, i) => `<option value="${i}" ${dl.hour === i ? "selected" : ""}>${String(i).padStart(2,"0")}:00</option>`).join("")}
+      </select></label>`;
+  dlCard.appendChild(dlGrid);
+  dlCard.appendChild(el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
+    onclick: () => {
+      state.meta.preferenceDeadline = {
+        daysBefore: Number($("#dl-days").value),
+        hour: Number($("#dl-hour").value),
+      };
+      persist(); render(); toast("提出締切を保存しました", "success");
+    } }, "保存"));
+  wrap.appendChild(dlCard);
 
   // Algorithm weights
   const algoCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });

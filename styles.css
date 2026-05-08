@@ -150,9 +150,35 @@
 /* Print styles */
 @media print {
   header, .no-print { display: none !important; }
-  body { background: white; }
-  .cal-cell { min-height: auto; }
+  body { background: white; color: #000; font-size: 10pt; }
+  /* 通常 view を非表示にして専用 print view を表示 */
+  #main > *:not(.print-only) { display: none !important; }
+  .print-only { display: block !important; }
+  /* A4 横向き */
+  @page { size: A4 landscape; margin: 10mm; }
+  .print-shift {
+    width: 100%; border-collapse: collapse; page-break-inside: avoid;
+  }
+  .print-shift th, .print-shift td {
+    border: 1px solid #555; padding: 4px 6px; text-align: center; font-size: 9pt;
+    white-space: nowrap;
+  }
+  .print-shift thead th {
+    background: #f0f0f0; font-weight: 700;
+  }
+  .print-shift .print-pos-cell {
+    background: #f8f8f8; font-weight: 600; text-align: left;
+  }
+  .print-shift .print-cell-multi {
+    text-align: left;
+  }
+  .print-shift .print-staff-name { display: block; font-size: 9pt; }
+  .print-shift .print-staff-time { display: block; font-size: 7pt; color: #555; }
+  .print-shift .print-empty { color: #aaa; }
+  .print-header { font-size: 14pt; font-weight: 700; margin-bottom: 6mm; text-align: center; }
+  .print-meta { font-size: 9pt; color: #555; margin-bottom: 4mm; text-align: center; }
 }
+.print-only { display: none; }
 
 /* Loader */
 .spinner {

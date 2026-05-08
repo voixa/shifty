@@ -157,7 +157,39 @@
         <div class="text-[10px] text-slate-500 mt-1.5">※ 給与は時給×時間の概算です。実際の支給額とは異なる場合があります</div>
       </div>` : "";
 
+    // 希望提出締切 (Round 4)
+    let deadlineCard = "";
+    if (data.preferenceDeadline) {
+      const dl = new Date(data.preferenceDeadline);
+      const now = new Date();
+      const diffMs = dl - now;
+      const isExpired = diffMs <= 0;
+      const diffH = Math.floor(diffMs / 3600000);
+      const diffMin = Math.floor((diffMs % 3600000) / 60000);
+      const fmt = (d) => `${d.getMonth()+1}/${d.getDate()}(${["日","月","火","水","木","金","土"][d.getDay()]}) ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+      if (isExpired) {
+        deadlineCard = `
+        <div class="bg-red-50 border border-red-300 rounded-xl p-3 mb-3 text-sm">
+          <div class="font-bold text-red-700">⏰ 希望提出期限を過ぎています</div>
+          <div class="text-xs text-red-600 mt-1">期限: ${fmt(dl)}　既にシフト編成中の可能性があります。今からの提出は店長に直接ご連絡ください。</div>
+        </div>`;
+      } else if (diffH < 24) {
+        deadlineCard = `
+        <div class="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-3 text-sm">
+          <div class="font-bold text-amber-800">⏰ 提出期限まで <span class="text-amber-900 text-lg">あと ${diffH > 0 ? diffH + "時間" + diffMin + "分" : diffMin + "分"}</span></div>
+          <div class="text-xs text-amber-700 mt-1">期限: ${fmt(dl)}　お早めにご提出ください</div>
+        </div>`;
+      } else {
+        const days = Math.floor(diffH / 24);
+        deadlineCard = `
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-3 text-sm">
+          <div class="font-semibold text-blue-900">⏰ 提出期限: ${fmt(dl)} <span class="text-xs">(あと ${days} 日)</span></div>
+        </div>`;
+      }
+    }
+
     $("#app").innerHTML = `
+      ${deadlineCard}
       ${monthCard}
       <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>
@@ -566,24 +598,55 @@
 
   // ===== 店長への連絡ダイアログ =====
   function openMessageDialog() {
+    // 確定済シフトのリストから「変更希望」をプルダウン選択可能に (Round 4)
+    const myShifts = (data.assignments || []).slice().sort((a, b) =>
+      a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+
     const overlay = document.createElement("div");
     overlay.className = "fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4";
     overlay.innerHTML = `
-      <div class="bg-white rounded-t-2xl sm:rounded-xl w-full max-w-md p-5 space-y-3">
+      <div class="bg-white rounded-t-2xl sm:rounded-xl w-full max-w-md p-5 space-y-3 max-h-[90vh] overflow-y-auto">
         <h3 class="font-bold text-lg">💬 店長に連絡</h3>
+
+        <div class="grid grid-cols-4 gap-1.5">
+          <button class="msg-kind-btn text-xs font-semibold py-2 rounded border-2 active:scale-95" data-kind="change_request">🔄<br>変更希望</button>
+          <button class="msg-kind-btn text-xs font-semibold py-2 rounded border-2 active:scale-95" data-kind="question">❓<br>質問</button>
+          <button class="msg-kind-btn text-xs font-semibold py-2 rounded border-2 active:scale-95" data-kind="report">📌<br>報告</button>
+          <button class="msg-kind-btn text-xs font-semibold py-2 rounded border-2 active:scale-95" data-kind="general">💬<br>その他</button>
+        </div>
+
+        <div id="changeRequestForm" class="hidden space-y-2">
+          <label class="block text-sm">
+            <span class="text-slate-600">変更したいシフト</span>
+            <select id="msgShift" class="mt-1 w-full border rounded-md px-3 py-2">
+              <option value="">選択してください</option>
+              ${myShifts.map(a => `<option value="${a.id}">${a.date.slice(5)} ${a.startTime}〜${a.endTime}</option>`).join("")}
+            </select>
+          </label>
+          <label class="block text-sm">
+            <span class="text-slate-600">理由（必須）</span>
+            <select id="msgReason" class="mt-1 w-full border rounded-md px-3 py-2">
+              <option value="">選択してください</option>
+              <option>体調不良</option>
+              <option>家族の用事</option>
+              <option>授業・試験</option>
+              <option>他バイト</option>
+              <option>急用</option>
+              <option>その他（詳細を下に記入）</option>
+            </select>
+          </label>
+          <label class="block text-sm">
+            <span class="text-slate-600">代替案（任意）</span>
+            <input id="msgAlt" class="mt-1 w-full border rounded-md px-3 py-2 text-sm"
+              placeholder="例: 翌日同時間なら出れます / 14時以降なら可能" />
+          </label>
+        </div>
+
         <label class="block text-sm">
-          <span class="text-slate-600">用件</span>
-          <select id="msgKind" class="mt-1 w-full border rounded-md px-3 py-2">
-            <option value="change_request">シフト変更希望</option>
-            <option value="question">質問</option>
-            <option value="report">報告</option>
-            <option value="general">その他</option>
-          </select>
+          <span class="text-slate-600">メッセージ <span id="msgTextHint" class="text-xs text-slate-400"></span></span>
+          <textarea id="msgText" class="mt-1 w-full border rounded-md px-3 py-2 h-20" maxlength="2000" placeholder="補足があればこちらに..."></textarea>
         </label>
-        <label class="block text-sm">
-          <span class="text-slate-600">メッセージ</span>
-          <textarea id="msgText" class="mt-1 w-full border rounded-md px-3 py-2 h-24" placeholder="例: 5/10 の夕方シフトを別日に変更したい..."></textarea>
-        </label>
+
         <div class="flex gap-2 justify-end">
           <button id="msgCancel" class="px-3 py-1.5 text-sm">キャンセル</button>
           <button id="msgSend" class="px-4 py-1.5 text-sm bg-amber-600 text-white rounded-md font-semibold">送信</button>
@@ -592,16 +655,61 @@
       </div>`;
     document.body.appendChild(overlay);
 
+    let selectedKind = "change_request";
+    function refreshKindUI() {
+      overlay.querySelectorAll(".msg-kind-btn").forEach(b => {
+        const k = b.getAttribute("data-kind");
+        if (k === selectedKind) {
+          b.classList.add("bg-amber-500", "text-white", "border-amber-500");
+          b.classList.remove("bg-white", "text-slate-600", "border-slate-200");
+        } else {
+          b.classList.remove("bg-amber-500", "text-white", "border-amber-500");
+          b.classList.add("bg-white", "text-slate-600", "border-slate-200");
+        }
+      });
+      const cr = overlay.querySelector("#changeRequestForm");
+      if (selectedKind === "change_request") cr.classList.remove("hidden");
+      else cr.classList.add("hidden");
+      const ph = overlay.querySelector("#msgText");
+      ph.placeholder = selectedKind === "change_request"
+        ? "上記で選んだシフトについて、補足があればこちらに..."
+        : selectedKind === "question" ? "例: 来週の希望提出はいつまでですか？"
+        : selectedKind === "report" ? "例: 5/12 の終電が遅延した件の報告..."
+        : "例: お知らせがあります";
+    }
+    refreshKindUI();
+
+    overlay.querySelectorAll(".msg-kind-btn").forEach(b => {
+      b.onclick = () => { selectedKind = b.getAttribute("data-kind"); refreshKindUI(); };
+    });
+
     overlay.querySelector("#msgCancel").onclick = () => overlay.remove();
     overlay.querySelector("#msgSend").onclick = async () => {
-      const kind = overlay.querySelector("#msgKind").value;
-      const message = overlay.querySelector("#msgText").value.trim();
+      let message = overlay.querySelector("#msgText").value.trim();
+      // change_request の場合は構造化テキストを生成
+      if (selectedKind === "change_request") {
+        const shiftId = overlay.querySelector("#msgShift").value;
+        const reason = overlay.querySelector("#msgReason").value;
+        const alt = overlay.querySelector("#msgAlt").value.trim();
+        if (!shiftId) { toast("変更したいシフトを選んでください", "error"); return; }
+        if (!reason) { toast("理由を選んでください", "error"); return; }
+        const sh = myShifts.find(a => a.id === shiftId);
+        const dt = sh ? `${sh.date} ${sh.startTime}〜${sh.endTime}` : "?";
+        const lines = [
+          "【シフト変更希望】",
+          `対象: ${dt}`,
+          `理由: ${reason}`,
+        ];
+        if (alt) lines.push(`代替案: ${alt}`);
+        if (message) lines.push(`補足: ${message}`);
+        message = lines.join("\n");
+      }
       if (!message) { toast("メッセージを入力してください", "error"); return; }
       const status = overlay.querySelector("#msgStatus");
       const btn = overlay.querySelector("#msgSend");
       btn.disabled = true; btn.textContent = "送信中…";
       try {
-        await window.ShiftyAPI.portalSendMessage(token, kind, message);
+        await window.ShiftyAPI.portalSendMessage(token, selectedKind, message);
         status.textContent = "✅ 送信完了。店長から折り返しご連絡があります。";
         status.className = "text-xs text-center text-emerald-600";
         status.classList.remove("hidden");

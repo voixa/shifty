@@ -294,6 +294,9 @@
     if (state.meta.onboardingCompleted === undefined) state.meta.onboardingCompleted = false;
     // 祝日扱い: as_sunday (デフォルト) | ignore (無視) | manual
     if (!state.meta.holidayHandling) state.meta.holidayHandling = "as_sunday";
+    // 希望提出の締切設定 (週開始の何日前 / 何時)
+    // null = 締切なし。{ daysBefore: 3, hour: 18 } = 週開始の 3 日前 18:00
+    if (state.meta.preferenceDeadline === undefined) state.meta.preferenceDeadline = { daysBefore: 3, hour: 18 };
     // v4 → v5: changeLog を各週に追加
     for (const wk of Object.values(state.weeks || {})) {
       if (!Array.isArray(wk.changeLog)) wk.changeLog = [];
