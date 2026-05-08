@@ -627,7 +627,12 @@ def gzip_response(resp):
     )
     if not compressible:
         return resp
-    data = resp.get_data()
+    # Flask の send_file は direct_passthrough=True なので解除して全データ取得
+    resp.direct_passthrough = False
+    try:
+        data = resp.get_data()
+    except Exception:
+        return resp
     if len(data) < 1024:
         return resp
     buf = _io.BytesIO()
