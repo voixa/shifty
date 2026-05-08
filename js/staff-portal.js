@@ -90,6 +90,13 @@
       return showError("リンクが無効・期限切れの可能性があります。店長にご確認ください。");
     }
 
+    // 初回ガイドツアー (Round 10) — 一度だけ表示
+    const tourKey = `shifty.portal.toured.${token || "anon"}`;
+    if (!localStorage.getItem(tourKey)) {
+      try { localStorage.setItem(tourKey, Date.now().toString()); } catch (_) {}
+      setTimeout(showOnboardingTour, 300);
+    }
+
     if (data.weekStatus === "published") {
       renderPublished();
     } else {
@@ -771,6 +778,73 @@
         openEmergencyAbsenceDialog(shiftTime);
       };
     });
+  }
+
+  // 初回ガイドツアー (Round 10)
+  function showOnboardingTour() {
+    let step = 0;
+    const STEPS = [
+      {
+        title: "👋 はじめまして！",
+        body: `${escapeHtml(data.staff?.name || "あなた")}さんのシフト希望を集めるページです。<br>
+          毎週、お店から URL が届くので、開いて希望を入力 → 送信、の繰り返しになります。<br><br>
+          <strong>所要時間: 約 2 分 / 週</strong>`,
+      },
+      {
+        title: "📝 希望の入力方法",
+        body: `各日の各時間帯に <strong>4 つのボタン</strong> があります:<br>
+          <ul class="list-disc pl-5 mt-2 space-y-1 text-xs">
+            <li>🔥 <strong>必須</strong>: 絶対入りたい (家計/予定優先)</li>
+            <li>✅ <strong>希望</strong>: 入れたら入りたい</li>
+            <li>🚫 <strong>不可</strong>: 入れません (用事あり)</li>
+            <li>— <strong>未定</strong>: 任せる (どちらでも)</li>
+          </ul>
+          <div class="mt-2 text-xs text-amber-700">時間範囲を絞りたい場合は ⚙️ ボタン、毎週同じパターンの方は ⚡ テンプレートが便利です。</div>`,
+      },
+      {
+        title: "✅ 送信して完了！",
+        body: `画面下部の「送信」ボタンを押すと完了です。<br><br>
+          ✓ 期限内なら何度でも編集して再送信できます<br>
+          ✓ 入力内容は自動下書き保存されます (途中で閉じても OK)<br>
+          ✓ 提出期限は画面上部の <strong>⏰ カウントダウン</strong> をご確認ください<br><br>
+          <strong>不明点は店長まで気軽にご連絡を！</strong>`,
+      },
+    ];
+    function render() {
+      const overlay = document.getElementById("portal-tour-overlay");
+      if (overlay) overlay.remove();
+      const o = document.createElement("div");
+      o.id = "portal-tour-overlay";
+      o.className = "fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4";
+      const s = STEPS[step];
+      o.innerHTML = `
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 space-y-3 shadow-2xl">
+          <div class="flex items-center justify-between">
+            <div class="text-xs text-slate-500">${step + 1} / ${STEPS.length}</div>
+            <button id="tour-skip" class="text-xs text-slate-400 hover:text-slate-700">スキップ</button>
+          </div>
+          <h2 class="font-bold text-xl">${s.title}</h2>
+          <div class="text-sm text-slate-700">${s.body}</div>
+          <div class="h-1 bg-slate-200 rounded-full overflow-hidden">
+            <div class="h-full bg-brand-600 transition-all" style="width:${((step + 1) / STEPS.length) * 100}%"></div>
+          </div>
+          <div class="flex gap-2 justify-between pt-2">
+            ${step > 0 ? '<button id="tour-prev" class="px-3 py-2 text-sm text-slate-500">← 戻る</button>' : '<div></div>'}
+            <button id="tour-next" class="px-5 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-semibold">
+              ${step < STEPS.length - 1 ? "次へ →" : "🎉 はじめる"}
+            </button>
+          </div>
+        </div>`;
+      document.body.appendChild(o);
+      o.querySelector("#tour-skip").onclick = () => o.remove();
+      const prev = o.querySelector("#tour-prev");
+      if (prev) prev.onclick = () => { step--; render(); };
+      o.querySelector("#tour-next").onclick = () => {
+        if (step < STEPS.length - 1) { step++; render(); }
+        else { o.remove(); }
+      };
+    }
+    render();
   }
 
   // 緊急休み申請ダイアログ (Round 7)

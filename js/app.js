@@ -858,11 +858,17 @@ function viewStaff() {
     return wrap;
   }
 
+  // ドラッグ並び替え用ヒント (Round 10)
+  if (state.staff.length > 1) {
+    wrap.appendChild(el("div", { class: "text-xs text-slate-500" },
+      "💡 行の左端 ⋮⋮ をドラッグでスタッフの並び順を変更できます (シフト編成・ランキングにも反映)"));
+  }
   const table = el("div", { class: "bg-white rounded-xl border border-slate-200 overflow-x-auto" });
   table.innerHTML = `
     <table class="w-full text-sm">
       <thead class="bg-slate-50 text-slate-600 text-xs">
         <tr>
+          <th class="px-2 py-2"></th>
           <th class="text-left px-3 py-2">名前</th>
           <th class="text-left px-3 py-2">本職</th>
           <th class="text-left px-3 py-2">兼任</th>
@@ -876,9 +882,31 @@ function viewStaff() {
       <tbody></tbody>
     </table>`;
   const tbody = table.querySelector("tbody");
-  state.staff.forEach(s => {
-    const tr = el("tr", { class: "border-t border-slate-100 hover:bg-slate-50" });
+  state.staff.forEach((s, idx) => {
+    const tr = el("tr", {
+      class: "border-t border-slate-100 hover:bg-slate-50",
+      draggable: "true",
+      "data-staff-id": s.id,
+      ondragstart: (e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", s.id); tr.style.opacity = "0.4"; },
+      ondragend: () => { tr.style.opacity = ""; },
+      ondragover: (e) => { e.preventDefault(); tr.style.borderTop = "2px solid #4f46e5"; },
+      ondragleave: () => { tr.style.borderTop = ""; },
+      ondrop: (e) => {
+        e.preventDefault();
+        tr.style.borderTop = "";
+        const sourceId = e.dataTransfer.getData("text/plain");
+        if (!sourceId || sourceId === s.id) return;
+        const sourceIdx = state.staff.findIndex(x => x.id === sourceId);
+        const targetIdx = state.staff.findIndex(x => x.id === s.id);
+        if (sourceIdx < 0 || targetIdx < 0) return;
+        const [moved] = state.staff.splice(sourceIdx, 1);
+        state.staff.splice(targetIdx, 0, moved);
+        persist(); render();
+        toast(`${moved.name} の並び順を変更`, "success");
+      },
+    });
     tr.innerHTML = `
+      <td class="px-2 py-2.5 text-center text-slate-400 cursor-move" title="ドラッグで並び替え">⋮⋮</td>
       <td class="px-3 py-2.5 font-medium">${escapeHtml(s.name)}</td>
       <td class="px-3 py-2.5">${posBadge(s.position)}</td>
       <td class="px-3 py-2.5">${s.canCover.length ? s.canCover.map(p => escapeHtml(posCfg(p).label)).join("・") : "<span class=\"text-slate-400\">—</span>"}</td>
@@ -983,8 +1011,10 @@ function openStaffEdit(s = null) {
   const data = s ? { ...s } : {
     id: uid("s_"), name: "", position: state.meta.positions[0]?.id || "hall", canCover: [],
     hourlyWage: 1100, maxHoursPerWeek: 28, minHoursPerWeek: 10,
-    fixedDayOff: [], skill: 3, notes: ""
+    fixedDayOff: [], skill: 3, notes: "",
+    breakMinutes: 0,  // Round 10: 6h 超勤務時の休憩時間（分）
   };
+  if (data.breakMinutes === undefined) data.breakMinutes = 0;
   const body = el("div", { class: "p-6 space-y-4" });
   body.innerHTML = `<h3 class="font-bold text-lg mb-3">${isNew ? "新規スタッフ追加" : "スタッフ編集"}</h3>`;
   const form = el("div", { class: "space-y-3 text-sm" });
@@ -1023,9 +1053,19 @@ function openStaffEdit(s = null) {
             ${d}</label>`).join("")}
       </div>
     </div>
-    <label class="block"><span class="text-slate-600">メールアドレス（シフト変更通知の宛先・任意）</span>
-      <input data-k="email" type="email" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.email || "")}" placeholder="staff@example.com"></label>
-    <label class="block"><span class="text-slate-600">メモ</span>
+    <div class="grid grid-cols-2 gap-3">
+      <label class="block"><span class="text-slate-600">休憩(分) <span class="text-[10px] text-slate-400">6h 超勤務時に控除</span></span>
+        <select data-k="breakMinutes" class="mt-1 w-full border rounded-md px-3 py-2">
+          <option value="0" ${data.breakMinutes === 0 ? "selected" : ""}>休憩なし (給与控除なし)</option>
+          <option value="30" ${data.breakMinutes === 30 ? "selected" : ""}>30 分</option>
+          <option value="45" ${data.breakMinutes === 45 ? "selected" : ""}>45 分 (労基: 6-8h 勤務)</option>
+          <option value="60" ${data.breakMinutes === 60 ? "selected" : ""}>60 分 (労基: 8h 超勤務)</option>
+          <option value="90" ${data.breakMinutes === 90 ? "selected" : ""}>90 分</option>
+        </select></label>
+      <label class="block"><span class="text-slate-600">メールアドレス <span class="text-[10px] text-slate-400">通知用</span></span>
+        <input data-k="email" type="email" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.email || "")}" placeholder="staff@example.com"></label>
+    </div>
+    <label class="block"><span class="text-slate-600">メモ (店長用・スタッフには非表示)</span>
       <input data-k="notes" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.notes || "")}"></label>`;
   body.appendChild(form);
   body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2" }, [
@@ -2669,13 +2709,19 @@ function downloadPayrollCsv(monthKey, format) {
     return;
   }
 
-  // スタッフ別集計
+  // スタッフ別集計 (Round 10: 休憩時間を控除)
   const byStaff = {};
   for (const a of monthAssignments) {
     if (!byStaff[a.staffId]) byStaff[a.staffId] = { hours: 0, pay: 0, days: [] };
-    const h = calcHours(a.startTime, a.endTime);
+    const staffRec = state.staff.find(s => s.id === a.staffId);
+    const breakMin = (staffRec && staffRec.breakMinutes) || 0;
+    let h = calcHours(a.startTime, a.endTime);
+    // 6h 超勤務の場合は休憩時間を控除（労基準拠の慣習）
+    if (h > 6 && breakMin > 0) {
+      h -= breakMin / 60;
+    }
     byStaff[a.staffId].hours += h;
-    byStaff[a.staffId].pay += a.cost;
+    byStaff[a.staffId].pay += staffRec ? (staffRec.hourlyWage * h) : a.cost;
     byStaff[a.staffId].days.push(a);
   }
 

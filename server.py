@@ -1853,6 +1853,8 @@ def api_t_portal_get(slug, token):
     month_total_h = 0.0
     month_total_pay = 0.0
     history_assignments = []  # 過去 4 週の assignment (確定済のみ)
+    # Round 10: 休憩時間 (6h 超勤務時に控除)
+    break_min = int(staff.get("breakMinutes", 0) or 0)
     if isinstance(weeks, dict):
         for wk_start, wk_data in weeks.items():
             if wk_data.get("status") != "published":
@@ -1861,11 +1863,13 @@ def api_t_portal_get(slug, token):
                 if a.get("staffId") != staff_id:
                     continue
                 hours = _calc_hours(a.get("startTime", ""), a.get("endTime", ""))
-                pay = a.get("cost") or (staff.get("hourlyWage", 0) * hours)
+                # 6h 超なら休憩時間を控除
+                eff_hours = hours - (break_min / 60.0) if (hours > 6 and break_min > 0) else hours
+                pay = staff.get("hourlyWage", 0) * eff_hours
                 # 当月集計
                 if month_key and a.get("date", "").startswith(month_key):
                     month_assignments.append(a)
-                    month_total_h += hours
+                    month_total_h += eff_hours
                     month_total_pay += pay
                 # 履歴 (過去 4 週)
                 if current_wk and wk_start <= current_wk:
@@ -1874,7 +1878,7 @@ def api_t_portal_get(slug, token):
                         "startTime": a.get("startTime"),
                         "endTime": a.get("endTime"),
                         "position": a.get("position"),
-                        "hours": round(hours, 2),
+                        "hours": round(eff_hours, 2),
                         "pay": int(pay),
                     })
     history_assignments.sort(key=lambda x: (x.get("date", ""), x.get("startTime", "")), reverse=True)
