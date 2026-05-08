@@ -1905,6 +1905,7 @@ def api_t_portal_get(slug, token):
         "weekStatus": week_data.get("status", "draft"),
         "publishedAt": week_data.get("publishedAt"),
         "preferenceDeadline": deadline_iso,
+        "ownerNotice": week_data.get("ownerNotice", ""),
         "restaurantName": meta.get("restaurantName", ""),
         "sessions": meta.get("sessions", []),
         "positions": meta.get("positions", []),

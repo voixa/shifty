@@ -1312,6 +1312,32 @@ function viewSchedule() {
     ]));
   }
 
+  // 今週の店長お知らせ (Round 9) — 確定通知 / iCal / 印刷に反映
+  const noticeCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3 no-print" });
+  noticeCard.appendChild(el("details", {}, [
+    el("summary", { class: "text-sm font-semibold cursor-pointer select-none" },
+      "📢 今週のお知らせ" + (curWeek().ownerNotice ? " ✓" : " (店長 → 全スタッフ)")),
+    el("div", { class: "mt-2 space-y-2" }, [
+      el("textarea", {
+        id: "owner-notice",
+        class: "w-full border rounded-md px-3 py-2 text-sm",
+        rows: "3",
+        maxlength: "500",
+        placeholder: "例: 今週は GW のため売上目標 200% / 18 時以降は人手不足のため積極的に入って欲しい / 月末に賞与あります 等",
+        oninput: () => {
+          const v = $("#owner-notice").value.slice(0, 500);
+          curWeek().ownerNotice = v;
+          // 自動保存タイマー
+          if (window._noticeTimer) clearTimeout(window._noticeTimer);
+          window._noticeTimer = setTimeout(() => persist(), 800);
+        },
+      }, curWeek().ownerNotice || ""),
+      el("div", { class: "text-[10px] text-slate-500" },
+        "ここに書いた内容は LINE 通知文・確定メール・印刷シフト・スタッフポータルに自動表示されます。最大 500 文字。"),
+    ]),
+  ]));
+  wrap.appendChild(noticeCard);
+
   // Publish / unpublish controls
   const pubBox = el("div", {});
   if (curStatus() === "draft") {
@@ -1501,14 +1527,20 @@ async function openLineNotificationDialog() {
 
   const w0 = state.meta.currentWeekStart;
   const wEnd = addDays(w0, 6);
+  const ownerNotice = (curWeek().ownerNotice || "").trim();
   const lines = [
     `【シフト確定のお知らせ】`,
     `${state.meta.restaurantName}`,
     `期間: ${w0} 〜 ${wEnd}`,
     ``,
-    `各自、下記URLから自分の今週のシフトを確認してください。`,
-    ``,
   ];
+  // Round 9: 店長お知らせがあれば冒頭に挿入
+  if (ownerNotice) {
+    lines.push("📢 今週のお知らせ:");
+    ownerNotice.split("\n").forEach(l => lines.push(l));
+    lines.push("");
+  }
+  lines.push(`各自、下記URLから自分の今週のシフトを確認してください。`, ``);
   for (const s of state.staff) {
     const t = tokens[s.id];
     if (!t) continue;
@@ -1625,9 +1657,11 @@ function openPrintView() {
   // テーブル構築: 行 = ポジション × セッション、列 = 日付
   const wrap = document.createElement("div");
   wrap.className = "print-only";
+  const ownerNotice = (curWeek().ownerNotice || "").trim();
   let html = `
     <div class="print-header">${escapeHtml(restaurant)} シフト表</div>
     <div class="print-meta">${w0} 〜 ${addDays(w0, 6)} (確定: ${(curWeek().publishedAt || "—").slice(0, 16)})</div>
+    ${ownerNotice ? `<div style="border:1px solid #999;padding:6px 8px;margin-bottom:4mm;background:#fffbeb;font-size:9pt;"><b>📢 今週のお知らせ:</b> ${escapeHtml(ownerNotice).replace(/\n/g, "<br>")}</div>` : ""}
     <table class="print-shift">
       <thead>
         <tr>
@@ -2112,7 +2146,10 @@ function getUnfilled() {
 
 function renderStaffSummary() {
   const card = el("div", { class: "bg-white border border-slate-200 rounded-xl overflow-x-auto" });
-  card.innerHTML = `<div class="font-semibold p-3 border-b">スタッフ別サマリ</div>`;
+  card.innerHTML = `<div class="font-semibold p-3 border-b flex items-center justify-between">
+    <span>スタッフ別サマリ</span>
+    <span class="text-xs font-normal text-slate-500" id="summary-total"></span>
+  </div>`;
   const tbl = el("table", { class: "w-full text-sm" });
   tbl.innerHTML = `
     <thead class="bg-slate-50 text-slate-600 text-xs"><tr>
@@ -2123,25 +2160,41 @@ function renderStaffSummary() {
     </tr></thead>`;
   const tb = el("tbody");
   const hours = aggregateHours();
+  // 時間降順でランキング表示 (Round 9)
+  const rows = [];
   for (const s of state.staff) {
     const h = hours[s.id] || 0;
     const cost = curAssignments().filter(a => a.staffId === s.id).reduce((sm, a) => sm + a.cost, 0);
+    rows.push({ s, h, cost });
+  }
+  rows.sort((a, b) => b.h - a.h);
+  let totalH = 0, totalCost = 0;
+  for (const { s, h, cost } of rows) {
+    totalH += h;
+    totalCost += cost;
     let status = "✓";
     let statusClass = "text-slate-400";
     if (h === 0) { status = "— 未配置"; statusClass = "text-slate-400"; }
     else if (h < s.minHoursPerWeek) { status = `△ 最低未達(${s.minHoursPerWeek}h)`; statusClass = "text-amber-600"; }
     else if (h > s.maxHoursPerWeek) { status = `× 上限超過(${s.maxHoursPerWeek}h)`; statusClass = "text-red-600"; }
     else { status = "✓ OK"; statusClass = "text-emerald-600"; }
-    const tr = el("tr", { class: "border-t border-slate-100" });
+    const tr = el("tr", { class: "border-t border-slate-100 cursor-pointer hover:bg-slate-50" });
     tr.innerHTML = `
       <td class="px-3 py-2">${escapeHtml(s.name)} <span class="text-xs text-slate-500">${escapeHtml(posCfg(s.position).label)}</span></td>
       <td class="px-3 py-2 text-right">${h.toFixed(1)}h</td>
       <td class="px-3 py-2 text-right">${fmtYen(cost)}</td>
       <td class="px-3 py-2 ${statusClass}">${status}</td>`;
+    // クリックでフィルタ適用 (Round 9)
+    tr.onclick = () => setStaffFilter(s.id);
     tb.appendChild(tr);
   }
   tbl.appendChild(tb);
   card.appendChild(tbl);
+  // 合計表示
+  setTimeout(() => {
+    const t = card.querySelector("#summary-total");
+    if (t) t.textContent = `合計: ${totalH.toFixed(1)}h / ${fmtYen(totalCost)}`;
+  }, 0);
   return card;
 }
 
@@ -2424,24 +2477,86 @@ function autoGenerate() {
   }
   if (curStatus() === "published") { toast("確定済の週は再生成できません。先に「下書きに戻す」してください。", "error"); return; }
   if (curSlots().length === 0) { toast("シフト枠がありません。設定タブの「必要人数」で定義してください。", "error"); return; }
-  toast("AI最適化を実行中...");
+
+  // Round 9: AI 生成中のプログレスモーダル表示
+  const slotN = curSlots().reduce((s, x) => s + x.requiredCount, 0);
+  const staffN = state.staff.length;
+  const estimatedSec = Math.max(1, Math.ceil(staffN * slotN / 600));  // 簡易予測
+  const body = el("div", { class: "p-6 text-center space-y-3" });
+  body.innerHTML = `
+    <div class="text-4xl">🤖</div>
+    <h3 class="font-bold text-lg">AI シフト生成中…</h3>
+    <p class="text-sm text-slate-600">
+      スタッフ ${staffN} 名 × シフト枠 ${slotN} 枠を最適化中。<br>
+      予測時間: 約 ${estimatedSec} 秒
+    </p>
+    <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+      <div id="progress-bar" class="h-full bg-gradient-to-r from-brand-500 to-brand-700 transition-all duration-200" style="width: 5%"></div>
+    </div>
+    <div id="progress-status" class="text-xs text-slate-500">準備中...</div>
+    <div id="progress-elapsed" class="text-[10px] text-slate-400">経過: 0.0s</div>`;
+  modal(body);
+
+  const startTime = Date.now();
+  let phaseIdx = 0;
+  const phases = [
+    { pct: 15, status: "📋 入力データ整理中..." },
+    { pct: 35, status: "🎯 Phase 1: 困難スロット優先で配置中..." },
+    { pct: 65, status: "⚙️ Phase 2: ペアスワップで最適化中..." },
+    { pct: 85, status: "✓ ハード制約検証中..." },
+    { pct: 95, status: "📊 メトリクス計算中..." },
+  ];
+  // プログレスバーをアニメーション
+  const progressTimer = setInterval(() => {
+    const elapsed = (Date.now() - startTime) / 1000;
+    const elEl = document.getElementById("progress-elapsed");
+    if (elEl) elEl.textContent = `経過: ${elapsed.toFixed(1)}s`;
+    if (phaseIdx < phases.length) {
+      const phase = phases[phaseIdx];
+      const bar = document.getElementById("progress-bar");
+      const stat = document.getElementById("progress-status");
+      if (bar) bar.style.width = `${phase.pct}%`;
+      if (stat) stat.textContent = phase.status;
+      phaseIdx++;
+    }
+  }, Math.max(150, estimatedSec * 200));
+
+  // 実際の生成は requestIdleCallback / setTimeout で UI ブロック回避
   setTimeout(() => {
-    const result = generateShift({
-      staff: state.staff, slots: curSlots(), preferences: curPrefs(),
-      laborRules: state.meta.laborRules,
-      weights: state.meta.algorithmWeights,
-      randomStarts: state.meta.randomStarts || 5,
-    });
-    state._lastAudit = result.audit;
-    curWeek().assignments = result.assignments;
-    logChange("autogenerate", `AI生成: ${result.assignments.length}件配置 / カバー${fmtPct(result.metrics.coverageRate)} / 希望${fmtPct(result.metrics.preferenceSatisfaction)}`, {
-      audit: result.audit ? { passed: result.audit.passed, violations: result.audit.hardViolations.length } : null,
-    });
-    persist();
-    render();
-    const m = result.metrics;
-    toast(`✅ 完成: カバー${fmtPct(m.coverageRate)} / 希望${fmtPct(m.preferenceSatisfaction)} / ${fmtYen(m.totalCost)}`, "success");
-  }, 400);
+    try {
+      const result = generateShift({
+        staff: state.staff, slots: curSlots(), preferences: curPrefs(),
+        laborRules: state.meta.laborRules,
+        weights: state.meta.algorithmWeights,
+        randomStarts: state.meta.randomStarts || 5,
+      });
+      clearInterval(progressTimer);
+      // 100% に
+      const bar = document.getElementById("progress-bar");
+      const stat = document.getElementById("progress-status");
+      if (bar) bar.style.width = "100%";
+      if (stat) stat.textContent = "✅ 完了！";
+
+      state._lastAudit = result.audit;
+      curWeek().assignments = result.assignments;
+      logChange("autogenerate", `AI生成: ${result.assignments.length}件配置 / カバー${fmtPct(result.metrics.coverageRate)} / 希望${fmtPct(result.metrics.preferenceSatisfaction)}`, {
+        audit: result.audit ? { passed: result.audit.passed, violations: result.audit.hardViolations.length } : null,
+      });
+      persist();
+      const m = result.metrics;
+      const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      setTimeout(() => {
+        closeModal();
+        render();
+        toast(`✅ 完成 (${totalElapsed}s): カバー${fmtPct(m.coverageRate)} / 希望${fmtPct(m.preferenceSatisfaction)} / ${fmtYen(m.totalCost)}`, "success", 5000);
+      }, 400);
+    } catch (e) {
+      clearInterval(progressTimer);
+      closeModal();
+      toast("AI 生成失敗: " + e.message, "error", 6000);
+      console.error(e);
+    }
+  }, 100);
 }
 
 // ===== View: Export =====

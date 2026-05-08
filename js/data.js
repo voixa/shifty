@@ -160,6 +160,7 @@
       status: "draft",
       publishedAt: null,
       changeLog: [],
+      ownerNotice: "",  // Round 9: 今週の店長お知らせ
     };
   }
 

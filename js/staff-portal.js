@@ -221,7 +221,14 @@
       }
     }
 
+    const draftNoticeCard = (data.ownerNotice && data.ownerNotice.trim()) ? `
+      <div class="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-3">
+        <div class="text-xs font-semibold text-amber-900 mb-1">📢 店長からのお知らせ</div>
+        <div class="text-sm text-amber-900 whitespace-pre-wrap">${escapeHtml(data.ownerNotice.trim())}</div>
+      </div>` : "";
+
     $("#app").innerHTML = `
+      ${draftNoticeCard}
       ${deadlineCard}
       ${tplCard}
       ${monthCard}
@@ -622,8 +629,16 @@
         </div>`;
     }
 
+    // 店長お知らせ (Round 9)
+    const noticeCard = (data.ownerNotice && data.ownerNotice.trim()) ? `
+      <div class="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-3">
+        <div class="text-xs font-semibold text-amber-900 mb-1">📢 店長からのお知らせ</div>
+        <div class="text-sm text-amber-900 whitespace-pre-wrap">${escapeHtml(data.ownerNotice.trim())}</div>
+      </div>` : "";
+
     $("#app").innerHTML = `
       ${nextShiftCard}
+      ${noticeCard}
       ${monthCard}
       <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>
