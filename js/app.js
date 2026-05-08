@@ -158,6 +158,108 @@ function regenerateCurSlots() {
   curWeek().slots = buildSlots(state.meta, state.meta.currentWeekStart);
 }
 
+// ===== 月次労務リスク (Round 15 TOP 1) =====
+function renderMonthlyLaborRisk() {
+  // 当月キー (現在週の月を採用)
+  const wkStart = state.meta.currentWeekStart || "";
+  const monthKey = wkStart.slice(0, 7); // "YYYY-MM"
+  if (!monthKey) return null;
+
+  // 全 weeks から当月の確定済 + 下書き両方を集計 (リスク予測のため下書きも含める)
+  const allWeeks = state.weeks || {};
+  const perStaff = {}; // staffId -> { hours, cost, days: Set }
+  for (const wk of Object.values(allWeeks)) {
+    for (const a of (wk.assignments || [])) {
+      if (!(a.date || "").startsWith(monthKey)) continue;
+      const sid = a.staffId;
+      if (!perStaff[sid]) perStaff[sid] = { hours: 0, cost: 0, days: new Set() };
+      const h = calcHours(a.startTime, a.endTime);
+      const s = state.staff.find(x => x.id === sid);
+      const breakMin = (s && s.breakMinutes) || 0;
+      const eff = (h > 6 && breakMin > 0) ? h - breakMin / 60 : h;
+      perStaff[sid].hours += eff;
+      perStaff[sid].cost += eff * (s ? s.hourlyWage : 1100);
+      perStaff[sid].days.add(a.date);
+    }
+  }
+
+  // 月の上限: 4.33 週 × maxHoursPerWeek を月上限と仮定 (社会保険の壁を考慮するなら別途)
+  const lr = state.meta.laborRules || {};
+  const monthLimitDefault = (lr.maxHoursPerWeek || 40) * 4.33;
+  const warnThreshold = (state.meta.laborWarnThreshold || 0.7);  // 70%
+  const dangerThreshold = (state.meta.laborDangerThreshold || 0.85); // 85%
+
+  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  const monthLabel = monthKey.replace("-", "年") + "月";
+  const totalCost = Object.values(perStaff).reduce((s, r) => s + r.cost, 0);
+  const monthBudget = (state.meta.weeklyBudget || 0) * 4.33;
+  card.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
+    el("div", { class: "font-semibold text-sm" }, `📊 ${monthLabel}の労務状況`),
+    el("div", { class: "text-xs text-slate-500" },
+      `合計人件費 ${fmtYen(Math.round(totalCost))} / 月予算${fmtYen(Math.round(monthBudget))}`),
+  ]));
+
+  // スタッフ一覧（時間が多い順）
+  const sorted = state.staff.map(s => {
+    const r = perStaff[s.id] || { hours: 0, cost: 0, days: new Set() };
+    const personalLimit = s.maxHoursPerWeek ? s.maxHoursPerWeek * 4.33 : monthLimitDefault;
+    const ratio = personalLimit > 0 ? r.hours / personalLimit : 0;
+    return { staff: s, hours: r.hours, cost: r.cost, daysCount: r.days.size, limit: personalLimit, ratio };
+  }).sort((a, b) => b.ratio - a.ratio);
+
+  // 警告サマリ
+  const warns = sorted.filter(x => x.ratio >= warnThreshold);
+  const dangers = sorted.filter(x => x.ratio >= dangerThreshold);
+  if (dangers.length > 0 || warns.length > 0) {
+    const summary = el("div", { class: "mb-3 text-xs flex flex-wrap gap-2" });
+    if (dangers.length > 0) {
+      summary.appendChild(el("span", { class: "bg-red-50 border border-red-200 text-red-800 rounded px-2 py-0.5" },
+        `🚨 上限接近 (${Math.round(dangerThreshold*100)}%以上): ${dangers.length}名`));
+    }
+    if (warns.length > dangers.length) {
+      summary.appendChild(el("span", { class: "bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-0.5" },
+        `⚠️ 注意 (${Math.round(warnThreshold*100)}%以上): ${warns.length - dangers.length}名`));
+    }
+    card.appendChild(summary);
+  }
+
+  const list = el("div", { class: "space-y-1.5" });
+  for (const item of sorted) {
+    if (item.hours === 0) continue;
+    const pct = Math.min(120, item.ratio * 100);
+    const color = item.ratio >= dangerThreshold ? "#dc2626"
+                : item.ratio >= warnThreshold ? "#f59e0b"
+                : "#10b981";
+    const row = el("div", { class: "text-xs" });
+    row.innerHTML = `
+      <div class="flex items-center justify-between mb-1">
+        <span class="font-medium">${escapeHtml(item.staff.name)}
+          <span class="text-[10px] text-slate-500 ml-1">(${escapeHtml(posCfg(item.staff.position).label)})</span></span>
+        <span class="text-slate-600">${item.hours.toFixed(1)}h / ${item.limit.toFixed(0)}h
+          <span class="font-bold" style="color:${color}">(${Math.round(item.ratio*100)}%)</span>
+        </span>
+      </div>
+      <div class="gauge-bar"><div style="width:${Math.min(100,pct)}%;background:${color}"></div></div>
+      <div class="text-[10px] text-slate-500 mt-0.5">${item.daysCount} 日 / ${fmtYen(Math.round(item.cost))}</div>
+    `;
+    list.appendChild(row);
+  }
+  if (list.children.length === 0) {
+    list.appendChild(el("div", { class: "text-xs text-slate-500 text-center py-2" },
+      "今月の確定済シフトはまだありません"));
+  }
+  card.appendChild(list);
+
+  // 設定リンク
+  card.appendChild(el("div", { class: "text-[10px] text-slate-400 mt-2 text-right" }, [
+    el("button", {
+      class: "underline decoration-dotted hover:text-slate-600",
+      onclick: () => { setTab("settings"); setTimeout(() => location.hash = "#set-labor", 100); },
+    }, "⚙️ 警告閾値を変更"),
+  ]));
+  return card;
+}
+
 // ===== Change Log =====
 function logChange(type, detail, extra = {}) {
   const wk = curWeek();
@@ -319,6 +421,12 @@ function viewDashboard() {
         action: () => { setTab("staff"); }, actionLabel: "スタッフ編集",
       });
     }
+  }
+
+  // 月次労務リスク (Round 15 TOP 1) — 当月の累積時間と労務上限への接近度
+  if (state.staff.length > 0) {
+    const monthCard = renderMonthlyLaborRisk();
+    if (monthCard) wrap.appendChild(monthCard);
   }
 
   // 人件費推移グラフ (Round 11) — 過去 8 週分の確定済シフト人件費
@@ -3652,6 +3760,24 @@ function viewSettings() {
     <label class="block"><span class="text-slate-600">最低週休(日)</span>
       <input id="lr-rest" type="number" class="mt-1 w-full border rounded-md px-3 py-2" value="${lr.minRestDaysPerWeek}"></label>`;
   laborCard.appendChild(lrGrid);
+
+  // 月次労務リスク警告閾値 (Round 15 TOP 1)
+  const warnT = state.meta.laborWarnThreshold ?? 0.7;
+  const dangerT = state.meta.laborDangerThreshold ?? 0.85;
+  laborCard.appendChild(el("div", { class: "mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600" },
+    "📊 ダッシュボードの月次労務警告閾値"));
+  const thresholdGrid = el("div", { class: "grid grid-cols-2 gap-3 text-sm" });
+  thresholdGrid.innerHTML = `
+    <label class="block"><span class="text-slate-600 text-xs">注意ライン (黄色)</span>
+      <select id="lr-warn" class="mt-1 w-full border rounded-md px-3 py-2 text-sm">
+        ${[0.5, 0.6, 0.7, 0.75, 0.8].map(v => `<option value="${v}" ${warnT === v ? "selected" : ""}>${Math.round(v*100)}%</option>`).join("")}
+      </select></label>
+    <label class="block"><span class="text-slate-600 text-xs">危険ライン (赤)</span>
+      <select id="lr-danger" class="mt-1 w-full border rounded-md px-3 py-2 text-sm">
+        ${[0.8, 0.85, 0.9, 0.95, 1.0].map(v => `<option value="${v}" ${dangerT === v ? "selected" : ""}>${Math.round(v*100)}%</option>`).join("")}
+      </select></label>`;
+  laborCard.appendChild(thresholdGrid);
+
   laborCard.appendChild(el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
     onclick: () => {
       state.meta.laborRules = {
@@ -3659,7 +3785,10 @@ function viewSettings() {
         maxHoursPerDay: Number($("#lr-day").value) || 8,
         maxConsecutiveDays: Number($("#lr-cons").value) || 5,
         minRestDaysPerWeek: Number($("#lr-rest").value) || 1,
+        minRestHoursBetweenShifts: state.meta.laborRules.minRestHoursBetweenShifts || 8,
       };
+      state.meta.laborWarnThreshold = Number($("#lr-warn").value) || 0.7;
+      state.meta.laborDangerThreshold = Number($("#lr-danger").value) || 0.85;
       persist(); render(); toast("労務ルールを保存（次回 AI 生成から適用）", "success");
     } }, "保存"));
   wrap.appendChild(laborCard);

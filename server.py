@@ -1801,7 +1801,22 @@ def api_t_portal_get(slug, token):
     meta = state.get("meta", {})
     current_wk = meta.get("currentWeekStart")
     weeks = state.get("weeks") or {}
-    week_data = weeks.get(current_wk, {})
+    # 複数週対応 (Round 15 TOP 2): ?week=YYYY-MM-DD で別週も指定可
+    requested_wk = request.args.get("week")
+    import re as _re_wk
+    target_wk = current_wk
+    if requested_wk and _re_wk.match(r"^\d{4}-\d{2}-\d{2}$", requested_wk):
+        # 安全制限: currentWeekStart の前後 ±4 週まで
+        try:
+            import datetime as _dt_wk
+            cur_dt = _dt_wk.datetime.strptime(current_wk, "%Y-%m-%d")
+            req_dt = _dt_wk.datetime.strptime(requested_wk, "%Y-%m-%d")
+            diff_days = abs((req_dt - cur_dt).days)
+            if diff_days <= 28 and req_dt.weekday() == 0:  # 月曜のみ受付
+                target_wk = requested_wk
+        except Exception:
+            pass
+    week_data = weeks.get(target_wk, {})
     prefs = [p for p in week_data.get("preferences", []) if p["staffId"] == staff_id]
     assignments = [a for a in week_data.get("assignments", []) if a["staffId"] == staff_id]
     comments = (week_data.get("staffComments", {}) or {}).get(staff_id, {})
@@ -1902,12 +1917,12 @@ def api_t_portal_get(slug, token):
                 })
             if len(pref_history) >= 4: break
 
-    # 希望提出締切の計算 (Round 4)
+    # 希望提出締切の計算 (Round 4 / Round 15: target_wk 対応)
     deadline_iso = None
     deadline_setting = meta.get("preferenceDeadline")
-    if isinstance(deadline_setting, dict) and current_wk:
+    if isinstance(deadline_setting, dict) and target_wk:
         try:
-            wk_dt = _dt.datetime.strptime(current_wk, "%Y-%m-%d")
+            wk_dt = _dt.datetime.strptime(target_wk, "%Y-%m-%d")
             days_before = int(deadline_setting.get("daysBefore", 3))
             hour = int(deadline_setting.get("hour", 18))
             deadline_dt = wk_dt - _dt.timedelta(days=days_before)
@@ -1917,13 +1932,32 @@ def api_t_portal_get(slug, token):
         except Exception:
             pass
 
+    # 複数週対応 (Round 15 TOP 2): 提出可能な週リスト
+    available_weeks = []
+    if current_wk:
+        try:
+            import datetime as _dt2
+            cur_dt = _dt2.datetime.strptime(current_wk, "%Y-%m-%d")
+            for offset in (0, 7, 14):  # 今週, +1週, +2週
+                wk_iso = (cur_dt + _dt2.timedelta(days=offset)).strftime("%Y-%m-%d")
+                wk_info = weeks.get(wk_iso, {})
+                available_weeks.append({
+                    "weekStart": wk_iso,
+                    "status": wk_info.get("status", "draft"),
+                    "offset": offset // 7,
+                })
+        except Exception:
+            pass
+
     return jsonify({
         "staff": public_staff,
         "preferences": prefs,
         "comments": comments,
         "assignments": assignments,
         "coworkers": coworkers,
-        "weekStart": current_wk,
+        "weekStart": target_wk,
+        "currentWeekStart": current_wk,
+        "availableWeeks": available_weeks,
         "weekStatus": week_data.get("status", "draft"),
         "publishedAt": week_data.get("publishedAt"),
         "preferenceDeadline": deadline_iso,
@@ -1990,7 +2024,14 @@ def api_t_portal_save_prefs(slug, token):
             text = str(v or "")[:200]
             if text:
                 cleaned_comments[k] = text
-    state_after = {"published": False, "no_state": False, "no_week": False}
+    # 複数週対応 (Round 15 TOP 2): body.weekStart で対象週を指定可能
+    target_wk_param = None
+    if isinstance(body, dict):
+        wk_str = str(body.get("weekStart") or "").strip()
+        if date_re.match(wk_str):
+            target_wk_param = wk_str
+
+    state_after = {"published": False, "no_state": False, "no_week": False, "out_of_range": False}
 
     def _mutate(current):
         if current is None:
@@ -1998,16 +2039,45 @@ def api_t_portal_save_prefs(slug, token):
             return current or {}
         meta = current.get("meta", {})
         current_wk = meta.get("currentWeekStart")
+        target_wk = current_wk
+        if target_wk_param:
+            # 安全制限: currentWeekStart の前後 ±4 週・月曜のみ受付
+            try:
+                import datetime as _dt_w
+                cur_dt = _dt_w.datetime.strptime(current_wk, "%Y-%m-%d")
+                req_dt = _dt_w.datetime.strptime(target_wk_param, "%Y-%m-%d")
+                if abs((req_dt - cur_dt).days) <= 28 and req_dt.weekday() == 0:
+                    target_wk = target_wk_param
+                else:
+                    state_after["out_of_range"] = True
+                    return current
+            except Exception:
+                state_after["out_of_range"] = True
+                return current
         weeks = current.setdefault("weeks", {})
-        week = weeks.get(current_wk)
+        week = weeks.get(target_wk)
         if not week:
-            state_after["no_week"] = True
-            return current
+            # 未来週へ希望提出時は週を作成 (slots は空 — オーナーが後で生成)
+            week = weeks.setdefault(target_wk, {
+                "slots": [],
+                "preferences": [],
+                "assignments": [],
+                "status": "draft",
+                "changeLog": [],
+            })
         if week.get("status") == "published":
             state_after["published"] = True
             return current
+        # cleaned のうち 対象週の月曜から +6 日以内の日付のみ採用
+        try:
+            import datetime as _dt_v
+            base = _dt_v.datetime.strptime(target_wk, "%Y-%m-%d")
+            valid_dates = {(base + _dt_v.timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)}
+            week_cleaned = [p for p in cleaned if p["date"] in valid_dates]
+        except Exception:
+            week_cleaned = cleaned
         week["preferences"] = [p for p in week.get("preferences", []) if p.get("staffId") != staff_id]
-        week["preferences"].extend(cleaned)
+        week["preferences"].extend(week_cleaned)
         # コメント保存 (週内 staffComments[staffId][date] = text)
         if cleaned_comments or isinstance(new_comments, dict):
             sc = week.setdefault("staffComments", {})
@@ -2017,6 +2087,8 @@ def api_t_portal_save_prefs(slug, token):
     s.transactional_update(_mutate)
     if state_after["no_state"]:
         return jsonify({"error": "no_state"}), 404
+    if state_after["out_of_range"]:
+        return jsonify({"error": "week_out_of_range"}), 400
     if state_after["no_week"]:
         return jsonify({"error": "no_current_week"}), 404
     if state_after["published"]:

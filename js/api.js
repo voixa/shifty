@@ -149,10 +149,13 @@
     checkoutSession: (data) =>
       jsonReq("/api/checkout/session", { method: "POST", body: JSON.stringify(data) }),
 
-    // Portal (public, tenant-aware)
-    portalGet: (token) => tenantSlug
-      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}`)
-      : jsonReq(`/api/portal/${encodeURIComponent(token)}`),
+    // Portal (public, tenant-aware) — weekStart で別週も指定可 (Round 15 TOP 2)
+    portalGet: (token, weekStart) => {
+      const q = weekStart ? `?week=${encodeURIComponent(weekStart)}` : "";
+      return tenantSlug
+        ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}${q}`)
+        : jsonReq(`/api/portal/${encodeURIComponent(token)}${q}`);
+    },
     portalSavePrefs: (token, prefs) => tenantSlug
       ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/preferences`, {
           method: "POST", body: JSON.stringify(prefs),

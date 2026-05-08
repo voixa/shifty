@@ -24,15 +24,46 @@
   let customTimes = {}; // {`${date}|${sessId}`: {startTime, endTime}}  時間範囲指定がある場合
   let comments = {};    // {date: text}
   let dirty = false;
-  const DRAFT_KEY = `shifty.portal.draft.${token || "anon"}`;
+  let activeWeek = null; // 複数週対応 (Round 15 TOP 2): 選択中の週 (YYYY-MM-DD)
+  // 週別 draft key (Round 15: 複数週対応)
+  function draftKeyFor(wk) { return `shifty.portal.draft.${token || "anon"}.${wk || "current"}`; }
+  let DRAFT_KEY = `shifty.portal.draft.${token || "anon"}`;
   // 希望テンプレート (Round 8) — 曜日 × セッション の優先度をローカル保存
   // {`${dow}|${sessId}`: priority}
   const PREF_TEMPLATE_KEY = `shifty.portal.template.${token || "anon"}`;
+  // 自動適用フラグ (Round 15 TOP 3)
+  const PREF_AUTO_APPLY_KEY = `shifty.portal.autoapply.${token || "anon"}`;
   function loadPrefTemplate() {
     try { const raw = localStorage.getItem(PREF_TEMPLATE_KEY); return raw ? JSON.parse(raw) : null; } catch (_) { return null; }
   }
   function savePrefTemplate(tpl) {
     try { localStorage.setItem(PREF_TEMPLATE_KEY, JSON.stringify(tpl)); } catch (_) {}
+  }
+  function loadAutoApply() {
+    try { return localStorage.getItem(PREF_AUTO_APPLY_KEY) === "1"; } catch (_) { return false; }
+  }
+  function saveAutoApply(on) {
+    try { localStorage.setItem(PREF_AUTO_APPLY_KEY, on ? "1" : "0"); } catch (_) {}
+  }
+  // 自動適用済みの週を記録 (Round 15 TOP 3)
+  // 同じ週で何度もテンプレが空白を埋めないように
+  const PREF_AUTO_APPLIED_WEEKS_KEY = `shifty.portal.autoapplied.${token || "anon"}`;
+  function isWeekAutoApplied(wk) {
+    try {
+      const raw = localStorage.getItem(PREF_AUTO_APPLIED_WEEKS_KEY);
+      if (!raw) return false;
+      return JSON.parse(raw).includes(wk);
+    } catch (_) { return false; }
+  }
+  function markWeekAutoApplied(wk) {
+    try {
+      const raw = localStorage.getItem(PREF_AUTO_APPLIED_WEEKS_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (!arr.includes(wk)) arr.push(wk);
+      // 最新 12 件のみ保持
+      const trimmed = arr.slice(-12);
+      localStorage.setItem(PREF_AUTO_APPLIED_WEEKS_KEY, JSON.stringify(trimmed));
+    } catch (_) {}
   }
 
   function saveDraft() {
@@ -56,12 +87,12 @@
     try { localStorage.removeItem(DRAFT_KEY); } catch (_) {}
   }
 
-  function toast(msg, type = "") {
+  function toast(msg, type = "", durationMs = 3000) {
     const t = document.createElement("div");
     t.className = `toast-item ${type}`;
     t.textContent = msg;
     $("#toast").appendChild(t);
-    setTimeout(() => t.remove(), 3000);
+    setTimeout(() => t.remove(), durationMs);
   }
   function fmtDate(s) { return s.slice(5); }
   function dayOfWeek(s) { return new Date(s).getDay(); }
@@ -90,6 +121,9 @@
       return showError("リンクが無効・期限切れの可能性があります。店長にご確認ください。");
     }
 
+    activeWeek = data.weekStart || null;
+    DRAFT_KEY = draftKeyFor(activeWeek);
+
     // 初回ガイドツアー (Round 10) — 一度だけ表示
     const tourKey = `shifty.portal.toured.${token || "anon"}`;
     if (!localStorage.getItem(tourKey)) {
@@ -100,47 +134,100 @@
     if (data.weekStatus === "published") {
       renderPublished();
     } else {
-      // load existing prefs from server
-      for (const p of (data.preferences || [])) {
-        const sess = (data.sessions || []).find(s => s.startTime === p.startTime && s.endTime === p.endTime);
-        if (sess) {
-          prefs[`${p.date}|${sess.id}`] = p.priority;
-        } else {
-          // 時間が一致するセッションがない = カスタム時間
-          // セッション枠を探す: 開始時刻が含まれるセッション
-          const owner = (data.sessions || []).find(s =>
-            timeToMin(p.startTime) >= timeToMin(s.startTime) &&
-            timeToMin(p.endTime) <= timeToMin(s.endTime)
-          );
-          if (owner) {
-            const k = `${p.date}|${owner.id}`;
-            prefs[k] = p.priority;
-            customTimes[k] = { startTime: p.startTime, endTime: p.endTime };
+      loadPrefsFromData();
+      renderDraft();
+    }
+  }
+
+  function loadPrefsFromData() {
+    prefs = {}; customTimes = {}; comments = {};
+    for (const p of (data.preferences || [])) {
+      const sess = (data.sessions || []).find(s => s.startTime === p.startTime && s.endTime === p.endTime);
+      if (sess) {
+        prefs[`${p.date}|${sess.id}`] = p.priority;
+      } else {
+        // 時間が一致するセッションがない = カスタム時間
+        const owner = (data.sessions || []).find(s =>
+          timeToMin(p.startTime) >= timeToMin(s.startTime) &&
+          timeToMin(p.endTime) <= timeToMin(s.endTime)
+        );
+        if (owner) {
+          const k = `${p.date}|${owner.id}`;
+          prefs[k] = p.priority;
+          customTimes[k] = { startTime: p.startTime, endTime: p.endTime };
+        }
+      }
+    }
+    comments = data.comments || {};
+
+    // 自動適用 (Round 15 TOP 3): テンプレが保存されていて、その週が空 & 未適用 なら自動で埋める
+    const autoApply = loadAutoApply();
+    if (autoApply && Object.keys(prefs).length === 0 && !isWeekAutoApplied(activeWeek)) {
+      const tpl = loadPrefTemplate();
+      if (tpl && Object.keys(tpl).length > 0) {
+        const days = Array.from({ length: 7 }, (_, i) => addDays(activeWeek, i));
+        let applied = 0;
+        for (const date of days) {
+          const dow = dayOfWeek(date);
+          for (const sess of (data.sessions || [])) {
+            const tplKey = `${dow}|${sess.id}`;
+            if (tpl[tplKey]) {
+              prefs[`${date}|${sess.id}`] = tpl[tplKey];
+              applied++;
+            }
           }
         }
-      }
-      // load comments
-      comments = data.comments || {};
-      // restore localStorage draft if newer
-      const draft = loadDraft();
-      if (draft && (Object.keys(draft.prefs || {}).length > 0 || Object.keys(draft.comments || {}).length > 0)) {
-        const keys = Object.keys(draft.prefs || {});
-        const hasUnsavedChange = keys.some(k => draft.prefs[k] !== prefs[k])
-          || Object.keys(draft.comments || {}).some(k => (draft.comments[k] || "") !== (comments[k] || ""))
-          || Object.keys(draft.customTimes || {}).some(k => JSON.stringify(draft.customTimes[k]) !== JSON.stringify(customTimes[k]));
-        if (hasUnsavedChange && confirm(
-          "前回未送信の入力があります。復元しますか？\n\n" +
-          "「キャンセル」を押すと送信済みの内容を表示します。"
-        )) {
-          prefs = { ...prefs, ...(draft.prefs || {}) };
-          customTimes = { ...customTimes, ...(draft.customTimes || {}) };
-          comments = { ...comments, ...(draft.comments || {}) };
+        if (applied > 0) {
           dirty = true;
-        } else {
-          clearDraft();
+          saveDraft();
+          markWeekAutoApplied(activeWeek);
+          // 表示用フラグ — トーストは renderDraft 後に出す
+          window.__SHIFTY_AUTO_APPLIED_COUNT__ = applied;
         }
       }
-      renderDraft();
+    }
+
+    // restore localStorage draft if newer (週別キー)
+    const draft = loadDraft();
+    if (draft && (Object.keys(draft.prefs || {}).length > 0 || Object.keys(draft.comments || {}).length > 0)) {
+      const keys = Object.keys(draft.prefs || {});
+      const hasUnsavedChange = keys.some(k => draft.prefs[k] !== prefs[k])
+        || Object.keys(draft.comments || {}).some(k => (draft.comments[k] || "") !== (comments[k] || ""))
+        || Object.keys(draft.customTimes || {}).some(k => JSON.stringify(draft.customTimes[k]) !== JSON.stringify(customTimes[k]));
+      if (hasUnsavedChange && confirm(
+        "前回未送信の入力があります。復元しますか？\n\n" +
+        "「キャンセル」を押すと送信済みの内容を表示します。"
+      )) {
+        prefs = { ...prefs, ...(draft.prefs || {}) };
+        customTimes = { ...customTimes, ...(draft.customTimes || {}) };
+        comments = { ...comments, ...(draft.comments || {}) };
+        dirty = true;
+      } else {
+        clearDraft();
+      }
+    }
+  }
+
+  // 別の週に切替 (Round 15 TOP 2)
+  async function switchWeek(weekStart) {
+    if (weekStart === activeWeek) return;
+    if (dirty && !confirm("未送信の変更を破棄して別の週に切り替えますか？\n\n（テンプレ保存済の場合は再適用できます）")) {
+      return;
+    }
+    try {
+      const newData = await window.ShiftyAPI.portalGet(token, weekStart);
+      data = newData;
+      activeWeek = newData.weekStart;
+      DRAFT_KEY = draftKeyFor(activeWeek);
+      dirty = false;
+      if (newData.weekStatus === "published") {
+        renderPublished();
+      } else {
+        loadPrefsFromData();
+        renderDraft();
+      }
+    } catch (e) {
+      toast("週の取得に失敗しました: " + (e?.message || ""), "error");
     }
   }
 
@@ -191,11 +278,12 @@
         </details>
       </div>` : "";
 
-    // 希望テンプレートカード (Round 8)
+    // 希望テンプレートカード (Round 8 + Round 15: auto-apply)
     const tpl = loadPrefTemplate();
+    const autoApplyOn = loadAutoApply();
     const tplCard = `
       <div class="bg-white border border-slate-200 rounded-xl p-3 mb-3">
-        <details>
+        <details ${tpl ? "open" : ""}>
           <summary class="text-sm font-semibold cursor-pointer select-none">⚡ 希望テンプレート (毎週同じパターンの方向け)</summary>
           <div class="mt-2 flex flex-col sm:flex-row gap-2">
             <button id="tpl-apply" class="text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-md px-3 py-2 font-semibold ${tpl ? "" : "hidden"}">
@@ -208,6 +296,13 @@
               🗑 テンプレを削除
             </button>
           </div>
+          ${tpl ? `
+          <label class="mt-2 flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+            <input type="checkbox" id="tpl-auto" ${autoApplyOn ? "checked" : ""} class="rounded">
+            <span>🔁 <b>新しい週を開いたとき自動でテンプレを適用</b>
+              <span class="block text-[10px] text-slate-500 ml-5">空の週を開くたびにテンプレが反映されます (送信は手動)。週切替時にも適用。</span>
+            </span>
+          </label>` : ""}
           <div class="text-[10px] text-slate-500 mt-2">
             テンプレは「曜日 × セッション」単位で保存されます。例: 「毎週月曜のランチ希望」など。<br>
             保存はお使いのブラウザに保管されます (送信時にサーバへは送られません)。
@@ -252,7 +347,28 @@
         <div class="text-sm text-amber-900 whitespace-pre-wrap">${escapeHtml(data.ownerNotice.trim())}</div>
       </div>` : "";
 
+    // 複数週タブ (Round 15 TOP 2)
+    let weekTabsHtml = "";
+    if ((data.availableWeeks || []).length > 1) {
+      const tabs = data.availableWeeks.map(w => {
+        const isActive = w.weekStart === activeWeek;
+        const label = w.offset === 0 ? "今週" : (w.offset === 1 ? "来週" : `+${w.offset}週`);
+        const statusBadge = w.status === "published"
+          ? `<span class="text-[9px] bg-emerald-100 text-emerald-800 rounded px-1 ml-1">確定</span>`
+          : "";
+        return `<button data-week="${escapeAttr(w.weekStart)}" class="week-tab-btn flex-1 py-2 px-2 text-xs font-semibold rounded-md ${isActive ? 'bg-brand-600 text-white' : 'bg-white text-slate-700 border border-slate-200'}">
+          ${label}<span class="block text-[10px] opacity-70">${escapeHtml(w.weekStart.slice(5))}</span>${statusBadge}
+        </button>`;
+      }).join("");
+      weekTabsHtml = `
+        <div class="bg-slate-50 rounded-xl p-2 mb-3">
+          <div class="text-[10px] text-slate-500 mb-1.5 px-1">📆 週を切り替えて先まで希望提出できます</div>
+          <div class="flex gap-1.5">${tabs}</div>
+        </div>`;
+    }
+
     $("#app").innerHTML = `
+      ${weekTabsHtml}
       ${draftNoticeCard}
       ${deadlineCard}
       ${tplCard}
@@ -390,6 +506,14 @@
       grid.appendChild(dayCard);
     }
 
+    // 週切替タブ (Round 15 TOP 2)
+    document.querySelectorAll(".week-tab-btn").forEach(btn => {
+      btn.onclick = () => {
+        const wk = btn.getAttribute("data-week");
+        if (wk) switchWeek(wk);
+      };
+    });
+
     // 通し勤務ボタン
     grid.querySelectorAll(".all-day-btn").forEach(btn => {
       btn.onclick = () => {
@@ -459,9 +583,27 @@
     if (tplClearBtn) tplClearBtn.onclick = () => {
       if (!confirm("保存済テンプレートを削除しますか？")) return;
       try { localStorage.removeItem(PREF_TEMPLATE_KEY); } catch (_) {}
+      try { localStorage.removeItem(PREF_AUTO_APPLY_KEY); } catch (_) {}
+      try { localStorage.removeItem(PREF_AUTO_APPLIED_WEEKS_KEY); } catch (_) {}
       toast("テンプレートを削除しました", "info");
       renderDraft();
     };
+    // 自動適用トグル (Round 15 TOP 3)
+    const tplAutoEl = document.getElementById("tpl-auto");
+    if (tplAutoEl) tplAutoEl.onchange = () => {
+      saveAutoApply(tplAutoEl.checked);
+      toast(tplAutoEl.checked
+        ? "✓ 新しい週を開いたとき自動で適用します"
+        : "自動適用をオフにしました",
+        "success", 3000);
+    };
+
+    // 自動適用後の通知 (Round 15 TOP 3)
+    if (window.__SHIFTY_AUTO_APPLIED_COUNT__ > 0) {
+      const n = window.__SHIFTY_AUTO_APPLIED_COUNT__;
+      delete window.__SHIFTY_AUTO_APPLIED_COUNT__;
+      setTimeout(() => toast(`🔁 テンプレを自動適用: ${n} 件 (内容を確認して送信してください)`, "success", 5000), 100);
+    }
 
     // コメント入力 (debounce 保存)
     let commentTimer;
@@ -501,7 +643,11 @@
       btn.disabled = true;
       btn.textContent = "送信中...";
       try {
-        await window.ShiftyAPI.portalSavePrefs(token, { preferences: out, comments });
+        await window.ShiftyAPI.portalSavePrefs(token, {
+          preferences: out,
+          comments,
+          weekStart: activeWeek || data.weekStart,
+        });
         toast("✅ 送信完了。お疲れ様でした", "success");
         btn.textContent = "✓ 送信完了 (もう一度送信できます)";
         btn.disabled = false;
@@ -671,7 +817,27 @@
         <div class="text-sm text-amber-900 whitespace-pre-wrap">${escapeHtml(data.ownerNotice.trim())}</div>
       </div>` : "";
 
+    // 複数週タブ (Round 15 TOP 2) — 確定済モードでも表示
+    let weekTabsHtml2 = "";
+    if ((data.availableWeeks || []).length > 1) {
+      const tabs2 = data.availableWeeks.map(w => {
+        const isActive = w.weekStart === activeWeek;
+        const label = w.offset === 0 ? "今週" : (w.offset === 1 ? "来週" : `+${w.offset}週`);
+        const statusBadge = w.status === "published"
+          ? `<span class="text-[9px] bg-emerald-100 text-emerald-800 rounded px-1 ml-1">確定</span>`
+          : `<span class="text-[9px] bg-amber-100 text-amber-800 rounded px-1 ml-1">下書き</span>`;
+        return `<button data-week="${escapeAttr(w.weekStart)}" class="week-tab-btn flex-1 py-2 px-2 text-xs font-semibold rounded-md ${isActive ? 'bg-brand-600 text-white' : 'bg-white text-slate-700 border border-slate-200'}">
+          ${label}<span class="block text-[10px] opacity-70">${escapeHtml(w.weekStart.slice(5))}</span>${statusBadge}
+        </button>`;
+      }).join("");
+      weekTabsHtml2 = `
+        <div class="bg-slate-50 rounded-xl p-2 mb-3">
+          <div class="flex gap-1.5">${tabs2}</div>
+        </div>`;
+    }
+
     $("#app").innerHTML = `
+      ${weekTabsHtml2}
       ${nextShiftCard}
       ${noticeCard}
       ${monthCard}
@@ -796,6 +962,14 @@
       }
       grid.appendChild(card);
     }
+
+    // 週切替タブ (Round 15 TOP 2 — 確定モード)
+    document.querySelectorAll(".week-tab-btn").forEach(btn => {
+      btn.onclick = () => {
+        const wk = btn.getAttribute("data-week");
+        if (wk) switchWeek(wk);
+      };
+    });
 
     // メッセージ送信ボタン
     const msgBtn = document.getElementById("msgBtn");
