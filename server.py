@@ -591,16 +591,14 @@ def add_security_headers(resp):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "same-origin"
     resp.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
-    # API は no-store、静的アセット (.css/.js/.png/.svg/.json) は長めの cache
+    # API は no-store、静的アセットは長めの cache (Flask デフォルトの no-cache を明示的に上書き)
     path = request.path or ""
     if path.startswith("/api/") or path.startswith("/auth/") or path.startswith("/internal/"):
-        resp.headers.setdefault("Cache-Control", "no-store, max-age=0")
-    elif path.endswith((".css", ".js", ".png", ".svg", ".webp", ".ico", ".woff2")):
-        # ファイル名にバージョンないので 1 時間キャッシュ + revalidate
-        resp.headers.setdefault("Cache-Control", "public, max-age=3600, must-revalidate")
+        resp.headers["Cache-Control"] = "no-store, max-age=0"
     elif path == "/og.png":
-        # OGP は更新頻度低いので長め
-        resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+        resp.headers["Cache-Control"] = "public, max-age=86400"  # 24h
+    elif path.endswith((".css", ".js", ".png", ".svg", ".webp", ".ico", ".woff2")):
+        resp.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"  # 1h
     return resp
 
 
