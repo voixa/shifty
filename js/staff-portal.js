@@ -173,6 +173,24 @@
         <div class="text-[10px] text-slate-500 mt-1.5">※ 給与は時給×時間の概算です。実際の支給額とは異なる場合があります</div>
       </div>` : "";
 
+    // 過去の希望提出履歴 (Round 12)
+    const prefHist = data.prefHistory || [];
+    const prefHistCard = prefHist.length > 0 ? `
+      <div class="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+        <details>
+          <summary class="text-sm font-semibold cursor-pointer select-none">📊 過去の希望提出履歴 (${prefHist.length} 週分)</summary>
+          <div class="mt-2 space-y-1 text-xs">
+            ${prefHist.map(p => `
+              <div class="flex items-center justify-between bg-slate-50 rounded p-1.5">
+                <span class="font-mono">${escapeHtml(p.weekStart)} 週</span>
+                <div class="text-right text-[11px]">
+                  <span class="text-red-700">必須 ${p.must}</span>・<span class="text-emerald-700">希望 ${p.want}</span>・<span class="text-slate-600">不可 ${p.avoid}</span>
+                </div>
+              </div>`).join("")}
+          </div>
+        </details>
+      </div>` : "";
+
     // 希望テンプレートカード (Round 8)
     const tpl = loadPrefTemplate();
     const tplCard = `
@@ -238,6 +256,7 @@
       ${draftNoticeCard}
       ${deadlineCard}
       ${tplCard}
+      ${prefHistCard}
       ${monthCard}
       <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>

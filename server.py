@@ -1884,6 +1884,23 @@ def api_t_portal_get(slug, token):
     history_assignments.sort(key=lambda x: (x.get("date", ""), x.get("startTime", "")), reverse=True)
     history_assignments = history_assignments[:30]
 
+    # 過去の希望提出履歴 (Round 12) — 過去 4 週分
+    pref_history = []
+    if isinstance(weeks, dict) and current_wk:
+        for wk_start in sorted(weeks.keys(), reverse=True):
+            if wk_start > current_wk: continue
+            wk_data = weeks[wk_start]
+            mine = [p for p in wk_data.get("preferences", []) if p.get("staffId") == staff_id]
+            if mine:
+                pref_history.append({
+                    "weekStart": wk_start,
+                    "count": len(mine),
+                    "must": sum(1 for p in mine if p.get("priority") == "must"),
+                    "want": sum(1 for p in mine if p.get("priority") == "want"),
+                    "avoid": sum(1 for p in mine if p.get("priority") == "avoid"),
+                })
+            if len(pref_history) >= 4: break
+
     # 希望提出締切の計算 (Round 4)
     deadline_iso = None
     deadline_setting = meta.get("preferenceDeadline")
@@ -1920,6 +1937,7 @@ def api_t_portal_get(slug, token):
             "totalPay": int(month_total_pay),
         },
         "history": history_assignments,
+        "prefHistory": pref_history,
     })
 
 

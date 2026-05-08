@@ -1320,7 +1320,10 @@ function viewPreferences() {
   const wrap = el("div", { class: "space-y-4" });
   wrap.appendChild(el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
     el("h2", { class: "text-xl font-bold" }, "希望収集"),
-    el("div", { class: "flex gap-2" }, [
+    el("div", { class: "flex gap-2 flex-wrap" }, [
+      el("button", { class: "text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-md px-3 py-1.5",
+        onclick: openRecruitDialog,
+        title: "新週の希望募集をスタッフに依頼するメール/LINE 文" }, "📨 募集メッセージ生成"),
       el("button", { class: "text-sm bg-emerald-600 text-white rounded-md px-3 py-1.5",
         onclick: copyAllStaffLinks }, "💬 LINE用 全員リンク生成"),
     ]),
@@ -1937,6 +1940,120 @@ function openPrintView() {
   setTimeout(() => {
     window.print();
   }, 100);
+}
+
+// 店長 → スタッフ 返信文生成 (Round 12)
+function openReplyDialog(msg) {
+  const staff = state.staff.find(s => s.id === msg.staffId);
+  const staffName = staff?.name || msg.staffName || "スタッフ";
+  const KIND_LABEL = { general: "ご連絡", change_request: "シフト変更希望", question: "ご質問", report: "ご報告" };
+
+  // 返信テンプレート (kind 別)
+  const REPLIES = {
+    "change_request": {
+      "了承": `${staffName}さん\n\nお疲れ様です。\nシフト変更のご希望、了承いたしました。\n\n調整して新しいシフトを確定しましたら改めてご連絡します。\n少々お待ちください。\n\n${state.meta.restaurantName || ''}`,
+      "確認中": `${staffName}さん\n\nお疲れ様です。\nシフト変更のご希望、確認しました。\n他のスタッフの状況を確認してから○月○日までにお返事いたします。\n\nご質問・補足あれば、追加でメッセージください。\n\n${state.meta.restaurantName || ''}`,
+      "代替提案": `${staffName}さん\n\nお疲れ様です。\nご希望の日は○○のため対応難しい状況です。\n\n代わりに以下の案はいかがでしょうか:\n• 案 A: ○月○日 (時間)\n• 案 B: ○月○日 (時間)\n\nご希望をお聞かせください。\n\n${state.meta.restaurantName || ''}`,
+      "却下": `${staffName}さん\n\nお疲れ様です。\nご希望の件、店舗運営の都合上で対応が難しい状況です。\n\n申し訳ございませんが、当初のシフト通りお願いできますでしょうか。\n何か事情があればお気軽にご相談ください。\n\n${state.meta.restaurantName || ''}`,
+    },
+    "question": {
+      "回答": `${staffName}さん\n\nお疲れ様です。\nご質問いただきありがとうございます。\n\n[ここに回答を記入してください]\n\n他に分からないことがあればお気軽にご質問ください。\n\n${state.meta.restaurantName || ''}`,
+    },
+    "report": {
+      "確認": `${staffName}さん\n\nお疲れ様です。\nご報告いただきありがとうございます。\n\n内容確認しました。お体ご自愛ください。\nお大事にしてください。\n\n${state.meta.restaurantName || ''}`,
+    },
+    "general": {
+      "返信": `${staffName}さん\n\nお疲れ様です。\nご連絡ありがとうございます。\n\n[返信内容を記入してください]\n\n${state.meta.restaurantName || ''}`,
+    },
+  };
+  const templates = REPLIES[msg.kind] || REPLIES["general"];
+
+  const body = el("div", { class: "p-6 space-y-3 max-h-[80vh] overflow-y-auto" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "✉️ 返信文を生成"));
+  body.appendChild(el("div", { class: "bg-slate-50 rounded p-2 text-xs text-slate-600" }, [
+    el("div", { class: "font-semibold" }, `${staffName} さんからの${KIND_LABEL[msg.kind] || msg.kind}:`),
+    el("div", { class: "mt-1 whitespace-pre-wrap" }, msg.message || ""),
+  ]));
+
+  body.appendChild(el("div", { class: "text-xs font-semibold text-slate-700" }, "返信テンプレ選択:"));
+  const tpls = el("div", { class: "grid grid-cols-2 gap-2" });
+  Object.keys(templates).forEach(label => {
+    const btn = el("button", {
+      class: "text-xs bg-slate-100 hover:bg-emerald-50 hover:border-emerald-300 border border-slate-300 rounded-md px-3 py-1.5",
+      onclick: () => {
+        $("#reply-text").value = templates[label];
+      },
+    }, label);
+    tpls.appendChild(btn);
+  });
+  body.appendChild(tpls);
+
+  body.appendChild(el("div", { class: "text-xs font-semibold text-slate-700 pt-2" }, "返信文 (LINE/メール用):"));
+  body.appendChild(el("textarea", {
+    id: "reply-text",
+    class: "w-full border rounded-md p-2 text-xs font-mono h-48",
+  }, templates[Object.keys(templates)[0]] || ""));
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-md font-semibold",
+      onclick: async () => {
+        const txt = $("#reply-text").value;
+        try {
+          await navigator.clipboard.writeText(txt);
+          toast(`返信文をコピー (${staffName} さん宛)`, "success");
+        } catch (_) { toast("コピー失敗", "error"); }
+      },
+    }, "📋 コピーして送信準備"),
+  ]));
+  modal(body);
+}
+
+// 新週の希望募集メッセージ生成 (Round 12)
+function openRecruitDialog() {
+  const restaurant = state.meta.restaurantName || "店舗";
+  const w0 = state.meta.currentWeekStart;
+  const wEnd = addDays(w0, 6);
+  const dl = state.meta.preferenceDeadline || { daysBefore: 3, hour: 18 };
+  const wkDate = new Date(w0 + "T00:00:00");
+  wkDate.setDate(wkDate.getDate() - dl.daysBefore);
+  const deadline = `${wkDate.getMonth()+1}/${wkDate.getDate()} (${["日","月","火","水","木","金","土"][wkDate.getDay()]}) ${String(dl.hour).padStart(2,"0")}:00`;
+
+  const lineTxt =
+    `【シフト希望募集】 (${restaurant})\n\n` +
+    `${w0.slice(5)} 〜 ${wEnd.slice(5)} の週シフト希望をお願いします。\n\n` +
+    `▼ 締切: ${deadline}\n\n` +
+    `▼ 提出方法:\n` +
+    `各自に個別の URL をお送りします（または「💬 LINE用 全員リンク生成」ボタンから一括取得）。\n` +
+    `URL を開いて、各日の希望をタップするだけ。所要時間 約 2 分です。\n\n` +
+    `▼ ご注意:\n` +
+    `期限内であれば何度でも編集・再送信できます。\n` +
+    `特殊な事情・要望はメモ欄にご記入ください。\n\n` +
+    `ご協力お願いいたします。`;
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "📨 希望募集メッセージ"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    `${state.staff.length} 名のスタッフへ送信する週次希望募集テンプレ`));
+  body.appendChild(el("textarea", {
+    id: "recruit-ta",
+    class: "w-full border rounded-md p-2 text-xs font-mono h-72",
+    readonly: "",
+  }, lineTxt));
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md font-semibold",
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(lineTxt);
+          toast("コピーしました。LINE グループに貼り付けてください", "success");
+        } catch (_) { $("#recruit-ta").select(); toast("選択しました。手動でコピー", "info"); }
+      },
+    }, "📋 コピー"),
+  ]));
+  modal(body);
 }
 
 // 未提出スタッフへの催促 LINE 文生成 (Round 3)
@@ -3420,8 +3537,14 @@ async function loadStaffMessages() {
           <span class="text-xs text-slate-500">${at}</span>
         </div>
         <div class="text-xs text-amber-700 mb-1">${KIND_LABEL[m.kind] || m.kind}</div>
-        <div class="text-sm text-slate-700 whitespace-pre-wrap">${escapeHtml(m.message || "")}</div>
+        <div class="text-sm text-slate-700 whitespace-pre-wrap mb-2">${escapeHtml(m.message || "")}</div>
       `;
+      // 返信ボタン (Round 12)
+      const replyBtn = el("button", {
+        class: "text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded px-2 py-1 font-semibold",
+        onclick: () => openReplyDialog(m),
+      }, "✉️ 返信文を生成");
+      row.appendChild(replyBtn);
       listEl.appendChild(row);
     });
   } catch (e) {
