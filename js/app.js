@@ -2522,9 +2522,35 @@ async function bootApp() {
   try {
     status = await window.ShiftyAPI.authStatus();
   } catch (e) {
+    // tenant が見つからない場合
+    if (window.ShiftyAPI.tenantSlug && (String(e.message).includes("404") || String(e.message).includes("tenant_not_found"))) {
+      $("#main").innerHTML = `<div class="max-w-md mx-auto mt-12 p-8 bg-white rounded-xl shadow text-center space-y-3">
+        <div class="text-4xl">⚠️</div>
+        <h1 class="font-bold text-xl">テナントが見つかりません</h1>
+        <p class="text-sm text-slate-600">URL のテナント識別子が無効です。<br>店長から正しい URL を再度ご確認ください。</p>
+        <a href="/login" class="inline-block bg-brand-600 text-white rounded-lg px-5 py-2.5 text-sm font-semibold mt-2">ログイン画面へ</a>
+      </div>`;
+      return;
+    }
     $("#main").innerHTML = `<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-900">サーバ接続失敗: ${escapeHtml(e.message)}</div>`;
     return;
   }
+  // Tenant モード: 認証されていなければ /login へ
+  if (window.ShiftyAPI.tenantSlug) {
+    if (!status.authenticated) {
+      location.href = "/login";
+      return;
+    }
+    // tenant 名をヘッダーに反映
+    if (status.tenant && status.tenant.restaurantName) {
+      const rn = document.getElementById("restaurantName");
+      if (rn) rn.textContent = status.tenant.restaurantName;
+    }
+    hideAuthOverlay();
+    await loadAndRender();
+    return;
+  }
+  // 旧 /app モード (legacy single-tenant): パスワード認証
   if (status.setupRequired) { showAuthOverlay("setup"); return; }
   if (!status.authenticated) { showAuthOverlay("login"); return; }
   hideAuthOverlay();

@@ -260,6 +260,218 @@ class _FirestoreStorage:
             self._tokens_col.document(sid).set({"token": tok})
 
 
+class _FirestoreStorageScoped:
+    """テナント単位で名前空間を分離した Firestore Storage."""
+
+    def __init__(self, slug):
+        from google.cloud import firestore
+        self._fs = firestore.Client()
+        self.slug = slug
+        # tenants/{slug}/state, tenants/{slug}/config, tenants/{slug}_tokens
+        # collection group が深いとクエリ複雑化するため、slug をプレフィックスに
+        prefix = f"shifty_t_{slug}"
+        self._state_ref = self._fs.collection(prefix).document("state")
+        self._config_ref = self._fs.collection(prefix).document("config")
+        self._tokens_col = self._fs.collection(f"{prefix}_tokens")
+
+    def get_state(self):
+        snap = self._state_ref.get()
+        if not snap.exists:
+            return None
+        return (snap.to_dict() or {}).get("data")
+
+    def save_state(self, state):
+        self._state_ref.set({"data": state})
+
+    def transactional_update(self, fn):
+        from google.cloud import firestore as _fs
+        client = self._fs
+        ref = self._state_ref
+        @_fs.transactional
+        def _do(tx):
+            snap = ref.get(transaction=tx)
+            current = (snap.to_dict() or {}).get("data") if snap.exists else None
+            new_state = fn(current)
+            tx.set(ref, {"data": new_state})
+            return new_state
+        return _do(client.transaction())
+
+    def reset(self):
+        self._state_ref.delete()
+        for doc in self._tokens_col.stream():
+            doc.reference.delete()
+
+    def get_config(self, key, default=None):
+        snap = self._config_ref.get()
+        if not snap.exists:
+            return default
+        return (snap.to_dict() or {}).get(key, default)
+
+    def set_config(self, key, value):
+        self._config_ref.set({key: value}, merge=True)
+
+    def get_token(self, staff_id):
+        snap = self._tokens_col.document(staff_id).get()
+        return (snap.to_dict() or {}).get("token") if snap.exists else None
+
+    def lookup_staff_by_token(self, token):
+        q = self._tokens_col.where("token", "==", token).limit(1).stream()
+        for doc in q:
+            return doc.id
+        return None
+
+    def add_token(self, staff_id, token):
+        self._tokens_col.document(staff_id).set({"token": token})
+
+    def list_tokens(self):
+        return {doc.id: (doc.to_dict() or {}).get("token") for doc in self._tokens_col.stream()}
+
+    def delete_token(self, staff_id):
+        self._tokens_col.document(staff_id).delete()
+
+    def replace_tokens(self, mapping):
+        for doc in self._tokens_col.stream():
+            doc.reference.delete()
+        for sid, tok in mapping.items():
+            self._tokens_col.document(sid).set({"token": tok})
+
+
+# ============================================================
+# Tenant Manager
+# - Tenant 一覧 / 作成 / マジックリンク
+# - tenants コレクションに各テナントの metadata を保持
+# ============================================================
+class TenantManager:
+    def __init__(self):
+        self._fs = None
+        if STORAGE_BACKEND == "firestore":
+            from google.cloud import firestore
+            self._fs = firestore.Client()
+            self._col = self._fs.collection("tenants")
+            # マジックリンクトークン用
+            self._magic_col = self._fs.collection("magic_links")
+        else:
+            # SQLite はローカル開発用。tenants テーブル作成
+            with sqlite3.connect(DB_PATH) as c:
+                c.execute("""CREATE TABLE IF NOT EXISTS tenants (
+                    slug TEXT PRIMARY KEY,
+                    email TEXT NOT NULL,
+                    contact_name TEXT,
+                    restaurant_name TEXT,
+                    status TEXT DEFAULT 'active',
+                    plan TEXT DEFAULT 'free',
+                    stripe_customer_id TEXT,
+                    stripe_subscription_id TEXT,
+                    paid_until TEXT,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )""")
+                c.execute("""CREATE TABLE IF NOT EXISTS magic_links (
+                    token TEXT PRIMARY KEY,
+                    slug TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    used INTEGER DEFAULT 0
+                )""")
+
+    def get(self, slug):
+        if not slug:
+            return None
+        if self._fs is not None:
+            snap = self._col.document(slug).get()
+            return snap.to_dict() if snap.exists else None
+        with sqlite3.connect(DB_PATH) as c:
+            c.row_factory = sqlite3.Row
+            row = c.execute("SELECT * FROM tenants WHERE slug=?", (slug,)).fetchone()
+            return dict(row) if row else None
+
+    def create(self, slug, email, contact_name="", restaurant_name="", plan="free", stripe_customer_id="", stripe_subscription_id=""):
+        import datetime as _dt
+        rec = {
+            "slug": slug,
+            "email": email,
+            "contactName": contact_name,
+            "restaurantName": restaurant_name,
+            "status": "active",
+            "plan": plan,
+            "stripeCustomerId": stripe_customer_id,
+            "stripeSubscriptionId": stripe_subscription_id,
+            "createdAt": _dt.datetime.utcnow().isoformat() + "Z",
+        }
+        if self._fs is not None:
+            self._col.document(slug).set(rec)
+        else:
+            with sqlite3.connect(DB_PATH) as c:
+                c.execute(
+                    "INSERT OR REPLACE INTO tenants (slug,email,contact_name,restaurant_name,status,plan,stripe_customer_id,stripe_subscription_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (slug, email, contact_name, restaurant_name, "active", plan, stripe_customer_id, stripe_subscription_id, rec["createdAt"]),
+                )
+        return rec
+
+    def list_all(self, limit=100):
+        if self._fs is not None:
+            return [doc.to_dict() for doc in self._col.limit(limit).stream()]
+        with sqlite3.connect(DB_PATH) as c:
+            c.row_factory = sqlite3.Row
+            rows = c.execute("SELECT * FROM tenants ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def issue_magic_link(self, slug, ttl_seconds=1800):
+        """マジックリンクトークンを発行（30 分有効）。返値はトークン文字列。"""
+        import datetime as _dt
+        token = secrets.token_urlsafe(32)
+        expires_at = int(_time.time()) + ttl_seconds
+        if self._fs is not None:
+            self._magic_col.document(token).set({
+                "slug": slug,
+                "expiresAt": expires_at,
+                "used": False,
+                "createdAt": _dt.datetime.utcnow().isoformat() + "Z",
+            })
+        else:
+            with sqlite3.connect(DB_PATH) as c:
+                c.execute("INSERT INTO magic_links (token,slug,expires_at,used) VALUES (?,?,?,0)",
+                          (token, slug, expires_at))
+        return token
+
+    def consume_magic_link(self, token):
+        """トークンを検証して slug を返す。1回限り。"""
+        if not token:
+            return None
+        now = int(_time.time())
+        if self._fs is not None:
+            doc_ref = self._magic_col.document(token)
+            snap = doc_ref.get()
+            if not snap.exists:
+                return None
+            data = snap.to_dict() or {}
+            if data.get("used") or data.get("expiresAt", 0) < now:
+                return None
+            doc_ref.update({"used": True, "usedAt": __import__("datetime").datetime.utcnow().isoformat() + "Z"})
+            return data.get("slug")
+        with sqlite3.connect(DB_PATH) as c:
+            c.row_factory = sqlite3.Row
+            row = c.execute("SELECT * FROM magic_links WHERE token=? AND used=0 AND expires_at > ?", (token, now)).fetchone()
+            if not row:
+                return None
+            c.execute("UPDATE magic_links SET used=1 WHERE token=?", (token,))
+            return row["slug"]
+
+
+_tenant_manager = None
+def get_tenant_manager():
+    global _tenant_manager
+    if _tenant_manager is None:
+        _tenant_manager = TenantManager()
+    return _tenant_manager
+
+
+def get_tenant_storage(slug):
+    """slug 指定でテナント別 Storage を取得。"""
+    if STORAGE_BACKEND == "firestore":
+        return _FirestoreStorageScoped(slug)
+    # SQLite はローカル開発用なので default のみサポート（slug 無視）
+    return _SQLiteStorage()
+
+
 def _make_storage():
     if STORAGE_BACKEND == "firestore":
         return _FirestoreStorage()
@@ -438,6 +650,33 @@ def _get_json(silent=True, default=None):
     return default if default is not None else {}
 
 
+# ============================================================
+# テナント slug バリデーション
+# ============================================================
+import re as _re
+_SLUG_RE = _re.compile(r"^[a-z0-9][a-z0-9-]{2,30}[a-z0-9]$")
+
+
+def _valid_slug(slug):
+    return bool(slug) and bool(_SLUG_RE.match(slug))
+
+
+def _generate_slug(seed=""):
+    """利用可能な slug を生成（衝突回避）。"""
+    base = _re.sub(r"[^a-z0-9-]", "-", (seed or "").lower())[:20].strip("-")
+    if len(base) < 3:
+        base = "shop"
+    tm = get_tenant_manager()
+    for _ in range(50):
+        suffix = secrets.token_urlsafe(4).lower().replace("_", "").replace("-", "")[:6]
+        candidate = f"{base}-{suffix}" if base else suffix
+        candidate = candidate[:32].strip("-")
+        if _valid_slug(candidate) and tm.get(candidate) is None:
+            return candidate
+    # Fallback - random
+    return "shop-" + secrets.token_urlsafe(6).lower().replace("_", "").replace("-", "")[:8]
+
+
 def _is_locked(ip):
     rec = _login_attempts.get(ip)
     if not rec:
@@ -524,6 +763,158 @@ def auth_login():
 @app.post("/api/auth/logout")
 def auth_logout():
     session.pop("authenticated", None)
+    session.pop("tenant_slug", None)
+    return jsonify({"ok": True})
+
+
+# ============================================================
+# Magic link 認証 (multi-tenant 対応)
+# ============================================================
+
+@app.post("/api/auth/magic-link/request")
+def auth_magic_link_request():
+    """email を受け取り、紐づく tenant にマジックリンクを送る。
+    tenant が無い場合も同じレスポンスで返して enumeration 防止。"""
+    if _rate_check("magic_link", limit_window=(5, 60)):
+        return jsonify({"error": "rate_limited"}), 429
+    payload = _get_json()
+    email = (payload.get("email") or "").strip().lower()[:200]
+    if not email or "@" not in email:
+        return jsonify({"error": "invalid_email"}), 400
+    tm = get_tenant_manager()
+    # email から tenant を検索
+    target_tenant = None
+    for t in tm.list_all(limit=500):
+        if (t.get("email") or "").strip().lower() == email:
+            target_tenant = t
+            break
+    if target_tenant:
+        token = tm.issue_magic_link(target_tenant["slug"])
+        site = os.environ.get("SITE_URL", "https://shifty.in-dx.jp")
+        link = f"{site}/auth/verify?token={token}"
+        send_email(
+            to_addr=_safe_header(email),
+            subject=_safe_header(f"【Shifty】ログインリンク（30 分有効）"),
+            body=(
+                f"{target_tenant.get('contactName', '') or 'お客様'} 様\n\n"
+                f"Shifty へのログインリンクをお送りします（30 分以内に開いてください）。\n\n"
+                f"{link}\n\n"
+                f"このメールに心当たりがない場合は無視していただいて問題ありません。\n"
+                f"---\n飲DX Shifty\nsupport@in-dx.jp\n"
+            ),
+        )
+    # enumeration 防止のため tenant 有無に関わらず同じレスポンス
+    return jsonify({"ok": True, "message": "メールアドレスにログインリンクをお送りしました（届かない場合は迷惑メールフォルダもご確認ください）"})
+
+
+@app.get("/auth/verify")
+def auth_verify_get():
+    """マジックリンクを開いた時の処理。検証 → セッション設定 → tenant ページへリダイレクト。"""
+    token = request.args.get("token", "")
+    tm = get_tenant_manager()
+    slug = tm.consume_magic_link(token)
+    if not slug:
+        from flask import make_response
+        body = '<!doctype html><html><head><meta charset="utf-8"><title>無効なリンク - Shifty</title><style>body{font-family:system-ui;max-width:480px;margin:60px auto;padding:24px;text-align:center;background:#f8fafc;color:#0f172a}.box{background:white;border-radius:12px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,.08)}h1{font-size:18px;margin-bottom:12px}p{font-size:13px;color:#475569;line-height:1.6}a{color:#4f46e5;text-decoration:underline}</style></head><body><div class="box"><div style="font-size:48px">⚠️</div><h1>このログインリンクは無効です</h1><p>リンクが期限切れ（30 分超過）または既に使用済みです。<br><a href="/login">ログイン画面でメールアドレスを再入力</a>してください。</p></div></body></html>'
+        return make_response(body, 401)
+    session.clear()
+    session["authenticated"] = True
+    session["tenant_slug"] = slug
+    session.permanent = True
+    return _redirect(f"/t/{slug}/app")
+
+
+def _redirect(url, status=302):
+    from flask import redirect
+    return redirect(url, code=status)
+
+
+@app.get("/login")
+def login_page():
+    """マジックリンク要求ページ"""
+    return send_from_directory(str(ROOT), "login.html")
+
+
+# ============================================================
+# Tenant 専用 routes (path-based)
+# ============================================================
+def _require_tenant_session(slug):
+    """セッションが指定 tenant にバインドされてるか確認"""
+    if not session.get("authenticated"):
+        return False
+    sess_slug = session.get("tenant_slug")
+    if sess_slug != slug:
+        return False
+    return True
+
+
+@app.get("/t/<slug>/app")
+def tenant_app(slug):
+    if not _valid_slug(slug):
+        return "Invalid tenant slug", 400
+    return send_from_directory(str(ROOT), "index.html")
+
+
+@app.get("/api/t/<slug>/auth/status")
+def tenant_auth_status(slug):
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    tm = get_tenant_manager()
+    tenant = tm.get(slug)
+    if not tenant:
+        return jsonify({"error": "tenant_not_found"}), 404
+    authenticated = _require_tenant_session(slug)
+    return jsonify({
+        "authenticated": authenticated,
+        "tenant": {
+            "slug": slug,
+            "restaurantName": tenant.get("restaurantName", ""),
+            "plan": tenant.get("plan", "free"),
+        },
+    })
+
+
+@app.get("/api/t/<slug>/state")
+def tenant_get_state(slug):
+    if not _require_tenant_session(slug):
+        return jsonify({"error": "unauthenticated"}), 401
+    s = get_tenant_storage(slug)
+    return jsonify(s.get_state() or {})
+
+
+@app.post("/api/t/<slug>/state")
+def tenant_save_state(slug):
+    if not _require_tenant_session(slug):
+        return jsonify({"error": "unauthenticated"}), 401
+    payload = _get_json()
+    if not payload:
+        return jsonify({"error": "expected_object"}), 400
+    if "meta" in payload and not isinstance(payload["meta"], dict):
+        return jsonify({"error": "invalid_meta"}), 400
+    if "staff" in payload and not isinstance(payload["staff"], list):
+        return jsonify({"error": "invalid_staff"}), 400
+    if "weeks" in payload and not isinstance(payload["weeks"], dict):
+        return jsonify({"error": "invalid_weeks"}), 400
+    if "staff" in payload and len(payload["staff"]) > 1000:
+        return jsonify({"error": "too_many_staff"}), 400
+    s = get_tenant_storage(slug)
+    expected_version = payload.get("_version")
+    def _mutate(current):
+        if expected_version is not None and current and current.get("_version") != expected_version:
+            raise _ConflictError(current.get("_version"))
+        new_state = dict(payload)
+        new_state["_version"] = ((current or {}).get("_version", 0) + 1)
+        return new_state
+    try:
+        result = s.transactional_update(_mutate)
+        return jsonify({"ok": True, "version": result.get("_version")})
+    except _ConflictError as ce:
+        return jsonify({"error": "version_conflict", "currentVersion": ce.current_version}), 409
+
+
+@app.post("/api/t/<slug>/auth/logout")
+def tenant_logout(slug):
+    session.clear()
     return jsonify({"ok": True})
 
 
@@ -874,11 +1265,94 @@ def api_stripe_webhook():
         # 永続失敗時は 500 を返して Stripe の再送に任せる（メール二重発信を防止）
         return jsonify({"error": "persist_failed"}), 500
 
-    # 重要イベントなら通知 (persisted=True のときのみ)
-    if persisted and et in ("checkout.session.completed", "customer.subscription.deleted"):
+    # checkout.session.completed: tenant 自動プロビジョニング + マジックリンクメール送信
+    if persisted and et == "checkout.session.completed":
+        try:
+            tm = get_tenant_manager()
+            email = record.get("email", "")
+            metadata = record.get("metadata", {}) or {}
+            restaurant_name = metadata.get("restaurantName", "")
+            contact_name = metadata.get("contactName", "")
+            customer_id = record.get("customerId", "")
+            sub_id = record.get("subscriptionId", "")
+
+            # 既存 tenant か確認 (重複サインアップ防止)
+            existing = None
+            for t in tm.list_all(limit=500):
+                if (t.get("email") or "").strip().lower() == email.strip().lower():
+                    existing = t
+                    break
+
+            if existing:
+                slug = existing["slug"]
+                # Stripe ID 更新
+                if customer_id and not existing.get("stripeCustomerId"):
+                    if STORAGE_BACKEND == "firestore":
+                        from google.cloud import firestore as _fs
+                        _fs.Client().collection("tenants").document(slug).update({
+                            "stripeCustomerId": customer_id,
+                            "stripeSubscriptionId": sub_id,
+                            "plan": "pro_trial",
+                        })
+            else:
+                slug = _generate_slug(restaurant_name)
+                tm.create(
+                    slug=slug,
+                    email=email,
+                    contact_name=contact_name,
+                    restaurant_name=restaurant_name,
+                    plan="pro_trial",
+                    stripe_customer_id=customer_id,
+                    stripe_subscription_id=sub_id,
+                )
+
+            # マジックリンクを送信
+            token = tm.issue_magic_link(slug)
+            site = os.environ.get("SITE_URL", "https://shifty.in-dx.jp")
+            magic_link = f"{site}/auth/verify?token={token}"
+            send_email(
+                to_addr=_safe_header(email),
+                subject=_safe_header(f"【Shifty】{restaurant_name} 様 - セットアップ完了のご案内"),
+                body=(
+                    f"{contact_name or 'お客様'} 様\n\n"
+                    f"このたびは Shifty へお申込みいただきありがとうございます。\n"
+                    f"{restaurant_name} 様専用の管理画面をご用意いたしました。\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"  ▼ ログイン用リンク（30 分有効）\n"
+                    f"  {magic_link}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"以後のログインは下記より行ってください:\n"
+                    f"  {site}/login\n\n"
+                    f"【次のステップ】\n"
+                    f"1. 上記リンクをクリックしてログイン\n"
+                    f"2. スタッフ情報を登録（CSV 取込もできます）\n"
+                    f"3. 「希望リンク全員生成」で LINE 配布\n"
+                    f"4. 希望が集まったら「AI 自動生成」\n\n"
+                    f"分からないことがあれば、このメールに返信してご質問ください。\n"
+                    f"飲DX サポートチームより 24 時間以内にお返事いたします。\n\n"
+                    f"---\n飲DX Shifty\nsupport@in-dx.jp\n{site}/help\n"
+                ),
+            )
+            # 管理者にも通知
+            send_email(
+                to_addr=_safe_header(NOTIFY_TO),
+                subject=_safe_header(f"【新規 Tenant】{restaurant_name} ({slug})"),
+                body=f"新規 Pro tenant 作成完了\n\nslug: {slug}\nemail: {email}\nrestaurant: {restaurant_name}\ncontact: {contact_name}\nstripe_customer: {customer_id}\nstripe_sub: {sub_id}\n\n管理画面: {site}/t/{slug}/app",
+            )
+        except Exception as e:
+            print(f"[tenant-provision] failed: {e}")
+            # 失敗時は管理者に通知
+            send_email(
+                to_addr=_safe_header(NOTIFY_TO),
+                subject=_safe_header("【!!!】Tenant 自動プロビジョニング失敗"),
+                body=f"イベント ID: {event_id}\nrecord: {record}\nerror: {e}\n\n手動対応が必要です。",
+            )
+
+    elif persisted and et == "customer.subscription.deleted":
+        # 解約時の通知
         send_email(
             to_addr=_safe_header(NOTIFY_TO),
-            subject=_safe_header(f"【Shifty/Stripe】{et}: {record['email']}"),
+            subject=_safe_header(f"【Shifty/Stripe】解約: {record['email']}"),
             body=f"Stripe イベント: {et}\nメール: {record['email']}\n顧客ID: {record['customerId']}\nstatus: {record['status']}\nmetadata: {record['metadata']}\n",
         )
 
@@ -1266,26 +1740,86 @@ def api_inquiry():
         reply_to=_safe_header(record["email"]),
     )
 
-    # 応募者へ自動返信
-    autoreply = (
-        f"{record['contactName']} 様\n\n"
-        f"このたびは Shifty にお問合せいただき、誠にありがとうございます。\n"
-        f"内容を確認のうえ、1 営業日以内に support@in-dx.jp よりご連絡いたします。\n\n"
-        f"――― 受付内容 ―――\n"
-        f"店舗名 : {record['restaurantName']}\n"
-        f"スタッフ数: {record['staffCount']}\n"
-        f"メッセージ: {record['message'] or '(なし)'}\n"
-        f"――――――――――――――\n\n"
-        f"なお、その間にデモ環境を触っていただくこともできます:\n"
-        f"https://shifty.in-dx.jp/demo\n\n"
-        f"ご質問・お急ぎの場合は support@in-dx.jp までお気軽にご連絡ください。\n\n"
-        f"飲DX\n"
-        f"代表 柳下 征二郎\n"
-        f"https://shifty.in-dx.jp\n"
-    )
+    # Free プランからの直接申込みかどうか判定
+    is_free_signup = "Free" in (record.get("message") or "") or "8 名以下" in (record.get("staffCount") or "") or "8名以下" in (record.get("staffCount") or "")
+    site = os.environ.get("SITE_URL", "https://shifty.in-dx.jp")
+
+    if is_free_signup and STORAGE_BACKEND == "firestore":
+        # Free プラン自動プロビジョニング
+        try:
+            tm = get_tenant_manager()
+            existing = None
+            for t in tm.list_all(limit=500):
+                if (t.get("email") or "").strip().lower() == record["email"].strip().lower():
+                    existing = t
+                    break
+            slug = existing["slug"] if existing else _generate_slug(record["restaurantName"])
+            if not existing:
+                tm.create(
+                    slug=slug,
+                    email=record["email"],
+                    contact_name=record["contactName"],
+                    restaurant_name=record["restaurantName"],
+                    plan="free",
+                )
+            magic_token = tm.issue_magic_link(slug)
+            magic_link = f"{site}/auth/verify?token={magic_token}"
+            autoreply = (
+                f"{record['contactName']} 様\n\n"
+                f"このたびは Shifty にお申込みいただきありがとうございます。\n"
+                f"{record['restaurantName']} 様専用の管理画面をご用意いたしました。\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"  ▼ ログイン用リンク（30 分有効）\n"
+                f"  {magic_link}\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"以後のログインは下記より行ってください:\n"
+                f"  {site}/login\n\n"
+                f"【次のステップ】\n"
+                f"1. 上記リンクをクリックしてログイン\n"
+                f"2. スタッフ情報を登録（CSV 取込もできます）\n"
+                f"3. 「希望リンク全員生成」で LINE 配布\n"
+                f"4. 希望が集まったら「AI 自動生成」\n\n"
+                f"分からないことがあれば、このメールに返信してご質問ください。\n"
+                f"飲DX サポートチームより 24 時間以内にお返事いたします。\n\n"
+                f"---\n飲DX Shifty\nsupport@in-dx.jp\n{site}/help\n"
+            )
+            # 管理者通知
+            send_email(
+                to_addr=_safe_header(NOTIFY_TO),
+                subject=_safe_header(f"【新規 Free Tenant】{record['restaurantName']} ({slug})"),
+                body=f"slug: {slug}\nemail: {record['email']}\nrestaurant: {record['restaurantName']}\ncontact: {record['contactName']}\nstaff count: {record['staffCount']}\n\n管理画面: {site}/t/{slug}/app",
+            )
+        except Exception as e:
+            print(f"[free-signup-provision] failed: {e}")
+            # フォールバック: 従来通りのメッセージ
+            autoreply = (
+                f"{record['contactName']} 様\n\n"
+                f"このたびは Shifty にお問合せいただき、誠にありがとうございます。\n"
+                f"内容を確認のうえ、1 営業日以内に support@in-dx.jp よりご連絡いたします。\n\n"
+                f"その間にデモ環境を触っていただけます:\n{site}/demo\n\n"
+                f"飲DX\n代表 柳下 征二郎\n{site}\n"
+            )
+    else:
+        # 通常のお問合せフォーム経由（手動対応）
+        autoreply = (
+            f"{record['contactName']} 様\n\n"
+            f"このたびは Shifty にお問合せいただき、誠にありがとうございます。\n"
+            f"内容を確認のうえ、1 営業日以内に support@in-dx.jp よりご連絡いたします。\n\n"
+            f"――― 受付内容 ―――\n"
+            f"店舗名 : {record['restaurantName']}\n"
+            f"スタッフ数: {record['staffCount']}\n"
+            f"メッセージ: {record['message'] or '(なし)'}\n"
+            f"――――――――――――――\n\n"
+            f"なお、その間にデモ環境を触っていただくこともできます:\n"
+            f"{site}/demo\n\n"
+            f"ご質問・お急ぎの場合は support@in-dx.jp までお気軽にご連絡ください。\n\n"
+            f"飲DX\n"
+            f"代表 柳下 征二郎\n"
+            f"{site}\n"
+        )
     send_email(
         to_addr=_safe_header(record["email"]),
-        subject=_safe_header("【Shifty】お問合せありがとうございます（受付完了）"),
+        subject=_safe_header("【Shifty】お申込みありがとうございます" if is_free_signup else "【Shifty】お問合せありがとうございます（受付完了）"),
         body=autoreply,
     )
     return jsonify({"ok": True}), 201

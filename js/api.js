@@ -1,7 +1,13 @@
-// api.js v3 — REST API クライアント（認証 + デモモード対応）
+// api.js v4 — REST API クライアント（multi-tenant + 認証 + デモ対応）
 (function () {
   const isDemo = !!window.__SHIFTY_DEMO_MODE__;
   const DEMO_KEY = "shifty.demo.state";
+
+  // /t/{slug}/app の URL を tenant 文脈として解釈
+  // それ以外（/app, /demo）は単一テナント default として動作
+  const tenantMatch = location.pathname.match(/^\/t\/([a-z0-9][a-z0-9-]{2,30}[a-z0-9])\//);
+  const tenantSlug = tenantMatch ? tenantMatch[1] : null;
+  const tenantPrefix = tenantSlug ? `/api/t/${tenantSlug}` : "/api";
 
   function uid(p = "") { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
@@ -78,17 +84,26 @@
   }
 
   const API = {
+    // Tenant context
+    tenantSlug,
+
     // Auth
-    authStatus: () => jsonReq("/api/auth/status"),
+    authStatus: () => tenantSlug
+      ? jsonReq(`${tenantPrefix}/auth/status`)
+      : jsonReq("/api/auth/status"),
     authLogin: (password) => jsonReq("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
     authSetup: (password) => jsonReq("/api/auth/setup", { method: "POST", body: JSON.stringify({ password }) }),
-    authLogout: () => jsonReq("/api/auth/logout", { method: "POST" }),
+    authLogout: () => tenantSlug
+      ? jsonReq(`${tenantPrefix}/auth/logout`, { method: "POST" })
+      : jsonReq("/api/auth/logout", { method: "POST" }),
     authChangePassword: (current, next) =>
       jsonReq("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current, new: next }) }),
+    requestMagicLink: (email) =>
+      jsonReq("/api/auth/magic-link/request", { method: "POST", body: JSON.stringify({ email }) }),
 
-    // State
-    getState: () => jsonReq("/api/state"),
-    saveState: (s) => jsonReq("/api/state", { method: "POST", body: JSON.stringify(s) }),
+    // State (tenant-aware)
+    getState: () => jsonReq(`${tenantPrefix}/state`),
+    saveState: (s) => jsonReq(`${tenantPrefix}/state`, { method: "POST", body: JSON.stringify(s) }),
     resetServer: () => jsonReq("/api/admin/reset", { method: "POST" }),
     backup: () => jsonReq("/api/admin/backup"),
     restore: (data) => jsonReq("/api/admin/restore", { method: "POST", body: JSON.stringify(data) }),

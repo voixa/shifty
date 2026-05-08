@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ログイン - Shifty</title>
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex,nofollow" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='white' font-family='system-ui,sans-serif' font-weight='700'%3ES%3C/text%3E%3C/svg%3E" />
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { brand: { 500:'#6366f1',600:'#4f46e5',700:'#4338ca' } } } }
+    }
+  </script>
+</head>
+<body class="bg-slate-100 text-slate-900 min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+    <div class="text-center mb-6">
+      <div class="inline-flex items-center justify-center w-12 h-12 bg-brand-600 text-white rounded-xl text-2xl font-bold mb-3">S</div>
+      <h1 class="text-2xl font-bold">Shifty にログイン</h1>
+      <p class="text-sm text-slate-600 mt-2">ご登録のメールアドレスにログインリンクをお送りします</p>
+    </div>
+
+    <form id="magicForm" class="space-y-4">
+      <label class="block">
+        <span class="text-sm font-medium text-slate-700">メールアドレス</span>
+        <input id="email" type="email" required
+          class="mt-1 w-full border border-slate-300 rounded-lg px-4 py-3 text-base focus:ring-2 focus:ring-brand-500 focus:border-transparent focus:outline-none"
+          placeholder="contact@example.com" autocomplete="email" />
+      </label>
+      <button id="submitBtn" type="submit"
+        class="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 font-semibold text-base disabled:opacity-50">
+        🔗 ログインリンクを送る
+      </button>
+      <div id="message" class="hidden text-sm text-center px-3 py-2 rounded"></div>
+    </form>
+
+    <div class="mt-6 text-center text-xs text-slate-500 space-y-2">
+      <p>
+        パスワードはありません。<br>
+        メールに届くリンクをクリックすると自動的にログインされます。
+      </p>
+      <p class="pt-2 border-t border-slate-100">
+        まだ登録されていませんか？<br>
+        <a href="/" class="text-brand-600 hover:underline font-semibold">トップページから無料で始める</a>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('magicForm');
+    const emailInput = document.getElementById('email');
+    const submitBtn = document.getElementById('submitBtn');
+    const msgEl = document.getElementById('message');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = emailInput.value.trim();
+      if (!email || !email.includes('@')) return;
+      submitBtn.disabled = true;
+      submitBtn.textContent = '送信中…';
+      msgEl.classList.add('hidden');
+      try {
+        const r = await fetch('/api/auth/magic-link/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        const j = await r.json();
+        if (r.ok) {
+          msgEl.className = 'text-sm text-center px-3 py-2 rounded bg-emerald-50 text-emerald-800 border border-emerald-200';
+          msgEl.innerHTML = '✅ ' + (j.message || 'ログインリンクを送信しました（30分有効）');
+          msgEl.classList.remove('hidden');
+          form.querySelector('button').textContent = '✓ 送信完了';
+          // 60 秒後にもう一度送れるようにする
+          setTimeout(() => {
+            submitBtn.disabled = false;
+            submitBtn.textContent = '🔗 もう一度送る';
+          }, 60000);
+        } else {
+          msgEl.className = 'text-sm text-center px-3 py-2 rounded bg-red-50 text-red-800 border border-red-200';
+          msgEl.textContent = '❌ ' + (j.error === 'rate_limited' ? '送信制限中です。少し待ってからお試しください' : '送信に失敗しました');
+          msgEl.classList.remove('hidden');
+          submitBtn.disabled = false;
+          submitBtn.textContent = '🔗 ログインリンクを送る';
+        }
+      } catch (err) {
+        msgEl.className = 'text-sm text-center px-3 py-2 rounded bg-red-50 text-red-800 border border-red-200';
+        msgEl.textContent = '❌ 通信エラー。サポートまでご連絡ください: support@in-dx.jp';
+        msgEl.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = '🔗 ログインリンクを送る';
+      }
+    });
+
+    setTimeout(() => emailInput.focus(), 50);
+  </script>
+</body>
+</html>
