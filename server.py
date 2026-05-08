@@ -1804,6 +1804,55 @@ def api_t_portal_get(slug, token):
         "hourlyWage": staff.get("hourlyWage"),
         "email": staff.get("email", ""),
     }
+
+    # 月次サマリ (Round 3): 当月内の確定シフトを集計
+    import datetime as _dt
+    def _calc_hours(st, et):
+        try:
+            sh, sm = map(int, st.split(":"))
+            eh, em = map(int, et.split(":"))
+            return ((eh * 60 + em) - (sh * 60 + sm)) / 60
+        except Exception:
+            return 0
+    if current_wk:
+        try:
+            cur_dt = _dt.datetime.strptime(current_wk, "%Y-%m-%d")
+            month_key = cur_dt.strftime("%Y-%m")
+        except Exception:
+            month_key = ""
+    else:
+        month_key = ""
+    month_assignments = []
+    month_total_h = 0.0
+    month_total_pay = 0.0
+    history_assignments = []  # 過去 4 週の assignment (確定済のみ)
+    if isinstance(weeks, dict):
+        for wk_start, wk_data in weeks.items():
+            if wk_data.get("status") != "published":
+                continue
+            for a in wk_data.get("assignments", []):
+                if a.get("staffId") != staff_id:
+                    continue
+                hours = _calc_hours(a.get("startTime", ""), a.get("endTime", ""))
+                pay = a.get("cost") or (staff.get("hourlyWage", 0) * hours)
+                # 当月集計
+                if month_key and a.get("date", "").startswith(month_key):
+                    month_assignments.append(a)
+                    month_total_h += hours
+                    month_total_pay += pay
+                # 履歴 (過去 4 週)
+                if current_wk and wk_start <= current_wk:
+                    history_assignments.append({
+                        "date": a.get("date"),
+                        "startTime": a.get("startTime"),
+                        "endTime": a.get("endTime"),
+                        "position": a.get("position"),
+                        "hours": round(hours, 2),
+                        "pay": int(pay),
+                    })
+    history_assignments.sort(key=lambda x: (x.get("date", ""), x.get("startTime", "")), reverse=True)
+    history_assignments = history_assignments[:30]  # 直近 30 件まで
+
     return jsonify({
         "staff": public_staff,
         "preferences": prefs,
@@ -1815,6 +1864,13 @@ def api_t_portal_get(slug, token):
         "restaurantName": meta.get("restaurantName", ""),
         "sessions": meta.get("sessions", []),
         "positions": meta.get("positions", []),
+        "monthlyStats": {
+            "monthKey": month_key,
+            "shiftCount": len(month_assignments),
+            "totalHours": round(month_total_h, 2),
+            "totalPay": int(month_total_pay),
+        },
+        "history": history_assignments,
     })
 
 

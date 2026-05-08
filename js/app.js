@@ -1010,7 +1010,13 @@ function viewPreferences() {
       el("div", { class: "text-emerald-800 mt-1" }, submitted.map(s => s.name).join("・") || "—"),
     ]),
     el("div", { class: "bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm" }, [
-      el("div", { class: "font-semibold text-amber-900" }, `未提出 ${notSubmitted.length}名`),
+      el("div", { class: "flex items-center justify-between" }, [
+        el("div", { class: "font-semibold text-amber-900" }, `未提出 ${notSubmitted.length}名`),
+        notSubmitted.length > 0 ? el("button", {
+          class: "text-xs bg-amber-500 hover:bg-amber-600 text-white rounded px-2 py-1 font-semibold",
+          onclick: () => openReminderDialog(notSubmitted),
+        }, "📣 催促 LINE 文") : null,
+      ]),
       el("div", { class: "text-amber-800 mt-1" }, notSubmitted.map(s => s.name).join("・") || "✓ 全員提出済み"),
     ]),
   ]));
@@ -1224,14 +1230,61 @@ function renderChangeLog() {
 
 function publishWeek() {
   if (!curAssignments().length) { toast("シフトを生成してから確定してください", "error"); return; }
-  if (!confirm("この週を確定しますか？確定後はスタッフがポータルで閲覧できるようになります。")) return;
-  const wasRepublish = curWeek().publishedAt;
-  curWeek().status = "published";
-  curWeek().publishedAt = new Date().toISOString();
-  logChange("publish", wasRepublish ? "再確定" : "確定", { assignmentCount: curAssignments().length });
-  persist(); render();
-  toast("確定しました。LINE通知文が生成できます。", "success");
-  setTimeout(openLineNotificationDialog, 400);
+  // Round 3: 確定 + 通知統合フロー
+  const withEmail = state.staff.filter(s => (s.email || "").trim());
+  const totalStaff = state.staff.length;
+  const noEmailCount = totalStaff - withEmail.length;
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "✓ 今週のシフトを確定"));
+  body.appendChild(el("p", { class: "text-sm text-slate-600" },
+    "確定するとスタッフはポータルから自分のシフトを閲覧できるようになります。"));
+
+  body.appendChild(el("div", { class: "bg-slate-50 rounded-md p-3 text-xs space-y-1" }, [
+    el("div", {}, `📊 ${curAssignments().length} 件のアサインを確定`),
+    el("div", { class: "text-emerald-700" }, `✉️ メール送信可能: ${withEmail.length}/${totalStaff} 名`),
+    noEmailCount > 0 ? el("div", { class: "text-amber-600" }, `⚠️ メール未登録: ${noEmailCount} 名 (LINE 通知文を別途お渡しください)`) : null,
+  ]));
+
+  // 通知方法選択
+  const cb = el("input", { type: "checkbox", id: "pub-send-mail", checked: withEmail.length > 0 ? "checked" : null });
+  body.appendChild(el("label", { class: "flex items-center gap-2 text-sm" }, [
+    cb,
+    el("span", {}, `確定と同時に ${withEmail.length} 名へメール送信`),
+  ]));
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-semibold",
+      onclick: async () => {
+        const sendMail = $("#pub-send-mail").checked;
+        const wasRepublish = curWeek().publishedAt;
+        curWeek().status = "published";
+        curWeek().publishedAt = new Date().toISOString();
+        logChange("publish", wasRepublish ? "再確定" : "確定", { assignmentCount: curAssignments().length });
+        await persist();
+        closeModal(); render();
+        toast("✓ 確定しました", "success");
+
+        if (sendMail && withEmail.length > 0) {
+          // メール送信実行
+          try {
+            toast("メール送信中…", "info");
+            const r = await window.ShiftyAPI.notifyShifts(state.meta.currentWeekStart);
+            if (r && r.sent) {
+              toast(`✉️ ${r.sent} 名にメール送信完了 (失敗 ${(r.errors||[]).length}件)`, "success");
+            }
+          } catch (e) {
+            toast("メール送信失敗: " + e.message + " — LINE通知文をご利用ください", "error");
+          }
+        }
+        // LINE 通知文ダイアログを開く (メール未登録者 / メール送信しなかった場合の補完)
+        setTimeout(openLineNotificationDialog, 600);
+      },
+    }, "✓ 確定する"),
+  ]));
+  modal(body);
 }
 
 function unpublishWeek() {
@@ -1385,6 +1438,56 @@ function renderCalendar() {
     }
   }
   return grid;
+}
+
+// 未提出スタッフへの催促 LINE 文生成 (Round 3)
+function openReminderDialog(staffList) {
+  const restaurant = state.meta.restaurantName || "店舗";
+  const wk = state.meta.currentWeekStart;
+  const wkEnd = addDays(wk, 6);
+  // 期限: 月曜の 18:00 (週開始の前日 18時) — もしくは設定可能だが固定で
+  const deadline = `${wk.slice(5)}〜${wkEnd.slice(5)} の希望提出`;
+
+  const lineTxt =
+    `📣 シフト希望のお願い (${restaurant})\n\n` +
+    `${deadline} がまだ提出されていない方へ、再度ご案内です。\n\n` +
+    `▼ 対象者:\n` +
+    staffList.map((s, i) => `${i+1}. ${s.name}さん`).join("\n") + "\n\n" +
+    `▼ 提出方法:\n` +
+    `スタッフ別にお送りした個人 URL を開いて、各日の希望をタップして「送信」を押してください。\n` +
+    `URL を紛失された方は、店長までお声がけください。\n\n` +
+    `▼ 締切:\n` +
+    `本日 18:00 までにご提出をお願いします。\n` +
+    `期限を過ぎた場合は店舗都合でシフトを組ませていただきます。\n\n` +
+    `ご協力よろしくお願いいたします。`;
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "📣 提出催促 LINE 文"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    `${staffList.length} 名 (${staffList.map(s => s.name).join("・")}) の未提出に対する一斉送信用テンプレ`));
+
+  body.appendChild(el("textarea", {
+    id: "reminder-ta",
+    class: "w-full border rounded-md p-2 text-xs font-mono h-72",
+    readonly: "",
+  }, lineTxt));
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-md font-semibold",
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(lineTxt);
+          toast("催促文をコピーしました。LINE グループに貼り付けてください", "success");
+        } catch (e) {
+          $("#reminder-ta").select();
+          toast("コピー失敗。手動で選択してコピーしてください", "error");
+        }
+      },
+    }, "📋 コピー"),
+  ]));
+  modal(body);
 }
 
 // 必要人数を日付・セッション別にオーバーライドするダイアログ (Round 2)

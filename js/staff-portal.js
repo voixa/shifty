@@ -144,7 +144,21 @@
     const filledCells = Object.values(prefs).filter(v => v).length;
     const progress = totalCells ? Math.round((filledCells / totalCells) * 100) : 0;
 
+    const m = data.monthlyStats || {};
+    const monthLabel = m.monthKey ? m.monthKey.replace("-", "年") + "月" : "今月";
+    const monthCard = m.shiftCount > 0 ? `
+      <div class="bg-gradient-to-br from-emerald-50 to-brand-50 rounded-xl border border-emerald-200 p-3 mb-3">
+        <div class="text-xs font-semibold text-emerald-900 mb-1.5">📊 ${escapeHtml(monthLabel)} の集計（確定済シフトのみ）</div>
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div><div class="text-[10px] text-slate-500">シフト数</div><div class="text-lg font-bold text-slate-900">${m.shiftCount}</div></div>
+          <div><div class="text-[10px] text-slate-500">勤務時間</div><div class="text-lg font-bold text-emerald-700">${m.totalHours}h</div></div>
+          <div><div class="text-[10px] text-slate-500">給与目安</div><div class="text-lg font-bold text-brand-700">${fmtYen(m.totalPay)}</div></div>
+        </div>
+        <div class="text-[10px] text-slate-500 mt-1.5">※ 給与は時給×時間の概算です。実際の支給額とは異なる場合があります</div>
+      </div>` : "";
+
     $("#app").innerHTML = `
+      ${monthCard}
       <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>
         <h1 class="text-xl font-bold mt-1">${escapeHtml(data.staff.name)}さん</h1>
@@ -159,6 +173,25 @@
         <div class="text-xs text-slate-500 mt-3">各セッションの 4 ボタンから希望を選択（必須＝絶対入りたい / 希望＝入れたら入りたい / 不可＝避けたい / 未定＝任せる）</div>
       </div>
       <div id="grid" class="space-y-3"></div>
+      ${(data.history && data.history.length) ? `
+      <div class="bg-white rounded-xl border border-slate-200 p-3 mt-4">
+        <details>
+          <summary class="text-sm font-semibold cursor-pointer select-none">📜 過去シフト履歴（直近 ${data.history.length} 件）</summary>
+          <div class="mt-2 space-y-1 text-xs">
+            ${data.history.map(h => `
+              <div class="flex items-center justify-between bg-slate-50 rounded p-1.5">
+                <div>
+                  <span class="font-mono">${escapeHtml(h.date)}</span>
+                  <span class="text-slate-600">${escapeHtml(h.startTime)}〜${escapeHtml(h.endTime)}</span>
+                </div>
+                <div class="text-right">
+                  <div class="text-slate-700">${h.hours}h</div>
+                  <div class="text-[10px] text-slate-500">${fmtYen(h.pay)}</div>
+                </div>
+              </div>`).join("")}
+          </div>
+        </details>
+      </div>` : ""}
       <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 shadow-2xl pb-safe">
         <div class="max-w-md mx-auto">
           <button id="saveBtn" class="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 font-semibold disabled:bg-slate-300">送信</button>
@@ -430,7 +463,20 @@
 
     const publishedAt = data.publishedAt ? new Date(data.publishedAt).toLocaleString("ja-JP") : "";
 
+    const m = data.monthlyStats || {};
+    const monthLabel = m.monthKey ? m.monthKey.replace("-", "年") + "月" : "今月";
+    const monthCard = m.shiftCount > 0 ? `
+      <div class="bg-gradient-to-br from-emerald-50 to-brand-50 rounded-xl border border-emerald-200 p-3 mb-3">
+        <div class="text-xs font-semibold text-emerald-900 mb-1.5">📊 ${escapeHtml(monthLabel)} の集計（確定済シフトのみ）</div>
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div><div class="text-[10px] text-slate-500">シフト数</div><div class="text-lg font-bold text-slate-900">${m.shiftCount}</div></div>
+          <div><div class="text-[10px] text-slate-500">勤務時間</div><div class="text-lg font-bold text-emerald-700">${m.totalHours}h</div></div>
+          <div><div class="text-[10px] text-slate-500">給与目安</div><div class="text-lg font-bold text-brand-700">${fmtYen(m.totalPay)}</div></div>
+        </div>
+      </div>` : "";
+
     $("#app").innerHTML = `
+      ${monthCard}
       <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>
         <h1 class="text-xl font-bold mt-1">${escapeHtml(data.staff.name)}さん</h1>
@@ -438,7 +484,7 @@
         <div class="mt-2 inline-block bg-emerald-100 text-emerald-800 text-xs px-2 py-1 rounded">✓ 確定済 ${publishedAt ? `(${publishedAt})` : ""}</div>
         <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
           <div class="bg-slate-50 rounded p-2">
-            <div class="text-xs text-slate-500">合計時間</div>
+            <div class="text-xs text-slate-500">今週の合計</div>
             <div class="text-lg font-bold">${totalH.toFixed(1)}h</div>
           </div>
           <div class="bg-slate-50 rounded p-2">
@@ -448,6 +494,25 @@
         </div>
       </div>
       <div id="grid" class="space-y-3"></div>
+      ${(data.history && data.history.length) ? `
+      <div class="bg-white rounded-xl border border-slate-200 p-3 mt-4">
+        <details>
+          <summary class="text-sm font-semibold cursor-pointer select-none">📜 過去シフト履歴（直近 ${data.history.length} 件）</summary>
+          <div class="mt-2 space-y-1 text-xs">
+            ${data.history.map(h => `
+              <div class="flex items-center justify-between bg-slate-50 rounded p-1.5">
+                <div>
+                  <span class="font-mono">${escapeHtml(h.date)}</span>
+                  <span class="text-slate-600">${escapeHtml(h.startTime)}〜${escapeHtml(h.endTime)}</span>
+                </div>
+                <div class="text-right">
+                  <div class="text-slate-700">${h.hours}h</div>
+                  <div class="text-[10px] text-slate-500">${fmtYen(h.pay)}</div>
+                </div>
+              </div>`).join("")}
+          </div>
+        </details>
+      </div>` : ""}
       <div class="mt-6 text-center">
         <button id="msgBtn" class="bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-3 text-sm font-semibold">
           💬 店長に連絡する
