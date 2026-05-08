@@ -1796,6 +1796,7 @@ def api_t_portal_get(slug, token):
     week_data = weeks.get(current_wk, {})
     prefs = [p for p in week_data.get("preferences", []) if p["staffId"] == staff_id]
     assignments = [a for a in week_data.get("assignments", []) if a["staffId"] == staff_id]
+    comments = (week_data.get("staffComments", {}) or {}).get(staff_id, {})
     public_staff = {
         "id": staff.get("id"),
         "name": staff.get("name"),
@@ -1806,6 +1807,7 @@ def api_t_portal_get(slug, token):
     return jsonify({
         "staff": public_staff,
         "preferences": prefs,
+        "comments": comments,
         "assignments": assignments,
         "weekStart": current_wk,
         "weekStatus": week_data.get("status", "draft"),
@@ -1825,9 +1827,14 @@ def api_t_portal_save_prefs(slug, token):
     if not staff_id:
         return jsonify({"error": "invalid_token"}), 404
     try:
-        new_prefs = request.get_json(force=True, silent=True)
+        body = request.get_json(force=True, silent=True)
     except Exception:
         return jsonify({"error": "invalid_json"}), 400
+    # 後方互換: list でも dict でも受け付ける
+    # 新形式: {"preferences":[...], "comments":{date: text, ...}}
+    # 旧形式: [{...}, ...]
+    new_prefs = body if isinstance(body, list) else (body.get("preferences") if isinstance(body, dict) else None)
+    new_comments = body.get("comments") if isinstance(body, dict) else None
     if not isinstance(new_prefs, list):
         return jsonify({"error": "expected_list"}), 400
     if len(new_prefs) > 100:
@@ -1851,6 +1858,14 @@ def api_t_portal_save_prefs(slug, token):
             "endTime": p["endTime"],
             "priority": p["priority"],
         })
+    # コメント (日付ごとに 100 文字まで)
+    cleaned_comments = {}
+    if isinstance(new_comments, dict):
+        for k, v in list(new_comments.items())[:14]:  # 最大2週間分
+            if not date_re.match(str(k)): continue
+            text = str(v or "")[:200]
+            if text:
+                cleaned_comments[k] = text
     state_after = {"published": False, "no_state": False, "no_week": False}
 
     def _mutate(current):
@@ -1869,6 +1884,10 @@ def api_t_portal_save_prefs(slug, token):
             return current
         week["preferences"] = [p for p in week.get("preferences", []) if p.get("staffId") != staff_id]
         week["preferences"].extend(cleaned)
+        # コメント保存 (週内 staffComments[staffId][date] = text)
+        if cleaned_comments or isinstance(new_comments, dict):
+            sc = week.setdefault("staffComments", {})
+            sc[staff_id] = cleaned_comments
         return current
 
     s.transactional_update(_mutate)
@@ -1878,7 +1897,7 @@ def api_t_portal_save_prefs(slug, token):
         return jsonify({"error": "no_current_week"}), 404
     if state_after["published"]:
         return jsonify({"error": "week_published_readonly"}), 403
-    return jsonify({"ok": True, "saved": len(cleaned)})
+    return jsonify({"ok": True, "saved": len(cleaned), "comments": len(cleaned_comments)})
 
 
 @app.post("/api/t/<slug>/portal/<token>/message")

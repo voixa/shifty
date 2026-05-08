@@ -7,12 +7,18 @@
   const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 
   let data = null;
-  let prefs = {};
+  let prefs = {};       // {`${date}|${sessId}`: priority}
+  let customTimes = {}; // {`${date}|${sessId}`: {startTime, endTime}}  時間範囲指定がある場合
+  let comments = {};    // {date: text}
   let dirty = false;
   const DRAFT_KEY = `shifty.portal.draft.${token || "anon"}`;
 
   function saveDraft() {
-    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ prefs, savedAt: Date.now() })); } catch (_) {}
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        prefs, customTimes, comments, savedAt: Date.now()
+      }));
+    } catch (_) {}
   }
   function loadDraft() {
     try {
@@ -46,6 +52,7 @@
   function escapeHtml(s) {
     return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
   }
+  function escapeAttr(s) { return escapeHtml(s).replace(/"/g, "&quot;"); }
   function fmtYen(n) { return "¥" + Math.round(n).toLocaleString(); }
 
   function showError(msg) {
@@ -67,18 +74,38 @@
       // load existing prefs from server
       for (const p of (data.preferences || [])) {
         const sess = (data.sessions || []).find(s => s.startTime === p.startTime && s.endTime === p.endTime);
-        if (sess) prefs[`${p.date}|${sess.id}`] = p.priority;
+        if (sess) {
+          prefs[`${p.date}|${sess.id}`] = p.priority;
+        } else {
+          // 時間が一致するセッションがない = カスタム時間
+          // セッション枠を探す: 開始時刻が含まれるセッション
+          const owner = (data.sessions || []).find(s =>
+            timeToMin(p.startTime) >= timeToMin(s.startTime) &&
+            timeToMin(p.endTime) <= timeToMin(s.endTime)
+          );
+          if (owner) {
+            const k = `${p.date}|${owner.id}`;
+            prefs[k] = p.priority;
+            customTimes[k] = { startTime: p.startTime, endTime: p.endTime };
+          }
+        }
       }
+      // load comments
+      comments = data.comments || {};
       // restore localStorage draft if newer
       const draft = loadDraft();
-      if (draft && Object.keys(draft.prefs || {}).length > 0) {
-        const keys = Object.keys(draft.prefs);
-        const hasUnsavedChange = keys.some(k => draft.prefs[k] !== prefs[k]);
+      if (draft && (Object.keys(draft.prefs || {}).length > 0 || Object.keys(draft.comments || {}).length > 0)) {
+        const keys = Object.keys(draft.prefs || {});
+        const hasUnsavedChange = keys.some(k => draft.prefs[k] !== prefs[k])
+          || Object.keys(draft.comments || {}).some(k => (draft.comments[k] || "") !== (comments[k] || ""))
+          || Object.keys(draft.customTimes || {}).some(k => JSON.stringify(draft.customTimes[k]) !== JSON.stringify(customTimes[k]));
         if (hasUnsavedChange && confirm(
           "前回未送信の入力があります。復元しますか？\n\n" +
           "「キャンセル」を押すと送信済みの内容を表示します。"
         )) {
-          prefs = { ...prefs, ...draft.prefs };
+          prefs = { ...prefs, ...(draft.prefs || {}) };
+          customTimes = { ...customTimes, ...(draft.customTimes || {}) };
+          comments = { ...comments, ...(draft.comments || {}) };
           dirty = true;
         } else {
           clearDraft();
@@ -133,13 +160,24 @@
       const dowColor = dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "text-slate-700";
       const dayCard = document.createElement("div");
       dayCard.className = "bg-white rounded-xl border border-slate-200 overflow-hidden";
+      // 通し勤務ボタン (lunch + dinner 両方を一括 "want" に)
+      const allDayBtn = sessions.length > 1
+        ? `<button class="all-day-btn text-[10px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded px-2 py-1 font-semibold ml-auto" data-date="${date}" aria-label="この日を通し勤務希望">⏩ 1日通し希望</button>`
+        : "";
       dayCard.innerHTML = `
-        <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 ${dowColor} font-semibold text-sm">${fmtDate(date)} (${dayLabel})</div>
+        <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+          <span class="${dowColor} font-semibold text-sm">${fmtDate(date)} (${dayLabel})</span>
+          ${allDayBtn}
+        </div>
         <div class="p-3 space-y-3"></div>`;
       const inner = dayCard.querySelector(".p-3");
       for (const sess of sessions) {
         const key = `${date}|${sess.id}`;
         const cur = prefs[key] || null;
+        const ct = customTimes[key];
+        const displayStart = (ct && ct.startTime) || sess.startTime;
+        const displayEnd = (ct && ct.endTime) || sess.endTime;
+        const isCustom = !!ct;
 
         const sessRow = document.createElement("div");
         sessRow.className = "border border-slate-100 rounded-lg p-2";
@@ -149,8 +187,13 @@
             <span class="text-lg">${escapeHtml(sess.icon || "")}</span>
             <div class="flex-1">
               <span class="font-medium text-sm">${escapeHtml(sess.label)}</span>
-              <span class="text-xs text-slate-500 ml-2">${escapeHtml(sess.startTime || "")}〜${escapeHtml(sess.endTime || "")}</span>
+              <span class="text-xs ${isCustom ? "text-amber-600 font-semibold" : "text-slate-500"} ml-2">
+                ${escapeHtml(displayStart)}〜${escapeHtml(displayEnd)}${isCustom ? " ⚙️" : ""}
+              </span>
             </div>
+            <button class="time-adjust-btn text-[10px] text-slate-400 hover:text-slate-700 px-1.5 py-1 rounded border border-slate-200 hover:border-slate-400"
+              data-key="${key}" data-sess-start="${escapeAttr(sess.startTime)}" data-sess-end="${escapeAttr(sess.endTime)}"
+              aria-label="時間を調整">⚙️ 時間調整</button>
           </div>
           <div class="grid grid-cols-4 gap-1.5"></div>`;
         const btnRow = sessRow.querySelector(".grid");
@@ -162,9 +205,12 @@
           btn.setAttribute("aria-pressed", isActive ? "true" : "false");
           btn.setAttribute("aria-label", `${escapeHtml(sess.label)} を「${p.label}」に設定`);
           btn.onclick = () => {
-            // 同じものを再度押した場合は未定にトグル（誤タップで戻せる）
-            if ((cur ?? null) === p.id && p.id !== null) prefs[key] = null;
-            else prefs[key] = p.id;
+            if ((cur ?? null) === p.id && p.id !== null) {
+              prefs[key] = null;
+              delete customTimes[key]; // 解除時はカスタム時間もクリア
+            } else {
+              prefs[key] = p.id;
+            }
             dirty = true;
             saveDraft();
             renderDraft();
@@ -173,8 +219,63 @@
         }
         inner.appendChild(sessRow);
       }
+      // コメント欄 (日付ごと)
+      const commentRow = document.createElement("div");
+      commentRow.className = "px-1";
+      const cmtId = `cmt-${date}`;
+      commentRow.innerHTML = `
+        <details class="text-xs">
+          <summary class="cursor-pointer text-slate-500 hover:text-slate-700 select-none">
+            ✏️ メモ${comments[date] ? ' (記入あり)' : ' (店長への伝達)'}
+          </summary>
+          <textarea id="${cmtId}" data-date="${date}" maxlength="200"
+            class="comment-input mt-1 w-full text-xs border border-slate-200 rounded-md px-2 py-1.5 h-16 resize-none"
+            placeholder="例: 16時以降なら通し可・家族の用事で15時で上がりたい・電車遅延の可能性あり 等">${escapeHtml(comments[date] || "")}</textarea>
+          <div class="text-[10px] text-slate-400 text-right">最大 200 文字</div>
+        </details>`;
+      inner.appendChild(commentRow);
+
       grid.appendChild(dayCard);
     }
+
+    // 通し勤務ボタン
+    grid.querySelectorAll(".all-day-btn").forEach(btn => {
+      btn.onclick = () => {
+        const date = btn.getAttribute("data-date");
+        for (const sess of sessions) {
+          prefs[`${date}|${sess.id}`] = "want";
+        }
+        dirty = true;
+        saveDraft();
+        renderDraft();
+        toast(`${date.slice(5)} 全セッションを「希望」に設定`, "success");
+      };
+    });
+
+    // 時間調整ボタン
+    grid.querySelectorAll(".time-adjust-btn").forEach(btn => {
+      btn.onclick = () => {
+        const key = btn.getAttribute("data-key");
+        const sessStart = btn.getAttribute("data-sess-start");
+        const sessEnd = btn.getAttribute("data-sess-end");
+        openTimeAdjustModal(key, sessStart, sessEnd);
+      };
+    });
+
+    // コメント入力 (debounce 保存)
+    let commentTimer;
+    grid.querySelectorAll(".comment-input").forEach(el => {
+      el.addEventListener("input", () => {
+        const d = el.getAttribute("data-date");
+        comments[d] = el.value.slice(0, 200);
+        dirty = true;
+        if (commentTimer) clearTimeout(commentTimer);
+        commentTimer = setTimeout(() => {
+          saveDraft();
+          if (dirty) $("#dirtyHint").classList.remove("hidden");
+        }, 400);
+      });
+    });
 
     if (dirty) $("#dirtyHint").classList.remove("hidden");
 
@@ -185,17 +286,21 @@
         const [date, sessId] = key.split("|");
         const sess = sessions.find(s => s.id === sessId);
         if (!sess) continue;
+        // カスタム時間があればそちらを優先
+        const ct = customTimes[key];
+        const startTime = (ct && ct.startTime) || sess.startTime;
+        const endTime = (ct && ct.endTime) || sess.endTime;
         out.push({
           id: "p_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
           staffId: data.staff.id,
-          date, startTime: sess.startTime, endTime: sess.endTime, priority: prio,
+          date, startTime, endTime, priority: prio,
         });
       }
       const btn = $("#saveBtn");
       btn.disabled = true;
       btn.textContent = "送信中...";
       try {
-        await window.ShiftyAPI.portalSavePrefs(token, out);
+        await window.ShiftyAPI.portalSavePrefs(token, { preferences: out, comments });
         toast("✅ 送信完了。お疲れ様でした", "success");
         btn.textContent = "✓ 送信完了 (もう一度送信できます)";
         btn.disabled = false;
@@ -207,6 +312,87 @@
         btn.disabled = false;
         toast("送信失敗: " + e.message, "error");
       }
+    };
+  }
+
+  // ===== 時間調整モーダル =====
+  function openTimeAdjustModal(key, sessStart, sessEnd) {
+    const ct = customTimes[key];
+    const curStart = (ct && ct.startTime) || sessStart;
+    const curEnd = (ct && ct.endTime) || sessEnd;
+
+    // 30 分刻みで sessStart〜sessEnd の範囲内オプションを生成
+    function timeOptions(min, max) {
+      const out = [];
+      for (let m = timeToMin(min); m <= timeToMin(max); m += 30) {
+        const h = String(Math.floor(m / 60)).padStart(2, "0");
+        const mm = String(m % 60).padStart(2, "0");
+        out.push(`${h}:${mm}`);
+      }
+      return out;
+    }
+    const opts = timeOptions(sessStart, sessEnd);
+
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4";
+    overlay.innerHTML = `
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold text-base">⚙️ 時間を調整</h3>
+          <button id="ta-close" class="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+        </div>
+        <p class="text-xs text-slate-600">
+          このセッション (${escapeHtml(sessStart)}〜${escapeHtml(sessEnd)}) の中で、希望する時間帯を指定できます。<br>
+          例: 11:00〜13:00 だけ・14:00 以降のみ 等
+        </p>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="text-xs font-semibold text-slate-700">開始時刻</span>
+            <select id="ta-start" class="mt-1 w-full border rounded-md px-3 py-2 text-base">
+              ${opts.map(t => `<option value="${t}" ${t === curStart ? "selected" : ""}>${t}</option>`).join("")}
+            </select>
+          </label>
+          <label class="block">
+            <span class="text-xs font-semibold text-slate-700">終了時刻</span>
+            <select id="ta-end" class="mt-1 w-full border rounded-md px-3 py-2 text-base">
+              ${opts.map(t => `<option value="${t}" ${t === curEnd ? "selected" : ""}>${t}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        <div id="ta-error" class="text-xs text-red-600 hidden"></div>
+        <div class="flex gap-2 pt-2">
+          ${ct ? '<button id="ta-reset" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm py-2 rounded-md">フル時間に戻す</button>' : ""}
+          <button id="ta-save" class="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm py-2 rounded-md font-semibold">適用</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
+    overlay.querySelector("#ta-close").onclick = close;
+    if (ct) overlay.querySelector("#ta-reset").onclick = () => {
+      delete customTimes[key];
+      dirty = true; saveDraft(); close(); renderDraft();
+      toast("時間範囲を解除しました", "info");
+    };
+    overlay.querySelector("#ta-save").onclick = () => {
+      const s = overlay.querySelector("#ta-start").value;
+      const e = overlay.querySelector("#ta-end").value;
+      const err = overlay.querySelector("#ta-error");
+      if (timeToMin(s) >= timeToMin(e)) {
+        err.textContent = "終了時刻は開始時刻より後にしてください";
+        err.classList.remove("hidden");
+        return;
+      }
+      // 全範囲と一致なら customTimes 削除
+      if (s === sessStart && e === sessEnd) {
+        delete customTimes[key];
+      } else {
+        customTimes[key] = { startTime: s, endTime: e };
+      }
+      // 同時に「希望」優先度がない場合は自動的に "want" に設定
+      if (!prefs[key]) prefs[key] = "want";
+      dirty = true; saveDraft(); close(); renderDraft();
+      toast(`時間を ${s}〜${e} に設定しました`, "success");
     };
   }
 

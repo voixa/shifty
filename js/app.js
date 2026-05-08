@@ -1015,6 +1015,32 @@ function viewPreferences() {
     ]),
   ]));
 
+  // スタッフからのコメント表示 (Round 1 改善)
+  const week = curWeek();
+  const staffComments = (week && week.staffComments) || {};
+  const allComments = [];
+  for (const [staffId, dateMap] of Object.entries(staffComments)) {
+    const staff = state.staff.find(s => s.id === staffId);
+    if (!staff || !dateMap) continue;
+    for (const [date, text] of Object.entries(dateMap)) {
+      if (!text) continue;
+      allComments.push({ staffName: staff.name, date, text });
+    }
+  }
+  if (allComments.length > 0) {
+    allComments.sort((a, b) => a.date.localeCompare(b.date));
+    const cmtCard = el("div", { class: "bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm" });
+    cmtCard.appendChild(el("div", { class: "font-semibold text-blue-900 mb-2" }, `💬 スタッフからのメモ (${allComments.length}件)`));
+    const list = el("div", { class: "space-y-1.5 text-xs text-blue-900" });
+    for (const c of allComments) {
+      const row = el("div", { class: "bg-white/60 border border-blue-100 rounded p-2" });
+      row.innerHTML = `<span class="font-semibold">${escapeHtml(c.staffName)}</span> <span class="text-blue-700">${escapeHtml(c.date.slice(5))}</span>: ${escapeHtml(c.text)}`;
+      list.appendChild(row);
+    }
+    cmtCard.appendChild(list);
+    wrap.appendChild(cmtCard);
+  }
+
   const w0 = state.meta.currentWeekStart;
   const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
 
