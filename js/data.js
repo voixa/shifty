@@ -63,7 +63,58 @@
     return fmtDate(d);
   }
   // 注: 明示的に T00:00:00 を付与してローカル時刻として解釈 (TZ ずれ防止)
+  // 注: 明示的に T00:00:00 を付与してローカル時刻として解釈 (TZ ずれ防止)
   function dayOfWeek(dateStr) { return new Date(dateStr + "T00:00:00").getDay(); }
+
+  // 日本の祝日 (2026 年・主要のみ。CSV や API 連携は将来課題)
+  // ref: 内閣府 https://www8.cao.go.jp/chosei/shukujitsu/gaiyou.html
+  const JP_HOLIDAYS = {
+    "2026-01-01": "元日",
+    "2026-01-12": "成人の日",
+    "2026-02-11": "建国記念の日",
+    "2026-02-23": "天皇誕生日",
+    "2026-03-20": "春分の日",
+    "2026-04-29": "昭和の日",
+    "2026-05-03": "憲法記念日",
+    "2026-05-04": "みどりの日",
+    "2026-05-05": "こどもの日",
+    "2026-05-06": "振替休日",
+    "2026-07-20": "海の日",
+    "2026-08-11": "山の日",
+    "2026-09-21": "敬老の日",
+    "2026-09-22": "国民の休日",
+    "2026-09-23": "秋分の日",
+    "2026-10-12": "スポーツの日",
+    "2026-11-03": "文化の日",
+    "2026-11-23": "勤労感謝の日",
+    "2027-01-01": "元日",
+    "2027-01-11": "成人の日",
+    "2027-02-11": "建国記念の日",
+    "2027-02-23": "天皇誕生日",
+    "2027-03-21": "春分の日",
+    "2027-03-22": "振替休日",
+    "2027-04-29": "昭和の日",
+    "2027-05-03": "憲法記念日",
+    "2027-05-04": "みどりの日",
+    "2027-05-05": "こどもの日",
+    "2027-07-19": "海の日",
+    "2027-08-11": "山の日",
+    "2027-09-20": "敬老の日",
+    "2027-09-23": "秋分の日",
+    "2027-10-11": "スポーツの日",
+    "2027-11-03": "文化の日",
+    "2027-11-23": "勤労感謝の日",
+  };
+
+  function getHoliday(dateStr) { return JP_HOLIDAYS[dateStr] || null; }
+  function isHoliday(dateStr) { return Boolean(JP_HOLIDAYS[dateStr]); }
+  // 祝日扱いの曜日を返す (祝日 → 0 = 日曜と同じ、それ以外は素の getDay())
+  function effectiveDayOfWeek(dateStr, meta) {
+    const handling = (meta && meta.holidayHandling) || "as_sunday";
+    if (handling === "ignore") return dayOfWeek(dateStr);
+    if (isHoliday(dateStr)) return 0;
+    return dayOfWeek(dateStr);
+  }
   function timeToMin(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
   function calcHours(start, end) { return (timeToMin(end) - timeToMin(start)) / 60; }
   function timeOverlap(a, b) {
@@ -81,7 +132,8 @@
     const plan = meta.staffingPlan || {};
     for (let i = 0; i < 7; i++) {
       const date = addDays(weekStart, i);
-      const dow = dayOfWeek(date);
+      // 祝日対応: 設定により祝日を日曜扱い
+      const dow = effectiveDayOfWeek(date, meta);
       for (const sess of meta.sessions || []) {
         const dayPlan = plan[sess.id]?.[dow] || {};
         for (const pos of meta.positions || []) {
@@ -240,6 +292,8 @@
     };
     if (!state.meta.randomStarts) state.meta.randomStarts = 5;
     if (state.meta.onboardingCompleted === undefined) state.meta.onboardingCompleted = false;
+    // 祝日扱い: as_sunday (デフォルト) | ignore (無視) | manual
+    if (!state.meta.holidayHandling) state.meta.holidayHandling = "as_sunday";
     // v4 → v5: changeLog を各週に追加
     for (const wk of Object.values(state.weeks || {})) {
       if (!Array.isArray(wk.changeLog)) wk.changeLog = [];
@@ -377,5 +431,6 @@
     timeToMin, calcHours, timeOverlap, timeContains,
     buildSlots, newWeek, ensureWeek, listWeeks,
     loadState, saveState, resetState, seedState, seedSampleData, migrate,
+    JP_HOLIDAYS, getHoliday, isHoliday, effectiveDayOfWeek,
   };
 })();

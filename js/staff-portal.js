@@ -6,6 +6,19 @@
 
   const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 
+  // 祝日マッピング (data.js の JP_HOLIDAYS と整合)
+  const HOLIDAY_NAMES = {
+    "2026-01-01":"元日","2026-01-12":"成人の日","2026-02-11":"建国記念の日","2026-02-23":"天皇誕生日",
+    "2026-03-20":"春分の日","2026-04-29":"昭和の日","2026-05-03":"憲法記念日","2026-05-04":"みどりの日",
+    "2026-05-05":"こどもの日","2026-05-06":"振替休日","2026-07-20":"海の日","2026-08-11":"山の日",
+    "2026-09-21":"敬老の日","2026-09-22":"国民の休日","2026-09-23":"秋分の日","2026-10-12":"スポーツの日",
+    "2026-11-03":"文化の日","2026-11-23":"勤労感謝の日","2027-01-01":"元日","2027-01-11":"成人の日",
+    "2027-02-11":"建国記念の日","2027-02-23":"天皇誕生日","2027-03-21":"春分の日","2027-03-22":"振替休日",
+    "2027-04-29":"昭和の日","2027-05-03":"憲法記念日","2027-05-04":"みどりの日","2027-05-05":"こどもの日",
+    "2027-07-19":"海の日","2027-08-11":"山の日","2027-09-20":"敬老の日","2027-09-23":"秋分の日",
+    "2027-10-11":"スポーツの日","2027-11-03":"文化の日","2027-11-23":"勤労感謝の日",
+  };
+
   let data = null;
   let prefs = {};       // {`${date}|${sessId}`: priority}
   let customTimes = {}; // {`${date}|${sessId}`: {startTime, endTime}}  時間範囲指定がある場合
@@ -164,9 +177,13 @@
       const allDayBtn = sessions.length > 1
         ? `<button class="all-day-btn text-[10px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded px-2 py-1 font-semibold ml-auto" data-date="${date}" aria-label="この日を通し勤務希望">⏩ 1日通し希望</button>`
         : "";
+      // 祝日チェック (data.js の JP_HOLIDAYS 簡易版を staff-portal でも持つ)
+      const holiday = HOLIDAY_NAMES[date];
+      const holidayBadge = holiday ? `<span class="text-[9px] text-red-600 bg-red-50 border border-red-200 rounded px-1 py-0.5 ml-1">🎌 ${escapeHtml(holiday)}</span>` : "";
       dayCard.innerHTML = `
-        <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
-          <span class="${dowColor} font-semibold text-sm">${fmtDate(date)} (${dayLabel})</span>
+        <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-2 flex-wrap">
+          <span class="${holiday ? 'text-red-600' : dowColor} font-semibold text-sm">${fmtDate(date)} (${dayLabel})</span>
+          ${holidayBadge}
           ${allDayBtn}
         </div>
         <div class="p-3 space-y-3"></div>`;

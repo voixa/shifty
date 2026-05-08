@@ -1321,9 +1321,14 @@ function renderCalendar() {
   grid.appendChild(el("div", { class: "cal-cell head" }, ""));
   for (const d of days) {
     const dow = dayOfWeek(d);
-    grid.appendChild(el("div", { class: "cal-cell head" }, [
-      el("div", { class: dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "" }, `${d.slice(5)} (${DAY_LABELS[dow]})`),
-    ]));
+    const holidayName = window.ShiftyData.getHoliday(d);
+    const dowColor = holidayName ? "text-red-600 font-semibold" : (dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "");
+    const headEl = el("div", { class: "cal-cell head" });
+    headEl.appendChild(el("div", { class: dowColor }, `${d.slice(5)} (${DAY_LABELS[dow]})`));
+    if (holidayName) {
+      headEl.appendChild(el("div", { class: "text-[9px] text-red-600 font-normal mt-0.5", title: `祝日: ${holidayName}` }, `🎌 ${holidayName}`));
+    }
+    grid.appendChild(headEl);
   }
 
   for (const sess of state.meta.sessions) {
@@ -1367,19 +1372,94 @@ function renderCalendar() {
             `不足: ${posCfg(slot.position).label} ×${missing}`));
         }
       });
+      // 必要人数オーバーライドボタン (Round 2 改善)
+      if (curStatus() === "draft") {
+        const adjustBtn = el("button", {
+          class: "text-[10px] text-slate-400 hover:text-slate-700 mt-1 underline decoration-dotted",
+          title: "この日のセッションの必要人数を編集",
+          onclick: () => openSlotAdjustDialog(d, sess),
+        }, "⚙️ 必要人数を調整");
+        cell.appendChild(adjustBtn);
+      }
       grid.appendChild(cell);
     }
   }
   return grid;
 }
 
+// 必要人数を日付・セッション別にオーバーライドするダイアログ (Round 2)
+function openSlotAdjustDialog(date, sess) {
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, `${date.slice(5)} ${sess.label} の必要人数`));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    "曜日設定の人数を上書きします。GW・年末年始・特別イベント等に。"));
+
+  const wrap = el("div", { class: "space-y-2" });
+  const inputs = {};
+  for (const pos of state.meta.positions) {
+    const cur = curSlots().find(s => s.date === date && s.position === pos.id && s.startTime === sess.startTime);
+    const val = cur ? cur.requiredCount : 0;
+    const row = el("div", { class: "flex items-center justify-between gap-3" });
+    row.appendChild(el("div", { class: "flex items-center gap-2" }, [
+      el("span", { style: { width: "12px", height: "12px", borderRadius: "3px", background: pos.color, display: "inline-block" } }),
+      el("span", { class: "font-medium text-sm" }, pos.label),
+    ]));
+    const input = el("input", {
+      type: "number", min: "0", max: "20", value: String(val),
+      class: "w-20 border rounded-md px-2 py-1 text-right text-sm",
+    });
+    inputs[pos.id] = input;
+    row.appendChild(input);
+    wrap.appendChild(row);
+  }
+  body.appendChild(wrap);
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-3 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-brand-600 text-white rounded-md font-semibold",
+      onclick: () => {
+        // 既存 slots を更新 / 新規追加 / 0 なら削除
+        const week = curWeek();
+        const newSlots = (week.slots || []).filter(s => !(s.date === date && s.startTime === sess.startTime));
+        for (const pos of state.meta.positions) {
+          const n = Number(inputs[pos.id].value) || 0;
+          if (n > 0) {
+            const existing = (week.slots || []).find(s =>
+              s.date === date && s.position === pos.id && s.startTime === sess.startTime);
+            newSlots.push({
+              id: existing ? existing.id : uid("sl_"),
+              date, position: pos.id,
+              startTime: sess.startTime, endTime: sess.endTime,
+              requiredCount: n,
+            });
+          }
+        }
+        // 「日付別オーバーライド」フラグを meta に記録 (UI 視覚化のため)
+        const meta = state.meta;
+        meta.dateOverrides = meta.dateOverrides || {};
+        meta.dateOverrides[`${date}|${sess.id}`] = true;
+        week.slots = newSlots;
+        persist(); closeModal(); render();
+        toast(`${date.slice(5)} ${sess.label} の必要人数を更新しました`, "success");
+      },
+    }, "保存"),
+  ]));
+  modal(body);
+}
+
 function renderCalendarMobile(days) {
   const wrap = el("div", { class: "space-y-2" });
   for (const d of days) {
     const dow = dayOfWeek(d);
+    const holidayName = window.ShiftyData.getHoliday(d);
     const dayCard = el("div", { class: "bg-white border border-slate-200 rounded-lg p-3" });
-    const dowColor = dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "text-slate-700";
-    dayCard.appendChild(el("div", { class: `font-bold text-sm mb-2 ${dowColor}` }, `${d.slice(5)} (${DAY_LABELS[dow]})`));
+    const dowColor = holidayName ? "text-red-600" : (dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "text-slate-700");
+    const header = el("div", { class: "flex items-center justify-between mb-2" });
+    header.appendChild(el("div", { class: `font-bold text-sm ${dowColor}` }, `${d.slice(5)} (${DAY_LABELS[dow]})`));
+    if (holidayName) {
+      header.appendChild(el("span", { class: "text-[10px] text-red-600 bg-red-50 border border-red-200 rounded px-1.5 py-0.5" }, `🎌 ${holidayName}`));
+    }
+    dayCard.appendChild(header);
 
     let totalCount = 0;
     for (const sess of state.meta.sessions) {
@@ -1569,7 +1649,95 @@ function showSubstitutes(targetA) {
       body.appendChild(row);
     });
   }
+  // Round 2: 代打一斉打診テンプレ生成
+  body.appendChild(el("div", { class: "mt-3 pt-3 border-t" }, [
+    el("div", { class: "text-xs text-slate-600 mb-2" }, "もしくは候補スタッフ全員に一斉打診"),
+    el("button", {
+      class: "w-full text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-md px-3 py-2 font-semibold",
+      onclick: () => openBroadcastSubDialog(a, subs),
+    }, "📣 候補全員に LINE / メール文を生成"),
+  ]));
   body.appendChild(el("button", { class: "mt-2 w-full text-sm bg-slate-200 rounded-md py-1.5", onclick: closeModal }, "閉じる"));
+  modal(body);
+}
+
+// 代打一斉打診テンプレ生成 (Round 2)
+function openBroadcastSubDialog(a, subs) {
+  const absent = state.staff.find(s => s.id === a.staffId);
+  const restaurant = state.meta.restaurantName || "店舗";
+  const dt = `${a.date.slice(5)} ${a.startTime}〜${a.endTime}`;
+  const positionLabel = posCfg(a.position).label;
+  const candidates = (subs || []).slice(0, 8); // 上位 8 名
+
+  const lineTxt =
+    `📣 急募・代打のお願い\n` +
+    `${restaurant}より\n\n` +
+    `下記のシフトに急遽 1 名足りなくなりました。出勤可能な方は 30 分以内にこのスレッドにご返信ください。\n\n` +
+    `📅 日時: ${a.date} (${a.startTime.slice(0,5)}〜${a.endTime.slice(0,5)})\n` +
+    `🪑 ポジション: ${positionLabel}\n` +
+    `❌ 元の担当: ${absent ? absent.name : '?'}\n\n` +
+    `【お声がけ候補】※ AI が自動推薦した順位\n` +
+    candidates.map((c, i) => `${i+1}. ${c.staff.name}さん`).join("\n") + "\n\n" +
+    `※ 上記以外の方も大歓迎です。お返事は早い者勝ちです。\n` +
+    `※ 入れない場合はその旨もお返事ください（出席集計のため）。`;
+
+  const emailTxt =
+    `件名: 【至急】${a.date} ${dt} 代打のお願い\n\n` +
+    `お疲れ様です、${restaurant}です。\n\n` +
+    `${a.date} (${a.startTime.slice(0,5)}〜${a.endTime.slice(0,5)}) の ${positionLabel} に急遽 1 名足りなくなりました。\n` +
+    `（元の担当: ${absent ? absent.name : '?'} さん）\n\n` +
+    `30 分以内にご返信いただける方を募集しています。\n` +
+    `早い者勝ちで決めさせていただきますので、もし出れる方はこのメールにご返信ください。\n\n` +
+    `【AI 推薦の優先候補】\n` +
+    candidates.map((c, i) => `${i+1}. ${c.staff.name}さん`).join("\n") + "\n\n" +
+    `上記以外の方も歓迎です。出れない場合もその旨ご返信いただけると助かります。\n\n` +
+    `${restaurant}\n${state.meta.restaurantName || ''}`;
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "📣 代打一斉打診テンプレ"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    "下記のテンプレをコピーして、LINE グループまたはメール一斉送信でお使いください。"));
+
+  // タブ風切替
+  const tabs = el("div", { class: "flex gap-1 border-b" });
+  const lineTab = el("button", { class: "px-3 py-1.5 text-sm font-semibold border-b-2 border-brand-600 text-brand-600" }, "💬 LINE 用");
+  const mailTab = el("button", { class: "px-3 py-1.5 text-sm border-b-2 border-transparent text-slate-500" }, "✉️ メール用");
+  tabs.appendChild(lineTab); tabs.appendChild(mailTab);
+  body.appendChild(tabs);
+
+  const ta = el("textarea", { class: "w-full border rounded-md p-2 text-xs font-mono h-72", readonly: "" }, lineTxt);
+  body.appendChild(ta);
+
+  lineTab.onclick = () => {
+    ta.value = lineTxt;
+    lineTab.classList.add("border-brand-600", "text-brand-600");
+    lineTab.classList.remove("border-transparent", "text-slate-500");
+    mailTab.classList.add("border-transparent", "text-slate-500");
+    mailTab.classList.remove("border-brand-600", "text-brand-600");
+  };
+  mailTab.onclick = () => {
+    ta.value = emailTxt;
+    mailTab.classList.add("border-brand-600", "text-brand-600");
+    mailTab.classList.remove("border-transparent", "text-slate-500");
+    lineTab.classList.add("border-transparent", "text-slate-500");
+    lineTab.classList.remove("border-brand-600", "text-brand-600");
+  };
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-md font-semibold",
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(ta.value);
+          toast("テンプレをクリップボードにコピーしました", "success");
+        } catch (e) {
+          ta.select();
+          toast("コピー失敗。手動で選択してコピーしてください", "error");
+        }
+      },
+    }, "📋 コピー"),
+  ]));
   modal(body);
 }
 
