@@ -545,12 +545,15 @@
           </div>
         </details>
       </div>` : ""}
-      <div class="mt-6 text-center">
+      <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
         <button id="msgBtn" class="bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-3 text-sm font-semibold">
           💬 店長に連絡する
         </button>
-        <div class="text-xs text-slate-400 mt-2">変更希望・質問・報告などお気軽に</div>
-      </div>`;
+        <button id="icalBtn" class="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-5 py-3 text-sm font-semibold">
+          📅 カレンダーに追加 (.ics)
+        </button>
+      </div>
+      <div class="text-xs text-slate-400 mt-2 text-center">変更希望・質問・報告などお気軽に</div>`;
 
     const grid = $("#grid");
     for (const date of days) {
@@ -607,6 +610,83 @@
     // メッセージ送信ボタン
     const msgBtn = document.getElementById("msgBtn");
     if (msgBtn) msgBtn.onclick = openMessageDialog;
+
+    // iCal ダウンロードボタン (Round 6)
+    const icalBtn = document.getElementById("icalBtn");
+    if (icalBtn) icalBtn.onclick = () => downloadIcs();
+  }
+
+  // .ics ファイル生成 (RFC 5545 準拠の最小限) — Round 6
+  function downloadIcs() {
+    const myAss = (data.assignments || []).slice().sort((a, b) =>
+      a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+    if (!myAss.length) { toast("シフトがありません", "error"); return; }
+
+    function pad(n) { return String(n).padStart(2, "0"); }
+    function dtJst(date, time) {
+      // date "YYYY-MM-DD", time "HH:MM" → JST 表記
+      // iCal の DTSTART;TZID=Asia/Tokyo:YYYYMMDDTHHmmSS
+      return `${date.replace(/-/g, "")}T${time.replace(":", "")}00`;
+    }
+    function nowUtc() {
+      const d = new Date();
+      return `${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+    }
+    const restaurant = data.restaurantName || "Shifty";
+    const staffName = data.staff?.name || "";
+    const lines = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Shifty//JP//JA",
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      `X-WR-CALNAME:${restaurant} - ${staffName}`,
+      "X-WR-TIMEZONE:Asia/Tokyo",
+      "BEGIN:VTIMEZONE",
+      "TZID:Asia/Tokyo",
+      "BEGIN:STANDARD",
+      "DTSTART:19700101T000000",
+      "TZOFFSETFROM:+0900",
+      "TZOFFSETTO:+0900",
+      "TZNAME:JST",
+      "END:STANDARD",
+      "END:VTIMEZONE",
+    ];
+    for (const a of myAss) {
+      const pos = (data.positions || []).find(p => p.id === a.position) || { label: a.position };
+      const uid = `${a.id || `${a.date}-${a.startTime}-${a.staffId}`}@shifty.in-dx.jp`;
+      lines.push(
+        "BEGIN:VEVENT",
+        `UID:${uid}`,
+        `DTSTAMP:${nowUtc()}`,
+        `DTSTART;TZID=Asia/Tokyo:${dtJst(a.date, a.startTime)}`,
+        `DTEND;TZID=Asia/Tokyo:${dtJst(a.date, a.endTime)}`,
+        `SUMMARY:${escapeIcs(restaurant + " " + (pos.label || ""))}`,
+        `LOCATION:${escapeIcs(restaurant)}`,
+        `DESCRIPTION:${escapeIcs(`${staffName} さんのシフト\\n${restaurant}\\n\\n勤務時間: ${a.startTime}〜${a.endTime}\\nポジション: ${pos.label}`)}`,
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        "DESCRIPTION:出勤の 1 時間前です",
+        "TRIGGER:-PT1H",
+        "END:VALARM",
+        "END:VEVENT",
+      );
+    }
+    lines.push("END:VCALENDAR");
+    const ics = lines.join("\r\n");
+
+    function escapeIcs(s) {
+      return String(s || "").replace(/\\/g, "\\\\").replace(/,/g, "\\,").replace(/;/g, "\\;").replace(/\n/g, "\\n");
+    }
+
+    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${restaurant}_${data.weekStart || "shift"}.ics`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast(`${myAss.length} 件のシフトを .ics でダウンロード。カレンダーアプリで開いてください`, "success", 5000);
   }
 
   // ===== 店長への連絡ダイアログ =====

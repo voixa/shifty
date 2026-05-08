@@ -799,12 +799,64 @@ function viewStaff() {
     el("div", { class: "flex gap-2 flex-wrap" }, [
       el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50",
         onclick: () => importCsvDialog() }, "📥 CSV取込"),
-      el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50",
-        onclick: copyAllStaffLinks }, "🔗 全員のリンク"),
+      state.staff.length > 0 ? el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50",
+        onclick: copyAllStaffLinks }, "🔗 全員のリンク") : null,
       el("button", { class: "text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md px-3 py-1.5",
-        onclick: () => openStaffEdit() }, "＋ 追加"),
+        onclick: () => openStaffEdit() }, "＋ スタッフ追加"),
     ]),
   ]));
+
+  // 空状態の wizard 風 onboarding (Round 6)
+  if (state.staff.length === 0 && !window.__SHIFTY_DEMO_MODE__) {
+    const guide = el("div", { class: "bg-gradient-to-br from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl p-5 text-center space-y-3" });
+    guide.appendChild(el("div", { class: "text-3xl" }, "👥"));
+    guide.appendChild(el("h3", { class: "font-bold text-base" }, "まだスタッフが登録されていません"));
+    guide.appendChild(el("p", { class: "text-sm text-slate-600" },
+      "次の 3 つの方法から選んで、スタッフ情報を登録してください。"));
+    const choices = el("div", { class: "grid grid-cols-1 md:grid-cols-3 gap-3 mt-3" });
+
+    // 1. サンプルで試す
+    const c1 = el("button", {
+      class: "bg-amber-50 border-2 border-amber-300 hover:bg-amber-100 rounded-lg p-4 text-left",
+      onclick: async () => {
+        if (!confirm("サンプルデータ（10 名スタッフ + 希望サンプル）を投入しますか？\n\n後でいつでも削除・変更できます。")) return;
+        state = await resetState({ withSample: true });
+        render();
+        toast("サンプルデータ投入完了", "success");
+      },
+    });
+    c1.innerHTML = `<div class="text-2xl mb-2">🎯</div>
+      <div class="font-semibold text-amber-900">サンプルで試す</div>
+      <div class="text-xs text-amber-700 mt-1">10 名のサンプルスタッフを即投入。動作を体験。</div>
+      <div class="text-[10px] text-amber-600 mt-1.5">⏱ 0 分</div>`;
+
+    // 2. 1人ずつ追加
+    const c2 = el("button", {
+      class: "bg-brand-50 border-2 border-brand-300 hover:bg-brand-100 rounded-lg p-4 text-left",
+      onclick: () => openStaffEdit(),
+    });
+    c2.innerHTML = `<div class="text-2xl mb-2">＋</div>
+      <div class="font-semibold text-brand-900">1人ずつ追加</div>
+      <div class="text-xs text-brand-700 mt-1">フォームに名前・時給・希望休を入力。</div>
+      <div class="text-[10px] text-brand-600 mt-1.5">⏱ 約 2 分/人</div>`;
+
+    // 3. CSV 取込
+    const c3 = el("button", {
+      class: "bg-emerald-50 border-2 border-emerald-300 hover:bg-emerald-100 rounded-lg p-4 text-left",
+      onclick: () => importCsvDialog(),
+    });
+    c3.innerHTML = `<div class="text-2xl mb-2">📥</div>
+      <div class="font-semibold text-emerald-900">CSV で一括取込</div>
+      <div class="text-xs text-emerald-700 mt-1">Excel / Google スプレッドシートからまとめて。</div>
+      <div class="text-[10px] text-emerald-600 mt-1.5">⏱ 約 5 分（既存データ流用）</div>`;
+
+    choices.appendChild(c1);
+    choices.appendChild(c2);
+    choices.appendChild(c3);
+    guide.appendChild(choices);
+    wrap.appendChild(guide);
+    return wrap;
+  }
 
   const table = el("div", { class: "bg-white rounded-xl border border-slate-200 overflow-x-auto" });
   table.innerHTML = `
@@ -2786,7 +2838,31 @@ function viewSettings() {
   algoHeader.appendChild(el("a", { class: "text-xs text-brand-600 underline", href: "/docs/algorithm.md", target: "_blank" }, "📖 仕様書"));
   algoCard.appendChild(algoHeader);
   algoCard.appendChild(el("div", { class: "text-xs text-slate-500" },
-    "各スコア要素の重みを 0〜100 で設定。合計は自動正規化。標準は希望充足を最重視。"));
+    "プリセットを選ぶか、各スコア要素の重みを直接調整できます。"));
+
+  // Round 6: プリセット選択
+  const PRESETS = {
+    "balanced": { label: "⚖️ バランス", desc: "標準的な配分", weights: { preference: 0.40, positionMatch: 0.15, fairness: 0.20, cost: 0.15, skill: 0.10 } },
+    "preference": { label: "❤️ 希望最優先", desc: "スタッフ希望を最大限尊重", weights: { preference: 0.60, positionMatch: 0.10, fairness: 0.15, cost: 0.05, skill: 0.10 } },
+    "cost": { label: "💴 コスト重視", desc: "人件費を最小化（時給低い人優先）", weights: { preference: 0.25, positionMatch: 0.15, fairness: 0.15, cost: 0.35, skill: 0.10 } },
+    "skill": { label: "⭐ スキル重視", desc: "ピーク時に熟練者を配置", weights: { preference: 0.30, positionMatch: 0.20, fairness: 0.15, cost: 0.10, skill: 0.25 } },
+    "fairness": { label: "🤝 公平性重視", desc: "全員に均等にシフトを配分", weights: { preference: 0.30, positionMatch: 0.10, fairness: 0.40, cost: 0.10, skill: 0.10 } },
+  };
+  const presetGrid = el("div", { class: "grid grid-cols-2 md:grid-cols-5 gap-2 mb-3" });
+  for (const [k, p] of Object.entries(PRESETS)) {
+    const isMatch = JSON.stringify(state.meta.algorithmWeights) === JSON.stringify(p.weights);
+    const btn = el("button", {
+      class: `text-xs p-2 rounded-md border-2 transition active:scale-95 ${isMatch ? "bg-brand-600 text-white border-brand-600" : "bg-white text-slate-700 border-slate-200 hover:border-brand-400"}`,
+      onclick: () => {
+        state.meta.algorithmWeights = { ...p.weights };
+        persist(); render(); toast(`プリセット「${p.label}」を適用`, "success");
+      },
+    });
+    btn.innerHTML = `<div class="font-semibold">${p.label}</div><div class="text-[10px] opacity-80 mt-0.5">${p.desc}</div>`;
+    presetGrid.appendChild(btn);
+  }
+  algoCard.appendChild(presetGrid);
+  algoCard.appendChild(el("div", { class: "text-[10px] text-slate-500 mb-2" }, "▼ または個別調整"));
 
   const aw = state.meta.algorithmWeights;
   const FACTORS = [
