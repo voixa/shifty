@@ -108,14 +108,19 @@
     backup: () => jsonReq("/api/admin/backup"),
     restore: (data) => jsonReq("/api/admin/restore", { method: "POST", body: JSON.stringify(data) }),
 
-    // Tokens
-    genStaffToken: (staffId) =>
-      jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "POST" }),
-    regenerateStaffToken: (staffId) =>
-      jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token?force=1`, { method: "POST" }),
-    listStaffTokens: () => jsonReq("/api/admin/staff/tokens"),
-    revokeStaffToken: (staffId) =>
-      jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "DELETE" }),
+    // Tokens (tenant-aware)
+    genStaffToken: (staffId) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "POST" })
+      : jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "POST" }),
+    regenerateStaffToken: (staffId) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/admin/staff/${encodeURIComponent(staffId)}/token?force=1`, { method: "POST" })
+      : jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token?force=1`, { method: "POST" }),
+    listStaffTokens: () => tenantSlug
+      ? jsonReq(`${tenantPrefix}/admin/staff/tokens`)
+      : jsonReq("/api/admin/staff/tokens"),
+    revokeStaffToken: (staffId) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "DELETE" })
+      : jsonReq(`/api/admin/staff/${encodeURIComponent(staffId)}/token`, { method: "DELETE" }),
 
     // Notification (admin)
     notifyShifts: (weekStart) =>
@@ -128,24 +133,30 @@
     // Staff messages (admin)
     listStaffMessages: () => jsonReq("/api/admin/staff_messages"),
 
-    // Portal message (public)
-    portalSendMessage: (token, kind, message) =>
-      jsonReq(`/api/portal/${encodeURIComponent(token)}/message`, {
-        method: "POST",
-        body: JSON.stringify({ kind, message }),
-      }),
+    // Portal message (public, tenant-aware)
+    portalSendMessage: (token, kind, message) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/message`, {
+          method: "POST", body: JSON.stringify({ kind, message }),
+        })
+      : jsonReq(`/api/portal/${encodeURIComponent(token)}/message`, {
+          method: "POST", body: JSON.stringify({ kind, message }),
+        }),
 
     // Stripe (public)
     checkoutSession: (data) =>
       jsonReq("/api/checkout/session", { method: "POST", body: JSON.stringify(data) }),
 
-    // Portal (public)
-    portalGet: (token) => jsonReq(`/api/portal/${encodeURIComponent(token)}`),
-    portalSavePrefs: (token, prefs) =>
-      jsonReq(`/api/portal/${encodeURIComponent(token)}/preferences`, {
-        method: "POST",
-        body: JSON.stringify(prefs),
-      }),
+    // Portal (public, tenant-aware)
+    portalGet: (token) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}`)
+      : jsonReq(`/api/portal/${encodeURIComponent(token)}`),
+    portalSavePrefs: (token, prefs) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/preferences`, {
+          method: "POST", body: JSON.stringify(prefs),
+        })
+      : jsonReq(`/api/portal/${encodeURIComponent(token)}/preferences`, {
+          method: "POST", body: JSON.stringify(prefs),
+        }),
 
     isDemo,
   };

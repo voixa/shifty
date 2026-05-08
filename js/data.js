@@ -1,7 +1,16 @@
-// data.js v3 — 複数週対応スキーマ
+// data.js v4 — multi-tenant 対応 + 複数週対応スキーマ
 // state.weeks[YYYY-MM-DD] = { slots, preferences, assignments, status, publishedAt }
 (function () {
-  const STORAGE_KEY = "shifty.v3";
+  // tenant slug を含めて localStorage キーを分離 (Round 4 C3 修正: クロステナント汚染防止)
+  // window.ShiftyAPI が読込済みでない場合は URL から推測
+  const _tenantSlug = (() => {
+    try {
+      if (typeof location === "undefined") return "default";
+      const m = location.pathname.match(/^\/t\/([a-z0-9][a-z0-9-]{2,30}[a-z0-9])\//);
+      return m ? m[1] : "default";
+    } catch (_) { return "default"; }
+  })();
+  const STORAGE_KEY = `shifty.v4.${_tenantSlug}`;
   const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 
   const DEFAULT_POSITIONS = [
@@ -139,9 +148,16 @@
       console.warn("API getState failed, falling back", e);
     }
     // デモモードでは localStorage の本番キーから読まない (クロス汚染防止)
+    // tenant モードでも localStorage フォールバックは現 tenant スコープのみ
     if (!window.__SHIFTY_DEMO_MODE__) {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("shifty.v2") || localStorage.getItem("shifty.v1");
+        // 旧キー (`shifty.v3`) からの読み込みは default tenant のみ (legacy 互換)
+        const raw = _tenantSlug === "default"
+          ? (localStorage.getItem(STORAGE_KEY)
+            || localStorage.getItem("shifty.v3")
+            || localStorage.getItem("shifty.v2")
+            || localStorage.getItem("shifty.v1"))
+          : localStorage.getItem(STORAGE_KEY);
         if (raw) {
           const parsed = migrate(JSON.parse(raw));
           try { await window.ShiftyAPI.saveState(parsed); } catch (_) {}

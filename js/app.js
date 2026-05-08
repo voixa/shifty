@@ -780,10 +780,18 @@ function viewStaff() {
   return wrap;
 }
 
+// tenant URL を生成（multi-tenant の場合は /t/{slug}/staff、legacy は /staff）
+function _staffPortalUrl(token) {
+  const slug = window.ShiftyAPI && window.ShiftyAPI.tenantSlug;
+  return slug
+    ? `${location.origin}/t/${encodeURIComponent(slug)}/staff?t=${token}`
+    : `${location.origin}/staff?t=${token}`;
+}
+
 async function copyStaffLink(s) {
   try {
     const r = await window.ShiftyAPI.genStaffToken(s.id);
-    const url = `${location.origin}/staff?t=${r.token}`;
+    const url = _staffPortalUrl(r.token);
     await navigator.clipboard.writeText(url);
     if (r.created) {
       toast(`${s.name} の新しいリンクを発行・コピーしました`, "success");
@@ -801,7 +809,7 @@ async function regenerateStaffLink(s) {
   )) return;
   try {
     const r = await window.ShiftyAPI.regenerateStaffToken(s.id);
-    const url = `${location.origin}/staff?t=${r.token}`;
+    const url = _staffPortalUrl(r.token);
     await navigator.clipboard.writeText(url);
     toast(
       r.regenerated
@@ -817,7 +825,7 @@ async function copyAllStaffLinks() {
     const lines = [];
     for (const s of state.staff) {
       const { token } = await window.ShiftyAPI.genStaffToken(s.id);
-      const url = `${location.origin}/staff?t=${token}`;
+      const url = _staffPortalUrl(token);
       lines.push(`【${s.name}】${url}`);
     }
     const txt = lines.join("\n");
@@ -1256,7 +1264,7 @@ async function openLineNotificationDialog() {
     const t = tokens[s.id];
     if (!t) continue;
     lines.push(`【${s.name}さん】`);
-    lines.push(`${location.origin}/staff?t=${t}`);
+    lines.push(_staffPortalUrl(t));
     lines.push("");
   }
   const txt = lines.join("\n");

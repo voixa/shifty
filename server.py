@@ -433,22 +433,35 @@ class TenantManager:
         return token
 
     def consume_magic_link(self, token):
-        """トークンを検証して slug を返す。1回限り。"""
+        """トークンを検証して slug を返す。Firestore transaction で atomic に 1 回限り消費 (Round 4 C4)。"""
         if not token:
             return None
         now = int(_time.time())
         if self._fs is not None:
+            from google.cloud import firestore as _fs
             doc_ref = self._magic_col.document(token)
-            snap = doc_ref.get()
-            if not snap.exists:
-                return None
-            data = snap.to_dict() or {}
-            if data.get("used") or data.get("expiresAt", 0) < now:
-                return None
-            doc_ref.update({"used": True, "usedAt": __import__("datetime").datetime.utcnow().isoformat() + "Z"})
-            return data.get("slug")
+            client = self._fs
+
+            # Firestore Transaction で TOCTOU 防止
+            @_fs.transactional
+            def _consume(tx):
+                snap = doc_ref.get(transaction=tx)
+                if not snap.exists:
+                    return None
+                data = snap.to_dict() or {}
+                if data.get("used") or data.get("expiresAt", 0) < now:
+                    return None
+                tx.update(doc_ref, {
+                    "used": True,
+                    "usedAt": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+                })
+                return data.get("slug")
+
+            return _consume(client.transaction())
+        # SQLite: BEGIN IMMEDIATE で行ロック
         with sqlite3.connect(DB_PATH) as c:
             c.row_factory = sqlite3.Row
+            c.execute("BEGIN IMMEDIATE")
             row = c.execute("SELECT * FROM magic_links WHERE token=? AND used=0 AND expires_at > ?", (token, now)).fetchone()
             if not row:
                 return None
@@ -702,12 +715,43 @@ def _record_success(ip):
 # Auth
 # ============================================================
 def require_auth(f):
+    """legacy single-tenant 管理 API 用認証。
+    重要: tenant_slug を持つセッション（multi-tenant ユーザ）は拒否する。
+    Round 4 監査 C1: クロステナント特権昇格防止。"""
     @wraps(f)
     def wrapper(*args, **kwargs):
         if not session.get("authenticated"):
             return jsonify({"error": "unauthenticated"}), 401
+        # tenant 経由でログインしたユーザは legacy admin API にアクセス不可
+        if session.get("tenant_slug"):
+            return jsonify({"error": "forbidden_legacy_admin"}), 403
         return f(*args, **kwargs)
     return wrapper
+
+
+def require_tenant_admin(slug_param="slug"):
+    """tenant 用認証デコレータ。指定 tenant のセッションでなければ 401/403。
+    URL パスから slug を受け取り、session の tenant_slug と照合。"""
+    def deco(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            slug = kwargs.get(slug_param)
+            if not _valid_slug(slug or ""):
+                return jsonify({"error": "invalid_slug"}), 400
+            if not session.get("authenticated"):
+                return jsonify({"error": "unauthenticated"}), 401
+            if session.get("tenant_slug") != slug:
+                return jsonify({"error": "tenant_mismatch"}), 403
+            # tenant の active 状態確認 (H2 修正)
+            tm = get_tenant_manager()
+            tenant = tm.get(slug)
+            if not tenant:
+                return jsonify({"error": "tenant_not_found"}), 404
+            if tenant.get("status") not in (None, "active"):
+                return jsonify({"error": "tenant_disabled"}), 403
+            return f(*args, **kwargs)
+        return wrapper
+    return deco
 
 
 @app.get("/api/auth/status")
@@ -774,7 +818,7 @@ def auth_logout():
 @app.post("/api/auth/magic-link/request")
 def auth_magic_link_request():
     """email を受け取り、紐づく tenant にマジックリンクを送る。
-    tenant が無い場合も同じレスポンスで返して enumeration 防止。"""
+    tenant が無い場合も同じレスポンスで返して enumeration 防止 (Round 4 C5: 時間差吸収)。"""
     if _rate_check("magic_link", limit_window=(5, 60)):
         return jsonify({"error": "rate_limited"}), 429
     payload = _get_json()
@@ -782,28 +826,46 @@ def auth_magic_link_request():
     if not email or "@" not in email:
         return jsonify({"error": "invalid_email"}), 400
     tm = get_tenant_manager()
-    # email から tenant を検索
+    # email から tenant を検索 (Firestore index で O(1)、SQLite は line scan)
     target_tenant = None
-    for t in tm.list_all(limit=500):
-        if (t.get("email") or "").strip().lower() == email:
-            target_tenant = t
+    if STORAGE_BACKEND == "firestore":
+        from google.cloud import firestore as _fs
+        client = _fs.Client()
+        q = client.collection("tenants").where(filter=_fs.FieldFilter("email", "==", email)).limit(1).stream()
+        for doc in q:
+            target_tenant = doc.to_dict()
             break
+    else:
+        for t in tm.list_all(limit=500):
+            if (t.get("email") or "").strip().lower() == email:
+                target_tenant = t
+                break
+
+    # enumeration 対策: メール送信は非同期にして応答時間を一定化
+    def _async_send():
+        if target_tenant:
+            try:
+                token = tm.issue_magic_link(target_tenant["slug"])
+                site = os.environ.get("SITE_URL", "https://shifty.in-dx.jp")
+                link = f"{site}/auth/verify?token={token}"
+                send_email(
+                    to_addr=_safe_header(email),
+                    subject=_safe_header(f"【Shifty】ログインリンク（30 分有効）"),
+                    body=(
+                        f"{target_tenant.get('contactName', '') or 'お客様'} 様\n\n"
+                        f"Shifty へのログインリンクをお送りします（30 分以内に開いてください）。\n\n"
+                        f"{link}\n\n"
+                        f"このメールに心当たりがない場合は無視していただいて問題ありません。\n"
+                        f"---\n飲DX Shifty\nsupport@in-dx.jp\n"
+                    ),
+                )
+            except Exception as e:
+                print(f"[magic-link] async send failed: {e}")
     if target_tenant:
-        token = tm.issue_magic_link(target_tenant["slug"])
-        site = os.environ.get("SITE_URL", "https://shifty.in-dx.jp")
-        link = f"{site}/auth/verify?token={token}"
-        send_email(
-            to_addr=_safe_header(email),
-            subject=_safe_header(f"【Shifty】ログインリンク（30 分有効）"),
-            body=(
-                f"{target_tenant.get('contactName', '') or 'お客様'} 様\n\n"
-                f"Shifty へのログインリンクをお送りします（30 分以内に開いてください）。\n\n"
-                f"{link}\n\n"
-                f"このメールに心当たりがない場合は無視していただいて問題ありません。\n"
-                f"---\n飲DX Shifty\nsupport@in-dx.jp\n"
-            ),
-        )
-    # enumeration 防止のため tenant 有無に関わらず同じレスポンス
+        import threading
+        threading.Thread(target=_async_send, daemon=True).start()
+    # 一定遅延 (200ms) を入れて enumeration 用タイミング攻撃の解像度を下げる
+    _time.sleep(0.2)
     return jsonify({"ok": True, "message": "メールアドレスにログインリンクをお送りしました（届かない場合は迷惑メールフォルダもご確認ください）"})
 
 
@@ -838,16 +900,6 @@ def login_page():
 # ============================================================
 # Tenant 専用 routes (path-based)
 # ============================================================
-def _require_tenant_session(slug):
-    """セッションが指定 tenant にバインドされてるか確認"""
-    if not session.get("authenticated"):
-        return False
-    sess_slug = session.get("tenant_slug")
-    if sess_slug != slug:
-        return False
-    return True
-
-
 @app.get("/t/<slug>/app")
 def tenant_app(slug):
     if not _valid_slug(slug):
@@ -863,29 +915,32 @@ def tenant_auth_status(slug):
     tenant = tm.get(slug)
     if not tenant:
         return jsonify({"error": "tenant_not_found"}), 404
-    authenticated = _require_tenant_session(slug)
+    authenticated = (
+        session.get("authenticated")
+        and session.get("tenant_slug") == slug
+        and tenant.get("status") in (None, "active")
+    )
     return jsonify({
-        "authenticated": authenticated,
+        "authenticated": bool(authenticated),
         "tenant": {
             "slug": slug,
             "restaurantName": tenant.get("restaurantName", ""),
             "plan": tenant.get("plan", "free"),
+            "status": tenant.get("status", "active"),
         },
     })
 
 
 @app.get("/api/t/<slug>/state")
+@require_tenant_admin()
 def tenant_get_state(slug):
-    if not _require_tenant_session(slug):
-        return jsonify({"error": "unauthenticated"}), 401
     s = get_tenant_storage(slug)
     return jsonify(s.get_state() or {})
 
 
 @app.post("/api/t/<slug>/state")
+@require_tenant_admin()
 def tenant_save_state(slug):
-    if not _require_tenant_session(slug):
-        return jsonify({"error": "unauthenticated"}), 401
     payload = _get_json()
     if not payload:
         return jsonify({"error": "expected_object"}), 400
@@ -914,6 +969,8 @@ def tenant_save_state(slug):
 
 @app.post("/api/t/<slug>/auth/logout")
 def tenant_logout(slug):
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
     session.clear()
     return jsonify({"ok": True})
 
@@ -1235,35 +1292,61 @@ def api_stripe_webhook():
         "raw_event_id": event.get("id"),
         "received_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
     }
-    # 冪等性: 同じ event id がすでに保存済みなら再処理しない (atomic create でレース防止)
+    # 冪等性: event id ごとに provisioning 完了状態を管理 (Round 4 C6 修正)
+    # フロー: 受信 → record 保存 → provisioning 試行 → 成功時のみ status='completed' に更新
+    # provisioning 失敗時は 5xx 返却 → Stripe が retry → 再受信時 status!='completed' なので再試行
     event_id = event.get("id") or ""
     persisted = False
+    already_provisioned = False
     try:
         if STORAGE_BACKEND == "firestore":
             from google.cloud import firestore as _fs
             from google.api_core import exceptions as _gcexc
             _client = _fs.Client()
             doc_ref = _client.collection(COLL_PREFIX + "_subscriptions").document(event_id or "evt_" + secrets.token_urlsafe(8))
-            try:
-                # create() は既存ドキュメントがあると AlreadyExists を投げる (atomic)
-                doc_ref.create(record)
+            existing_snap = doc_ref.get()
+            if existing_snap.exists:
+                # 既存 doc がある場合: provisioning が完了していれば即 return、未完了ならリトライ
+                existing_data = existing_snap.to_dict() or {}
+                if existing_data.get("provisioned"):
+                    return jsonify({"ok": True, "duplicate": True})
+                # 未完了 → 再試行 (record は更新)
+                doc_ref.update({**record, "lastRetryAt": __import__("datetime").datetime.utcnow().isoformat() + "Z"})
                 persisted = True
-            except _gcexc.AlreadyExists:
-                # Stripe の retry / 二重配信 — 通知メールも再送しない
-                return jsonify({"ok": True, "duplicate": True})
+            else:
+                doc_ref.create({**record, "provisioned": False})
+                persisted = True
         else:
             with sqlite3.connect(DB_PATH) as c:
-                c.execute("CREATE TABLE IF NOT EXISTS subs (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE, data TEXT, created_at TEXT DEFAULT (datetime('now')))")
-                # UNIQUE 制約で event_id が同じものは弾かれる
-                try:
-                    c.execute("INSERT INTO subs (event_id, data) VALUES (?, ?)", (event_id, json.dumps(record, ensure_ascii=False)))
+                c.execute("CREATE TABLE IF NOT EXISTS subs (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE, data TEXT, provisioned INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))")
+                row = c.execute("SELECT provisioned FROM subs WHERE event_id=?", (event_id,)).fetchone()
+                if row:
+                    if row[0]:
+                        return jsonify({"ok": True, "duplicate": True})
+                    # 再試行
+                    c.execute("UPDATE subs SET data=? WHERE event_id=?", (json.dumps(record, ensure_ascii=False), event_id))
                     persisted = True
-                except sqlite3.IntegrityError:
-                    return jsonify({"ok": True, "duplicate": True})
+                else:
+                    c.execute("INSERT INTO subs (event_id, data, provisioned) VALUES (?, ?, 0)", (event_id, json.dumps(record, ensure_ascii=False)))
+                    persisted = True
     except Exception as e:
         print(f"[stripe] persist failed: {e}")
-        # 永続失敗時は 500 を返して Stripe の再送に任せる（メール二重発信を防止）
         return jsonify({"error": "persist_failed"}), 500
+
+
+    def _mark_provisioned():
+        """provisioning 成功時に呼ぶ。次回 Stripe retry 時にスキップさせる。"""
+        try:
+            if STORAGE_BACKEND == "firestore":
+                from google.cloud import firestore as _fs
+                _client = _fs.Client()
+                doc_ref = _client.collection(COLL_PREFIX + "_subscriptions").document(event_id)
+                doc_ref.update({"provisioned": True, "provisionedAt": __import__("datetime").datetime.utcnow().isoformat() + "Z"})
+            else:
+                with sqlite3.connect(DB_PATH) as c:
+                    c.execute("UPDATE subs SET provisioned=1 WHERE event_id=?", (event_id,))
+        except Exception as e:
+            print(f"[stripe] mark provisioned failed: {e}")
 
     # checkout.session.completed: tenant 自動プロビジョニング + マジックリンクメール送信
     if persisted and et == "checkout.session.completed":
@@ -1339,22 +1422,55 @@ def api_stripe_webhook():
                 subject=_safe_header(f"【新規 Tenant】{restaurant_name} ({slug})"),
                 body=f"新規 Pro tenant 作成完了\n\nslug: {slug}\nemail: {email}\nrestaurant: {restaurant_name}\ncontact: {contact_name}\nstripe_customer: {customer_id}\nstripe_sub: {sub_id}\n\n管理画面: {site}/t/{slug}/app",
             )
+            # provisioning 成功 → 次回 Stripe retry 時にスキップさせる
+            _mark_provisioned()
         except Exception as e:
             print(f"[tenant-provision] failed: {e}")
-            # 失敗時は管理者に通知
-            send_email(
-                to_addr=_safe_header(NOTIFY_TO),
-                subject=_safe_header("【!!!】Tenant 自動プロビジョニング失敗"),
-                body=f"イベント ID: {event_id}\nrecord: {record}\nerror: {e}\n\n手動対応が必要です。",
-            )
+            # 失敗時は管理者に通知 + 5xx 返却で Stripe retry に任せる (Round 4 C6)
+            try:
+                send_email(
+                    to_addr=_safe_header(NOTIFY_TO),
+                    subject=_safe_header("【!!!】Tenant 自動プロビジョニング失敗 (リトライ予定)"),
+                    body=f"イベント ID: {event_id}\nrecord: {record}\nerror: {e}\n\nStripe が自動リトライします。手動対応が必要な場合は subscriptions コレクションの provisioned フラグを確認。",
+                )
+            except Exception:
+                pass
+            return jsonify({"error": "provisioning_failed", "willRetry": True}), 500
 
     elif persisted and et == "customer.subscription.deleted":
-        # 解約時の通知
+        # 解約時: 該当 tenant を disabled 化 (Round 4 H3)
+        try:
+            tm = get_tenant_manager()
+            email = record.get("email", "")
+            customer_id = record.get("customerId", "")
+            target = None
+            if STORAGE_BACKEND == "firestore" and customer_id:
+                from google.cloud import firestore as _fs
+                client = _fs.Client()
+                q = client.collection("tenants").where(filter=_fs.FieldFilter("stripeCustomerId", "==", customer_id)).limit(1).stream()
+                for doc in q:
+                    target = (doc.id, doc.to_dict())
+                    break
+            if not target and email:
+                for t in tm.list_all(limit=500):
+                    if (t.get("email") or "").strip().lower() == email.strip().lower():
+                        target = (t["slug"], t)
+                        break
+            if target and STORAGE_BACKEND == "firestore":
+                from google.cloud import firestore as _fs
+                _fs.Client().collection("tenants").document(target[0]).update({
+                    "status": "disabled",
+                    "disabledAt": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+                    "plan": "cancelled",
+                })
+        except Exception as e:
+            print(f"[tenant-disable] failed: {e}")
         send_email(
             to_addr=_safe_header(NOTIFY_TO),
             subject=_safe_header(f"【Shifty/Stripe】解約: {record['email']}"),
             body=f"Stripe イベント: {et}\nメール: {record['email']}\n顧客ID: {record['customerId']}\nstatus: {record['status']}\nmetadata: {record['metadata']}\n",
         )
+        _mark_provisioned()
 
     return jsonify({"ok": True})
 
@@ -1566,6 +1682,213 @@ def api_list_tokens():
 def api_revoke_token(staff_id):
     storage.delete_token(staff_id)
     return jsonify({"ok": True})
+
+
+# ============================================================
+# Tenant-scoped staff token endpoints (Round 4 C2)
+# ============================================================
+@app.post("/api/t/<slug>/admin/staff/<staff_id>/token")
+@require_tenant_admin()
+def api_t_gen_token(slug, staff_id):
+    force = request.args.get("force", "").lower() in ("1", "true", "yes")
+    s = get_tenant_storage(slug)
+    state = s.get_state() or {}
+    if not any(st.get("id") == staff_id for st in (state.get("staff") or [])):
+        return jsonify({"error": "staff_not_found"}), 404
+    existing = s.get_token(staff_id)
+    if existing and not force:
+        return jsonify({"token": existing, "created": False, "regenerated": False})
+    if existing and force:
+        s.delete_token(staff_id)
+    token = secrets.token_urlsafe(16)
+    s.add_token(staff_id, token)
+    return jsonify({"token": token, "created": True, "regenerated": bool(existing)})
+
+
+@app.get("/api/t/<slug>/admin/staff/tokens")
+@require_tenant_admin()
+def api_t_list_tokens(slug):
+    s = get_tenant_storage(slug)
+    return jsonify(s.list_tokens())
+
+
+@app.delete("/api/t/<slug>/admin/staff/<staff_id>/token")
+@require_tenant_admin()
+def api_t_revoke_token(slug, staff_id):
+    s = get_tenant_storage(slug)
+    s.delete_token(staff_id)
+    return jsonify({"ok": True})
+
+
+# ============================================================
+# Tenant-scoped public portal (Round 4 C2)
+# ============================================================
+@app.get("/api/t/<slug>/portal/<token>")
+def api_t_portal_get(slug, token):
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    state = s.get_state()
+    if state is None:
+        return jsonify({"error": "no_state"}), 404
+    staff = next((st for st in state.get("staff", []) if st["id"] == staff_id), None)
+    if not staff:
+        return jsonify({"error": "staff_not_found"}), 404
+    meta = state.get("meta", {})
+    current_wk = meta.get("currentWeekStart")
+    weeks = state.get("weeks") or {}
+    week_data = weeks.get(current_wk, {})
+    prefs = [p for p in week_data.get("preferences", []) if p["staffId"] == staff_id]
+    assignments = [a for a in week_data.get("assignments", []) if a["staffId"] == staff_id]
+    public_staff = {
+        "id": staff.get("id"),
+        "name": staff.get("name"),
+        "position": staff.get("position"),
+        "hourlyWage": staff.get("hourlyWage"),
+        "email": staff.get("email", ""),
+    }
+    return jsonify({
+        "staff": public_staff,
+        "preferences": prefs,
+        "assignments": assignments,
+        "weekStart": current_wk,
+        "weekStatus": week_data.get("status", "draft"),
+        "publishedAt": week_data.get("publishedAt"),
+        "restaurantName": meta.get("restaurantName", ""),
+        "sessions": meta.get("sessions", []),
+        "positions": meta.get("positions", []),
+    })
+
+
+@app.post("/api/t/<slug>/portal/<token>/preferences")
+def api_t_portal_save_prefs(slug, token):
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    try:
+        new_prefs = request.get_json(force=True, silent=True)
+    except Exception:
+        return jsonify({"error": "invalid_json"}), 400
+    if not isinstance(new_prefs, list):
+        return jsonify({"error": "expected_list"}), 400
+    if len(new_prefs) > 100:
+        return jsonify({"error": "too_many_preferences"}), 400
+    valid_priorities = {"must", "want", "avoid"}
+    cleaned = []
+    import re as _re
+    date_re = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    time_re = _re.compile(r"^\d{2}:\d{2}$")
+    for p in new_prefs:
+        if not isinstance(p, dict): continue
+        if not date_re.match(str(p.get("date", ""))): continue
+        if not time_re.match(str(p.get("startTime", ""))): continue
+        if not time_re.match(str(p.get("endTime", ""))): continue
+        if p.get("priority") not in valid_priorities: continue
+        cleaned.append({
+            "id": str(p.get("id", ""))[:64] or ("p_" + secrets.token_urlsafe(6)),
+            "staffId": staff_id,
+            "date": p["date"],
+            "startTime": p["startTime"],
+            "endTime": p["endTime"],
+            "priority": p["priority"],
+        })
+    state_after = {"published": False, "no_state": False, "no_week": False}
+
+    def _mutate(current):
+        if current is None:
+            state_after["no_state"] = True
+            return current or {}
+        meta = current.get("meta", {})
+        current_wk = meta.get("currentWeekStart")
+        weeks = current.setdefault("weeks", {})
+        week = weeks.get(current_wk)
+        if not week:
+            state_after["no_week"] = True
+            return current
+        if week.get("status") == "published":
+            state_after["published"] = True
+            return current
+        week["preferences"] = [p for p in week.get("preferences", []) if p.get("staffId") != staff_id]
+        week["preferences"].extend(cleaned)
+        return current
+
+    s.transactional_update(_mutate)
+    if state_after["no_state"]:
+        return jsonify({"error": "no_state"}), 404
+    if state_after["no_week"]:
+        return jsonify({"error": "no_current_week"}), 404
+    if state_after["published"]:
+        return jsonify({"error": "week_published_readonly"}), 403
+    return jsonify({"ok": True, "saved": len(cleaned)})
+
+
+@app.post("/api/t/<slug>/portal/<token>/message")
+def api_t_portal_message(slug, token):
+    if _rate_check("portal_msg"):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    payload = _get_json()
+    msg = (payload.get("message") or "").strip()
+    kind = (payload.get("kind") or "general").strip()
+    if kind not in {"general", "change_request", "question", "report"}:
+        kind = "general"
+    if not msg or len(msg) > 2000:
+        return jsonify({"error": "invalid_message"}), 400
+    state = s.get_state()
+    staff = next((st for st in (state.get("staff") or []) if st["id"] == staff_id), None) if state else None
+    if not staff:
+        return jsonify({"error": "staff_not_found"}), 404
+    # tenant 情報取得 (オーナーへの通知先)
+    tm = get_tenant_manager()
+    tenant = tm.get(slug)
+    notify_to = tenant.get("email") if tenant else NOTIFY_TO
+
+    import datetime as _dt
+    record = {
+        "tenantSlug": slug,
+        "staffId": staff_id,
+        "staffName": staff.get("name", ""),
+        "kind": kind,
+        "message": msg,
+        "createdAt": _dt.datetime.utcnow().isoformat() + "Z",
+        "read": False,
+    }
+    try:
+        if STORAGE_BACKEND == "firestore":
+            from google.cloud import firestore as _fs
+            _fs.Client().collection(f"shifty_t_{slug}_messages").add(record)
+    except Exception as e:
+        print(f"[t-msg] persist failed: {e}")
+
+    KIND_LABEL = {"general": "連絡", "change_request": "シフト変更希望", "question": "質問", "report": "報告"}
+    send_email(
+        to_addr=_safe_header(notify_to),
+        subject=_safe_header(f"【Shifty】{KIND_LABEL.get(kind, '連絡')}: {staff.get('name', '?')}"),
+        body=f"スタッフ「{staff.get('name', '?')}」から{KIND_LABEL.get(kind, '連絡')}が届きました。\n\n{msg}\n\n---\n受信日時: {record['createdAt']}\n店舗: {tenant.get('restaurantName') if tenant else slug}",
+    )
+    return jsonify({"ok": True})
+
+
+# ============================================================
+# Tenant 用スタッフポータル HTML
+# /t/{slug}/staff?t={token}
+# ============================================================
+@app.get("/t/<slug>/staff")
+def tenant_staff_portal(slug):
+    if not _valid_slug(slug):
+        return "Invalid tenant slug", 400
+    return send_from_directory(str(ROOT), "staff.html")
 
 
 # ============================================================
