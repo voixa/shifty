@@ -591,6 +591,56 @@ def add_security_headers(resp):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "same-origin"
     resp.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+    # API は no-store、静的アセット (.css/.js/.png/.svg/.json) は長めの cache
+    path = request.path or ""
+    if path.startswith("/api/") or path.startswith("/auth/") or path.startswith("/internal/"):
+        resp.headers.setdefault("Cache-Control", "no-store, max-age=0")
+    elif path.endswith((".css", ".js", ".png", ".svg", ".webp", ".ico", ".woff2")):
+        # ファイル名にバージョンないので 1 時間キャッシュ + revalidate
+        resp.headers.setdefault("Cache-Control", "public, max-age=3600, must-revalidate")
+    elif path == "/og.png":
+        # OGP は更新頻度低いので長め
+        resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+    return resp
+
+
+# ============================================================
+# Response 圧縮 (gzip)
+# Cloud Run 自体は自動圧縮しないため Flask 側で。
+# 1 KB 以上 + 圧縮対象 Content-Type のみ。
+# ============================================================
+import gzip as _gzip
+import io as _io
+@app.after_request
+def gzip_response(resp):
+    accept = (request.headers.get("Accept-Encoding") or "")
+    if "gzip" not in accept:
+        return resp
+    if resp.status_code < 200 or resp.status_code >= 300:
+        return resp
+    if resp.headers.get("Content-Encoding"):
+        return resp
+    ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip()
+    compressible = (
+        ctype.startswith("text/")
+        or ctype in ("application/javascript", "application/json", "application/xml", "image/svg+xml")
+    )
+    if not compressible:
+        return resp
+    data = resp.get_data()
+    if len(data) < 1024:
+        return resp
+    buf = _io.BytesIO()
+    with _gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
+        gz.write(data)
+    compressed = buf.getvalue()
+    resp.set_data(compressed)
+    resp.headers["Content-Encoding"] = "gzip"
+    resp.headers["Content-Length"] = str(len(compressed))
+    # Vary に Accept-Encoding 追加（中間 cache 用）
+    vary = resp.headers.get("Vary", "")
+    if "Accept-Encoding" not in vary:
+        resp.headers["Vary"] = ("Accept-Encoding, " + vary) if vary else "Accept-Encoding"
     return resp
 
 

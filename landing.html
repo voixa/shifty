@@ -60,6 +60,11 @@
   }
   </script>
 
+  <!-- DNS preconnect / dns-prefetch — 体感速度の向上 -->
+  <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.tailwindcss.com">
+  <link rel="dns-prefetch" href="https://js.stripe.com">
+
   <!-- Sentry frontend (DSN 設定時のみ) -->
   <script>
     (function () {
@@ -181,10 +186,10 @@
           🎬 実際の使用フロー（30 秒で見る）
         </div>
       </div>
-      <div class="grid md:grid-cols-3 gap-4 md:gap-6">
+      <div class="grid md:grid-cols-3 gap-4 md:gap-6" role="img" aria-label="使用フローのモックアップ: スタッフがスマホで希望提出 → 店長が AI 生成 → LINE 通知文ワンタップ">
 
         <!-- Step 1: スタッフがスマホで希望提出 -->
-        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden" aria-hidden="true">
           <div class="bg-slate-50 px-3 py-2 border-b flex items-center justify-between">
             <span class="text-xs font-semibold text-slate-700">① スタッフがスマホで希望提出</span>
             <span class="text-[10px] text-slate-500">30 秒</span>
@@ -221,7 +226,7 @@
         </div>
 
         <!-- Step 2: 店長が AI 自動生成 -->
-        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden" aria-hidden="true">
           <div class="bg-slate-50 px-3 py-2 border-b flex items-center justify-between">
             <span class="text-xs font-semibold text-slate-700">② 店長が「🤖 AI 生成」</span>
             <span class="text-[10px] text-slate-500">数秒</span>
@@ -270,7 +275,7 @@
         </div>
 
         <!-- Step 3: スタッフ全員に LINE 通知 -->
-        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden" aria-hidden="true">
           <div class="bg-slate-50 px-3 py-2 border-b flex items-center justify-between">
             <span class="text-xs font-semibold text-slate-700">③ LINE 通知文ワンタップ</span>
             <span class="text-[10px] text-slate-500">3 秒</span>
@@ -349,7 +354,7 @@
           <div class="flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
             <span class="font-semibold text-slate-700">🛡️ 安心の運用基盤:</span>
             <span class="bg-white border border-slate-200 rounded px-2 py-1 flex items-center gap-1">
-              <svg viewBox="0 0 32 32" class="w-4 h-4"><path fill="#4285F4" d="M9.4 5.5a3.6 3.6 0 0 1 5 1.4l1.9-1.1a5.7 5.7 0 0 0-8 -2.2"/><path fill="#34A853" d="M14.4 6.9a3.6 3.6 0 0 1 1.4 5l1.9 1.1a5.7 5.7 0 0 0-2.2-8"/><path fill="#FBBC04" d="M15.7 12a3.6 3.6 0 0 1-5-1.5l-1.9 1.1a5.7 5.7 0 0 0 8 2.3"/><path fill="#EA4335" d="M10.7 10.5a3.6 3.6 0 0 1-1.5-5L7.3 4.4a5.7 5.7 0 0 0 2.3 8"/></svg>
+              <svg viewBox="0 0 32 32" class="w-4 h-4" role="img" aria-label="Google Cloud" focusable="false"><path fill="#4285F4" d="M9.4 5.5a3.6 3.6 0 0 1 5 1.4l1.9-1.1a5.7 5.7 0 0 0-8 -2.2"/><path fill="#34A853" d="M14.4 6.9a3.6 3.6 0 0 1 1.4 5l1.9 1.1a5.7 5.7 0 0 0-2.2-8"/><path fill="#FBBC04" d="M15.7 12a3.6 3.6 0 0 1-5-1.5l-1.9 1.1a5.7 5.7 0 0 0 8 2.3"/><path fill="#EA4335" d="M10.7 10.5a3.6 3.6 0 0 1-1.5-5L7.3 4.4a5.7 5.7 0 0 0 2.3 8"/></svg>
               <strong>Google Cloud</strong> で暗号化保存
             </span>
             <span class="bg-white border border-slate-200 rounded px-2 py-1 flex items-center gap-1">
@@ -861,27 +866,27 @@
       <h2 class="text-2xl md:text-4xl font-bold mb-4">まずは無料で使ってみませんか？</h2>
       <p class="text-white/90 mb-8">スタッフ 8 名まで永久無料 / クレジットカード登録不要 / 1 営業日以内にセットアップご案内</p>
 
-      <form id="inquiryForm" class="bg-white text-slate-900 rounded-2xl p-6 md:p-8 text-left space-y-4 max-w-xl mx-auto">
+      <form id="inquiryForm" class="bg-white text-slate-900 rounded-2xl p-6 md:p-8 text-left space-y-4 max-w-xl mx-auto" aria-label="無料トライアル申込みフォーム">
         <div>
-          <label class="block text-sm font-semibold mb-1">店舗名 <span class="text-red-500">*</span></label>
-          <input name="restaurantName" required class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="例: いざかや 縁">
+          <label for="iform-restaurant" class="block text-sm font-semibold mb-1">店舗名 <span class="text-red-500" aria-hidden="true">*</span><span class="sr-only">必須</span></label>
+          <input id="iform-restaurant" name="restaurantName" required autocomplete="organization" class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="例: いざかや 縁">
         </div>
         <div>
-          <label class="block text-sm font-semibold mb-1">お名前 <span class="text-red-500">*</span></label>
-          <input name="contactName" required class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="例: 山田 太郎">
+          <label for="iform-name" class="block text-sm font-semibold mb-1">お名前 <span class="text-red-500" aria-hidden="true">*</span><span class="sr-only">必須</span></label>
+          <input id="iform-name" name="contactName" required autocomplete="name" class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="例: 山田 太郎">
         </div>
         <div>
-          <label class="block text-sm font-semibold mb-1">メールアドレス <span class="text-red-500">*</span></label>
-          <input name="email" type="email" required class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="example@example.com">
+          <label for="iform-email" class="block text-sm font-semibold mb-1">メールアドレス <span class="text-red-500" aria-hidden="true">*</span><span class="sr-only">必須</span></label>
+          <input id="iform-email" name="email" type="email" required autocomplete="email" class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="example@example.com">
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-sm font-semibold mb-1">電話番号</label>
-            <input name="phone" class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="090-1234-5678">
+            <label for="iform-phone" class="block text-sm font-semibold mb-1">電話番号</label>
+            <input id="iform-phone" name="phone" type="tel" autocomplete="tel" class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="090-1234-5678">
           </div>
           <div>
-            <label class="block text-sm font-semibold mb-1">スタッフ数</label>
-            <select name="staffCount" class="w-full border border-slate-300 rounded-lg px-4 py-2.5">
+            <label for="iform-staff" class="block text-sm font-semibold mb-1">スタッフ数</label>
+            <select id="iform-staff" name="staffCount" class="w-full border border-slate-300 rounded-lg px-4 py-2.5">
               <option value="1-5">1〜5名</option>
               <option value="6-15">6〜15名</option>
               <option value="16-30">16〜30名</option>
@@ -890,8 +895,8 @@
           </div>
         </div>
         <div>
-          <label class="block text-sm font-semibold mb-1">ご相談・ご質問（任意）</label>
-          <textarea name="message" class="w-full border border-slate-300 rounded-lg px-4 py-2.5 h-24" placeholder="現在のシフト作成の悩み等、ご自由にお書きください"></textarea>
+          <label for="iform-msg" class="block text-sm font-semibold mb-1">ご相談・ご質問（任意）</label>
+          <textarea id="iform-msg" name="message" class="w-full border border-slate-300 rounded-lg px-4 py-2.5 h-24" placeholder="現在のシフト作成の悩み等、ご自由にお書きください"></textarea>
         </div>
         <div class="text-xs text-slate-500">
           送信により <a href="/tos" class="text-brand-600 underline">利用規約</a> と <a href="/privacy" class="text-brand-600 underline">プライバシーポリシー</a> に同意したものとみなされます。
