@@ -473,9 +473,16 @@
       }
 
       // ----- Step B: 2-opt スワップ -----
-      // 計算量を抑えるため、同日のペア + 同一スタッフ集合のペアのみを候補にする
-      // (異日異ポジションのペアは効果が小さく、O(N^2) 全探索は避ける)
+      // 計算量最適化:
+      //  - staff index で O(1) 検索（staff.find は O(N)）
+      //  - 同日同ポジションは positionMatch スコア同じなので無意味、即スキップ
+      //  - 既に score >= 0.95 のアサインは改善余地小、スキップ
+      //  - 同タイム重複は時間重複バリデーションで自然に弾かれる
       const SWAP_THRESHOLD = 0.005;
+      const NEAR_OPTIMAL = 0.95;
+      const staffById = {};
+      for (const s of staff) staffById[s.id] = s;
+
       const byDate = {};
       for (const a of state.assignments) {
         (byDate[a.date] = byDate[a.date] || []).push(a);
@@ -486,25 +493,30 @@
         if (stepBSwapped) break;
         const dayAss = byDate[date];
         for (let i = 0; i < dayAss.length && !stepBSwapped; i++) {
+          const a = dayAss[i];
+          // 早期スキップ: aがほぼ最適なら swap で改善期待値低い
+          if (a.score >= NEAR_OPTIMAL) continue;
           for (let j = i + 1; j < dayAss.length && !stepBSwapped; j++) {
-            const a = dayAss[i], b = dayAss[j];
+            const b = dayAss[j];
             if (a.staffId === b.staffId) continue;
-            // 両方の状態から自分を抜いた仮想 state
-            const stateMinusBoth = removeAssignmentsVirtual(state, [a, b]);
-            const sa = staff.find((x) => x.id === a.staffId);
-            const sb = staff.find((x) => x.id === b.staffId);
+            // 同ポジション + 同時間 = positionMatch スコアが同じなのでコスト要因しか効かない
+            // 「コスト効率改善のみ」のスワップは改善幅小さいので skip (時短)
+            if (a.position === b.position && a.startTime === b.startTime) continue;
+            if (b.score >= NEAR_OPTIMAL) continue;
+            const sa = staffById[a.staffId];
+            const sb = staffById[b.staffId];
             if (!sa || !sb) continue;
             const slotA = { date: a.date, position: a.position, startTime: a.startTime, endTime: a.endTime };
             const slotB = { date: b.date, position: b.position, startTime: b.startTime, endTime: b.endTime };
+            // 両方の状態から自分を抜いた仮想 state
+            const stateMinusBoth = removeAssignmentsVirtual(state, [a, b]);
             // sa が slotB に, sb が slotA に入れるか?
             if (!isEligible(sa, slotB, stateMinusBoth, laborRules)) continue;
             if (!isEligible(sb, slotA, stateMinusBoth, laborRules)) continue;
             // avoid 2-pass: スワップで avoid 違反を新しく作るなら拒否
-            // (Phase 1 で avoid を尊重した配置を Phase 2 が壊さないように)
             const swapWouldCreateAvoid =
               hasAvoidPreference(sa, slotB, preferences) ||
               hasAvoidPreference(sb, slotA, preferences);
-            // 既存 a/b が avoid 持ちなら緩和されている可能性あり、これは許容
             const swapResolvesAvoid =
               hasAvoidPreference(sa, slotA, preferences) ||
               hasAvoidPreference(sb, slotB, preferences);
