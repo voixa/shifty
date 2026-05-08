@@ -321,6 +321,76 @@ function viewDashboard() {
     }
   }
 
+  // 人件費推移グラフ (Round 11) — 過去 8 週分の確定済シフト人件費
+  if (state.staff.length > 0 && typeof Chart !== "undefined") {
+    const chartCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+    chartCard.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
+      el("div", { class: "font-semibold text-sm" }, "📈 人件費推移 (直近 8 週)"),
+      el("div", { class: "text-xs text-slate-500" }, `予算: ${fmtYen(state.meta.weeklyBudget)}/週`),
+    ]));
+    const canvas = document.createElement("canvas");
+    canvas.id = "cost-chart";
+    canvas.style.maxHeight = "200px";
+    chartCard.appendChild(canvas);
+
+    // データ集計: 直近 8 週
+    const allWeeks = state.weeks || {};
+    const sortedWeeks = Object.keys(allWeeks).sort().slice(-8);
+    const labels = sortedWeeks.map(w => w.slice(5));
+    const costs = sortedWeeks.map(w => {
+      const week = allWeeks[w];
+      if (!week.assignments) return 0;
+      return week.assignments.reduce((sum, a) => sum + (a.cost || 0), 0);
+    });
+    const budget = state.meta.weeklyBudget;
+
+    setTimeout(() => {
+      const ctx = document.getElementById("cost-chart");
+      if (!ctx) return;
+      try {
+        // 既存 chart instance 破棄
+        if (window._costChart) window._costChart.destroy();
+        window._costChart = new Chart(ctx, {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "人件費",
+                data: costs,
+                backgroundColor: costs.map(c => c > budget ? "#dc2626" : c > budget * 0.85 ? "#f59e0b" : "#10b981"),
+                borderRadius: 4,
+              },
+              {
+                label: "予算",
+                data: labels.map(() => budget),
+                type: "line",
+                borderColor: "#4f46e5",
+                borderWidth: 2,
+                borderDash: [5, 5],
+                pointRadius: 0,
+                fill: false,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: true, position: "bottom", labels: { font: { size: 10 } } },
+              tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ¥${ctx.parsed.y.toLocaleString()}` } },
+            },
+            scales: {
+              y: { beginAtZero: true, ticks: { callback: (v) => `¥${(v/1000).toFixed(0)}k`, font: { size: 10 } } },
+              x: { ticks: { font: { size: 10 } } },
+            },
+          },
+        });
+      } catch (e) { console.warn("chart render failed:", e); }
+    }, 100);
+    wrap.appendChild(chartCard);
+  }
+
   if (alerts.length > 0) {
     const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
     card.appendChild(el("div", { class: "font-semibold text-sm text-slate-700 mb-2" }, `⚠️ 注意事項 ${alerts.length} 件`));
@@ -1122,49 +1192,127 @@ function importCsvDialog() {
     placeholder: sampleCsv,
     "aria-label": "CSV 内容",
   }));
+  // プレビュー領域 (Round 11)
+  const previewArea = el("div", { class: "hidden", id: "csv-preview-area" });
+  body.appendChild(previewArea);
+
   body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2" }, [
     el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
     el("button", {
-      class: "px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-semibold",
+      id: "csv-preview-btn",
+      class: "px-4 py-1.5 text-sm bg-slate-600 hover:bg-slate-700 text-white rounded-md font-semibold",
       onclick: () => {
         const txt = $("#csvText").value.trim();
         if (!txt) { toast("CSV を入力してください", "error"); return; }
-        // ヘッダ行をスキップ
-        const lines = txt.split(/\r?\n/).filter(l => l.trim());
-        const dataLines = lines[0].includes("名前") || lines[0].includes("本職ID") ? lines.slice(1) : lines;
-        const rows = dataLines.map(r => r.split(",").map(x => x.trim())).filter(r => r.length >= 5);
-        if (rows.length === 0) { toast("有効な行がありません", "error"); return; }
-        const errors = [];
-        let added = 0;
-        for (let i = 0; i < rows.length; i++) {
-          const r = rows[i];
-          if (!r[0]) { errors.push(`${i+1}行目: 名前が空`); continue; }
-          const posId = r[1] || state.meta.positions[0]?.id;
-          if (!state.meta.positions.find(p => p.id === posId)) {
-            errors.push(`${i+1}行目: 不明な本職ID 「${posId}」`); continue;
-          }
-          const off = r[5] ? r[5].split(/[\s\/、]+/).map(Number).filter(n => !isNaN(n) && n >= 0 && n <= 6) : [];
-          state.staff.push({
-            id: uid("s_"), name: r[0], position: posId, canCover: [],
-            hourlyWage: Number(r[2]) || 1100,
-            minHoursPerWeek: Number(r[3]) || 10,
-            maxHoursPerWeek: Number(r[4]) || 28,
-            fixedDayOff: off,
-            skill: Math.min(5, Math.max(1, Number(r[6]) || 3)),
-            notes: "", email: "",
-          });
-          added++;
-        }
-        persist(); closeModal(); render();
-        if (errors.length === 0) {
-          toast(`${added}名 取り込みました`, "success");
-        } else {
-          toast(`${added}名 取込・${errors.length}件エラー: ${errors.slice(0,2).join(" / ")}`, errors.length === rows.length ? "error" : "info");
-        }
+        previewCsvImport(txt);
       }
-    }, "取込"),
+    }, "👁 プレビュー"),
+    el("button", {
+      id: "csv-confirm-btn",
+      class: "px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-semibold hidden",
+      onclick: () => {
+        const txt = $("#csvText").value.trim();
+        commitCsvImport(txt);
+      },
+    }, "✓ 取込実行"),
   ]));
   modal(body);
+}
+
+// CSV 取込: parse + validate (preview 用と commit 用で共有)
+function _parseCsvRows(txt) {
+  const lines = txt.split(/\r?\n/).filter(l => l.trim());
+  const dataLines = lines[0].includes("名前") || lines[0].includes("本職ID") ? lines.slice(1) : lines;
+  const rows = dataLines.map(r => r.split(",").map(x => x.trim())).filter(r => r.length >= 5);
+  const parsed = [];
+  const errors = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const name = r[0];
+    const posId = r[1] || state.meta.positions[0]?.id;
+    if (!name) { errors.push(`${i+1}行目: 名前が空`); continue; }
+    if (!state.meta.positions.find(p => p.id === posId)) {
+      errors.push(`${i+1}行目: 不明な本職ID 「${posId}」`); continue;
+    }
+    const off = r[5] ? r[5].split(/[\s\/、]+/).map(Number).filter(n => !isNaN(n) && n >= 0 && n <= 6) : [];
+    parsed.push({
+      lineNo: i+1, name, position: posId,
+      hourlyWage: Number(r[2]) || 1100,
+      minHoursPerWeek: Number(r[3]) || 10,
+      maxHoursPerWeek: Number(r[4]) || 28,
+      fixedDayOff: off,
+      skill: Math.min(5, Math.max(1, Number(r[6]) || 3)),
+    });
+  }
+  return { parsed, errors };
+}
+
+function previewCsvImport(txt) {
+  const { parsed, errors } = _parseCsvRows(txt);
+  const area = $("#csv-preview-area");
+  if (!area) return;
+  area.classList.remove("hidden");
+  let html = `<div class="bg-slate-50 rounded p-3 mt-2 text-xs">
+    <div class="font-semibold mb-2">📋 取込プレビュー: 有効 ${parsed.length} 件 / エラー ${errors.length} 件</div>`;
+  if (errors.length > 0) {
+    html += `<div class="bg-red-50 border border-red-200 rounded p-2 mb-2">
+      <div class="font-semibold text-red-700">エラー:</div>
+      ${errors.slice(0, 5).map(e => `<div class="text-red-600">• ${escapeHtml(e)}</div>`).join("")}
+      ${errors.length > 5 ? `<div class="text-red-500">…他 ${errors.length - 5} 件</div>` : ""}
+    </div>`;
+  }
+  if (parsed.length > 0) {
+    html += `<div class="overflow-x-auto"><table class="w-full text-[11px]">
+      <thead class="bg-white"><tr>
+        <th class="text-left p-1">名前</th>
+        <th class="text-left p-1">本職</th>
+        <th class="text-right p-1">時給</th>
+        <th class="text-right p-1">週時間</th>
+        <th class="text-left p-1">固定休</th>
+        <th class="text-left p-1">スキル</th>
+      </tr></thead><tbody>`;
+    parsed.slice(0, 20).forEach(p => {
+      const dows = p.fixedDayOff.map(d => DAY_LABELS[d]).join("・") || "—";
+      html += `<tr class="border-t border-slate-200">
+        <td class="p-1 font-medium">${escapeHtml(p.name)}</td>
+        <td class="p-1">${escapeHtml(posCfg(p.position).label)}</td>
+        <td class="p-1 text-right">${fmtYen(p.hourlyWage)}</td>
+        <td class="p-1 text-right">${p.minHoursPerWeek}〜${p.maxHoursPerWeek}h</td>
+        <td class="p-1">${dows}</td>
+        <td class="p-1">${"★".repeat(p.skill)}</td>
+      </tr>`;
+    });
+    if (parsed.length > 20) html += `<tr><td colspan="6" class="p-1 text-slate-500">…他 ${parsed.length - 20} 件</td></tr>`;
+    html += `</tbody></table></div>`;
+  }
+  html += `</div>`;
+  area.innerHTML = html;
+
+  // ボタン状態切替
+  $("#csv-confirm-btn").classList.toggle("hidden", parsed.length === 0);
+  $("#csv-preview-btn").textContent = "🔄 再プレビュー";
+}
+
+function commitCsvImport(txt) {
+  const { parsed, errors } = _parseCsvRows(txt);
+  if (parsed.length === 0) { toast("有効な行がありません", "error"); return; }
+  for (const p of parsed) {
+    state.staff.push({
+      id: uid("s_"), name: p.name, position: p.position, canCover: [],
+      hourlyWage: p.hourlyWage,
+      minHoursPerWeek: p.minHoursPerWeek,
+      maxHoursPerWeek: p.maxHoursPerWeek,
+      fixedDayOff: p.fixedDayOff,
+      skill: p.skill,
+      notes: "", email: "", breakMinutes: 0,
+    });
+  }
+  persist(); closeModal(); render();
+  if (errors.length === 0) {
+    toast(`${parsed.length}名 取り込み完了`, "success");
+  } else {
+    toast(`${parsed.length}名 取込・${errors.length}件はエラーで除外`, "info");
+  }
 }
 
 // ===== View: Preferences =====
@@ -1437,6 +1585,30 @@ function viewSchedule() {
 
   wrap.appendChild(renderCalendar());
   if (curAssignments().length) wrap.appendChild(renderStaffSummary());
+
+  // 変更履歴 (Round 11) — このタブで一覧表示
+  const changeLog = curWeek().changeLog || [];
+  if (changeLog.length > 0) {
+    const logCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3 no-print" });
+    logCard.appendChild(el("details", {}, [
+      el("summary", { class: "text-sm font-semibold cursor-pointer select-none" },
+        `📜 変更履歴 (${changeLog.length} 件)`),
+      el("div", { class: "mt-3 space-y-1 text-xs max-h-80 overflow-y-auto" }, changeLog.slice().reverse().map(log => {
+        const TYPE_EMOJI = { publish: "✅", unpublish: "📝", delete: "🗑", swap: "🔄", substitute: "🆘", add: "➕", autogenerate: "🤖" };
+        const emoji = TYPE_EMOJI[log.type] || "📌";
+        const ts = log.at ? new Date(log.at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+        const row = el("div", { class: "flex items-start gap-2 bg-slate-50 rounded p-2" });
+        row.innerHTML = `
+          <span>${emoji}</span>
+          <div class="flex-1">
+            <div class="font-medium">${escapeHtml(log.message || log.type || "")}</div>
+            <div class="text-[10px] text-slate-500">${ts}</div>
+          </div>`;
+        return row;
+      })),
+    ]));
+    wrap.appendChild(logCard);
+  }
   if ((curWeek().changeLog || []).length) wrap.appendChild(renderChangeLog());
   return wrap;
 }
