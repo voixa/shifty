@@ -36,7 +36,8 @@
       <p class="text-white/90 mb-6">使い方・トラブルシューティング・よくある質問</p>
       <div class="max-w-xl mx-auto">
         <input id="searchBox" type="search" placeholder="🔍 検索（例: スタッフ追加、希望提出、シフト確定）"
-          class="w-full border-0 rounded-lg px-5 py-3 text-slate-900 shadow-lg" />
+          class="w-full border-0 rounded-lg px-5 py-3 text-slate-900 shadow-lg" aria-label="ヘルプを検索" />
+        <div id="searchResultInfo" class="mt-2 text-sm text-white/90 hidden" aria-live="polite"></div>
       </div>
     </div>
   </section>
@@ -366,20 +367,45 @@
   </footer>
 
   <script>
-    // 検索: マッチしないセクションを薄表示
+    // 検索: マッチしないセクションを非表示 + 件数表示 + マッチ詳細を自動展開
     const searchBox = document.getElementById('searchBox');
+    const resultInfo = document.getElementById('searchResultInfo');
     searchBox.addEventListener('input', () => {
       const q = searchBox.value.toLowerCase().trim();
+      let hits = 0;
       document.querySelectorAll('article > section').forEach(sec => {
-        if (!q) { sec.style.display = ''; sec.style.opacity = '1'; return; }
+        if (!q) {
+          sec.style.display = '';
+          // details も初期状態（閉じる）に戻す
+          sec.querySelectorAll('details').forEach(d => d.removeAttribute('open'));
+          return;
+        }
         const text = sec.textContent.toLowerCase();
         if (text.includes(q)) {
           sec.style.display = '';
-          sec.style.opacity = '1';
+          // マッチした details を自動展開して内容をすぐ確認できるように
+          sec.querySelectorAll('details').forEach(d => {
+            const txt = d.textContent.toLowerCase();
+            if (txt.includes(q)) d.setAttribute('open', '');
+            else d.removeAttribute('open');
+          });
+          hits++;
         } else {
-          sec.style.opacity = '0.3';
+          sec.style.display = 'none';
         }
       });
+      // 件数フィードバック
+      if (!q) {
+        resultInfo.classList.add('hidden');
+        resultInfo.textContent = '';
+      } else {
+        resultInfo.classList.remove('hidden');
+        if (hits === 0) {
+          resultInfo.innerHTML = '🔎 該当する記事が見つかりません。<a href="mailto:support@in-dx.jp" class="underline font-semibold">support@in-dx.jp</a> までお気軽にお問い合わせください';
+        } else {
+          resultInfo.textContent = `🔍 ${hits} 件のセクションがマッチしました`;
+        }
+      }
     });
 
     // ハッシュリンクで該当セクションを開く

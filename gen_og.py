@@ -66,19 +66,19 @@ draw.text(
 draw.text((logo_x + logo_size + 24, logo_y + 20), "Shifty", fill=(255, 255, 255), font=font_brand)
 
 # ----- メインコピー -----
-draw.text((80, 230), "飲食店のシフト作成、", fill=(255, 255, 255), font=font_h1)
-draw.text((80, 320), "AI で 5 分。", fill=(255, 255, 255), font=font_h1)
+draw.text((80, 220), "飲食店の AI シフト、", fill=(255, 255, 255), font=font_h1)
+draw.text((80, 310), "8 名まで永久無料。", fill=(126, 252, 200), font=font_h1)  # emerald-300 風
 
 # サブコピー
-draw.text((80, 440), "希望収集 → AI生成 → 確定通知 まで完全自動化。", fill=(230, 230, 250), font=font_sub)
+draw.text((80, 430), "AI が希望を聞いて、5 分でシフト完成。", fill=(230, 230, 250), font=font_sub)
 
 # タグ
-draw.rounded_rectangle((80, 510, 220, 555), radius=8, fill=(255, 255, 255, 50))
-draw.text((100, 518), "AI 最適化", fill=(255, 255, 255), font=font_tag)
-draw.rounded_rectangle((240, 510, 410, 555), radius=8, fill=(255, 255, 255, 50))
-draw.text((260, 518), "14日間無料", fill=(255, 255, 255), font=font_tag)
-draw.rounded_rectangle((430, 510, 610, 555), radius=8, fill=(255, 255, 255, 50))
-draw.text((450, 518), "クレカ不要", fill=(255, 255, 255), font=font_tag)
+draw.rounded_rectangle((80, 500, 250, 545), radius=8, fill=(16, 185, 129, 200))  # emerald-500
+draw.text((100, 508), "永久無料 ¥0", fill=(255, 255, 255), font=font_tag)
+draw.rounded_rectangle((270, 500, 470, 545), radius=8, fill=(255, 255, 255, 50))
+draw.text((290, 508), "クレカ不要", fill=(255, 255, 255), font=font_tag)
+draw.rounded_rectangle((490, 500, 690, 545), radius=8, fill=(255, 255, 255, 50))
+draw.text((510, 508), "1 営業日でセットアップ", fill=(255, 255, 255), font=font_tag)
 
 # URL
 draw.text((80, 580), "shifty.in-dx.jp", fill=(220, 220, 240), font=font_url)
