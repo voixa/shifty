@@ -2038,6 +2038,23 @@ def api_t_portal_get(slug, token):
         except Exception:
             pass
 
+    # 代打打診 (Round 27 TOP 3): 自分宛のオープンな打診のみ
+    my_sub_offers = []
+    for o in (meta.get("substituteOffers") or []):
+        if o.get("status") != "open": continue
+        if staff_id not in (o.get("candidateIds") or []): continue
+        # 自分が既に応答済ならスキップ
+        if (o.get("responses") or {}).get(staff_id): continue
+        my_sub_offers.append({
+            "id": o.get("id"),
+            "createdAt": o.get("createdAt"),
+            "originalStaffName": (lambda sid: next((s2.get("name") for s2 in (state.get("staff") or []) if s2.get("id") == sid), "?"))(o.get("originalStaffId")),
+            "date": o.get("date"),
+            "startTime": o.get("startTime"),
+            "endTime": o.get("endTime"),
+            "position": o.get("position"),
+        })
+
     # シフト交換掲示板 (Round 16 TOP 2): 公開中のすべて + 自分が出した分の履歴
     swap_open = []
     swap_mine = []
@@ -2111,6 +2128,7 @@ def api_t_portal_get(slug, token):
         "vacationRequests": my_vacations,
         "swapsOpen": swap_open,
         "swapsMine": swap_mine,
+        "substituteOffers": my_sub_offers,
     })
 
 
@@ -2612,6 +2630,180 @@ def api_t_broadcast(slug):
         return current
     s.transactional_update(_mutate)
     return jsonify({"ok": True, "sentEmail": sent_email, "sentWebhook": sent_webhook, "skipped": skipped})
+
+
+# ============================================================
+# 自動代打パイプライン (Round 27 TOP 3)
+# ============================================================
+@app.post("/api/t/<slug>/substitute-offers")
+@require_tenant_admin()
+def api_t_create_sub_offer(slug):
+    """オーナーが代打候補に一斉打診を作成"""
+    payload = _get_json()
+    assignment_id = (payload.get("assignmentId") or "").strip()
+    candidate_ids = payload.get("candidateIds") or []
+    if not assignment_id or not isinstance(candidate_ids, list) or len(candidate_ids) == 0:
+        return jsonify({"error": "missing_params"}), 400
+    candidate_ids = [str(c)[:64] for c in candidate_ids][:5]
+
+    s = get_tenant_storage(slug)
+    state = s.get_state()
+    if state is None:
+        return jsonify({"error": "no_state"}), 404
+
+    # assignment を全週から探す
+    target = None
+    target_wk = None
+    for wk_key, wk_data in (state.get("weeks") or {}).items():
+        for a in (wk_data.get("assignments") or []):
+            if a.get("id") == assignment_id:
+                target = a
+                target_wk = wk_key
+                break
+        if target: break
+    if not target:
+        return jsonify({"error": "assignment_not_found"}), 404
+
+    import datetime as _dt_so
+    offer_id = "so_" + secrets.token_urlsafe(8)
+    offer = {
+        "id": offer_id,
+        "createdAt": _dt_so.datetime.utcnow().isoformat() + "Z",
+        "assignmentId": assignment_id,
+        "weekStart": target_wk,
+        "originalStaffId": target.get("staffId"),
+        "date": target.get("date"),
+        "startTime": target.get("startTime"),
+        "endTime": target.get("endTime"),
+        "position": target.get("position"),
+        "candidateIds": candidate_ids,
+        "responses": {},  # staffId -> {status, at}
+        "status": "open",
+    }
+
+    def _mutate(current):
+        if current is None: return current
+        meta = current.setdefault("meta", {})
+        offers = meta.setdefault("substituteOffers", [])
+        if len(offers) > 100:
+            offers[:] = offers[-99:]
+        offers.append(offer)
+        return current
+    s.transactional_update(_mutate)
+
+    # 候補スタッフへメール/Webhook 通知
+    tm = get_tenant_manager()
+    tenant = tm.get(slug)
+    restaurant = tenant.get("restaurantName", slug) if tenant else slug
+    pos = next((p for p in (state.get("meta", {}).get("positions") or []) if p.get("id") == target.get("position")), {})
+    pos_label = pos.get("label", target.get("position", ""))
+    sent_n = 0
+    for cid in candidate_ids:
+        cstaff = next((s2 for s2 in (state.get("staff", []) or []) if s2.get("id") == cid), None)
+        if not cstaff: continue
+        cemail = (cstaff.get("email") or "").strip()
+        cwebhook = (cstaff.get("webhookUrl") or "").strip()
+        body_text = (
+            f"{cstaff.get('name', '')} 様\n\n"
+            f"{restaurant} より緊急の代打打診です。\n\n"
+            f"【日付】{target.get('date')}\n"
+            f"【時間】{target.get('startTime')}〜{target.get('endTime')}\n"
+            f"【ポジション】{pos_label}\n\n"
+            f"対応可能な場合、スタッフポータル (お渡しした URL) を開いて、\n"
+            f"トップに表示される「📞 代打打診」カードから「やります」を押してください。\n"
+            f"先着順で決定します (他の方が先に応えた場合は自動で取消)。\n"
+        )
+        if cemail:
+            send_email(_safe_header(cemail), _safe_header(f"【緊急代打打診】{restaurant} ({target.get('date')})"), body_text)
+            sent_n += 1
+        if cwebhook:
+            send_webhook(cwebhook, body_text, title=f"🆘 代打打診 ({target.get('date')} {target.get('startTime')}〜)")
+
+    return jsonify({"ok": True, "offerId": offer_id, "candidatesSent": sent_n})
+
+
+@app.post("/api/t/<slug>/portal/<token>/substitute-offers/<oid>/respond")
+def api_t_portal_sub_respond(slug, token, oid):
+    """スタッフが代打打診に応答 (accept/decline)"""
+    if _rate_check("portal_sub_resp"):
+        return jsonify({"error": "rate_limited"}), 429
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    payload = _get_json()
+    response = (payload.get("response") or "").strip()  # "accept" or "decline"
+    if response not in {"accept", "decline"}:
+        return jsonify({"error": "invalid_response"}), 400
+
+    import datetime as _dt_so
+    result = {"accepted": False, "alreadyTaken": False, "notFound": False}
+
+    def _mutate(current):
+        if current is None: return current
+        meta = current.setdefault("meta", {})
+        offers = meta.get("substituteOffers", [])
+        offer = next((o for o in offers if o.get("id") == oid), None)
+        if not offer:
+            result["notFound"] = True
+            return current
+        if offer.get("status") != "open":
+            result["alreadyTaken"] = True
+            return current
+        if staff_id not in (offer.get("candidateIds") or []):
+            result["notFound"] = True
+            return current
+
+        offer.setdefault("responses", {})[staff_id] = {
+            "status": response,
+            "at": _dt_so.datetime.utcnow().isoformat() + "Z",
+        }
+
+        if response == "accept":
+            # 先着の accept: assignment 担当者を更新、offer を accepted に
+            wk_key = offer.get("weekStart")
+            wk = (current.get("weeks") or {}).get(wk_key)
+            if wk:
+                staff_lookup = {s2["id"]: s2 for s2 in (current.get("staff") or [])}
+                for a in (wk.get("assignments") or []):
+                    if a.get("id") == offer.get("assignmentId"):
+                        new_staff = staff_lookup.get(staff_id)
+                        if new_staff:
+                            sh, sm = map(int, a.get("startTime", "0:0").split(":"))
+                            eh, em = map(int, a.get("endTime", "0:0").split(":"))
+                            h = ((eh * 60 + em) - (sh * 60 + sm)) / 60
+                            a["staffId"] = staff_id
+                            a["cost"] = (new_staff.get("hourlyWage", 1100)) * h
+                            a["substituteFor"] = offer.get("originalStaffId")
+                            a["substitutedAt"] = _dt_so.datetime.utcnow().isoformat() + "Z"
+                        break
+            offer["status"] = "accepted"
+            offer["acceptedBy"] = staff_id
+            offer["acceptedAt"] = _dt_so.datetime.utcnow().isoformat() + "Z"
+            result["accepted"] = True
+        return current
+    s.transactional_update(_mutate)
+
+    if result.get("notFound"):
+        return jsonify({"error": "not_found_or_not_eligible"}), 404
+    if result.get("alreadyTaken"):
+        return jsonify({"error": "already_taken", "info": "他のスタッフが先に応えました"}), 409
+
+    # 受諾 → オーナーへ通知
+    if result["accepted"]:
+        state2 = s.get_state()
+        tm = get_tenant_manager()
+        tenant = tm.get(slug)
+        notify_to = tenant.get("email") if tenant else NOTIFY_TO
+        accepter = next((s2 for s2 in (state2.get("staff", []) or []) if s2.get("id") == staff_id), None)
+        send_email(
+            _safe_header(notify_to),
+            _safe_header(f"【代打決定】{accepter.get('name', '?') if accepter else '?'} さんが対応"),
+            f"代打打診に {accepter.get('name', '?') if accepter else '?'} さんが「やります」と応えてくれました。\n"
+            f"アサインは自動的に切り替わっています。"
+        )
+
+    return jsonify({"ok": True, "response": response, "accepted": result["accepted"]})
 
 
 # ============================================================

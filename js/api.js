@@ -145,6 +145,18 @@
         })
       : Promise.reject(new Error("legacy_mode_not_supported")),
 
+    // 代打打診 (Round 27 TOP 3)
+    createSubstituteOffer: (payload) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/substitute-offers`, {
+          method: "POST", body: JSON.stringify(payload),
+        })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
+    portalRespondSubOffer: (token, oid, response) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/substitute-offers/${encodeURIComponent(oid)}/respond`, {
+          method: "POST", body: JSON.stringify({ response }),
+        })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
+
     // 多店舗対応 (Round 26 = A)
     listOwnerTenants: () => jsonReq("/api/owner/tenants"),
     addOwnerTenant: (restaurantName) =>

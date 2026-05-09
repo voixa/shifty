@@ -252,6 +252,35 @@
     return out;
   }
 
+  // Round 27 TOP 1: 配置理由を自然言語で生成
+  function explainPlacement(breakdown, staff, slot) {
+    if (!breakdown || breakdown.length === 0) return "";
+    // 寄与度上位 2 要素を取得
+    const sorted = breakdown.slice().sort((a, b) => b.contrib - a.contrib);
+    const top = sorted.filter(b => b.contrib > 0.04).slice(0, 2);
+    if (top.length === 0) return "汎用的に適合";
+    const labelMap = {
+      preference: "希望に合致",
+      positionMatch: "本職",
+      fairness: "公平性",
+      cost: "コスト効率",
+      skill: "スキル高",
+      skillMix: "スキル構成",
+    };
+    const parts = top.map(b => {
+      const detail = b.detail || labelMap[b.id] || b.label;
+      return detail.length > 20 ? labelMap[b.id] || b.label : detail;
+    });
+    // 通常下位 (低貢献) も最低スコア一つ
+    const low = sorted[sorted.length - 1];
+    let reason = parts.join(" + ");
+    if (low && low.contrib < 0.02 && low.id !== top[0].id) {
+      const lowLabel = labelMap[low.id] || low.label;
+      reason += `（${lowLabel}は弱）`;
+    }
+    return reason;
+  }
+
   function scoreCandidate(staff, slot, state, prefs, lr, weights, ctx) {
     let total = 0;
     const breakdown = [];
@@ -269,7 +298,8 @@
         detail,
       });
     }
-    return { score: total, breakdown };
+    const reason = explainPlacement(breakdown, staff, slot);
+    return { score: total, breakdown, reason };
   }
 
   // =====================================================================
@@ -445,6 +475,7 @@
         cost,
         score: picked.score,
         breakdown: picked.breakdown,
+        reason: picked.reason, // Round 27 TOP 1: 配置理由
         avoidRelaxed: isAvoidRelaxed || undefined,
         // 監査ログ: この時点での候補トップ3を記録
         topCandidates: scored.slice(0, 3).map((x) => ({

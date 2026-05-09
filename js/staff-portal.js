@@ -1087,6 +1087,12 @@
             <span class="font-semibold">📝</span>
             <span class="whitespace-pre-wrap">${escapeHtml(next.note.trim())}</span>
           </div>` : "";
+      // Round 27 TOP 1: AI 配置理由
+      const nextReason = (next.reason) ? `
+          <div class="mt-2 bg-white/15 rounded px-2 py-1 text-[11px] flex items-start gap-1">
+            <span>🧠</span>
+            <span>店長があなたを選んだ理由: ${escapeHtml(next.reason)}</span>
+          </div>` : "";
       nextShiftCard = `
         <div class="bg-gradient-to-br from-blue-500 to-brand-600 rounded-xl p-4 mb-3 text-white shadow-lg">
           <div class="text-xs opacity-90">⏰ 次のシフト</div>
@@ -1094,6 +1100,7 @@
           <div class="text-sm opacity-90 mt-0.5">${escapeHtml(pos.label)}</div>
           <div class="text-2xl font-bold mt-2">${countdown}</div>
           ${nextNote}
+          ${nextReason}
         </div>`;
     }
 
@@ -1127,12 +1134,15 @@
     const vacCard2 = renderVacationCard();
     // シフト交換掲示板カード (Round 16 TOP 2)
     const swapCard2 = renderSwapBoardCard();
+    // 代打打診カード (Round 27 TOP 3)
+    const subOfferCard = renderSubOfferCard();
 
     const installBannerHtml = renderInstallBanner();
 
     $("#app").innerHTML = `
       ${weekTabsHtml2}
       ${installBannerHtml}
+      ${subOfferCard}
       ${clockCard}
       ${nextShiftCard}
       ${noticeCard}
@@ -1296,6 +1306,14 @@
       btn.onclick = () => handleClockClick("out");
     });
 
+    // 代打打診応答ボタン (Round 27 TOP 3)
+    document.querySelectorAll(".sub-accept-btn").forEach(btn => {
+      btn.onclick = () => respondSubOffer(btn.getAttribute("data-offer-id"), "accept");
+    });
+    document.querySelectorAll(".sub-decline-btn").forEach(btn => {
+      btn.onclick = () => respondSubOffer(btn.getAttribute("data-offer-id"), "decline");
+    });
+
     // 長期休暇申請ボタン (Round 16 TOP 1 — 確定モード)
     const vacBtn2 = document.getElementById("vac-new-btn");
     if (vacBtn2) vacBtn2.onclick = openVacationDialog;
@@ -1445,6 +1463,62 @@
         toast("打刻可能なシフトがありません (シフト時刻の前後 4 時間以内のみ可)", "error", 5000);
       } else {
         toast("打刻失敗: " + m, "error");
+      }
+    }
+  }
+
+  // ===== 代打打診カード (Round 27 TOP 3) =====
+  function renderSubOfferCard() {
+    const offers = (data && data.substituteOffers) || [];
+    if (offers.length === 0) return "";
+    const positions = data.positions || [];
+    const posLabel = (pid) => (positions.find(p => p.id === pid) || {}).label || pid;
+    return offers.map(o => {
+      const dow = ["日","月","火","水","木","金","土"][new Date(o.date + "T00:00:00").getDay()];
+      return `
+        <div class="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-4 mb-3 text-white shadow-lg sub-offer-card" data-offer-id="${escapeAttr(o.id)}">
+          <div class="text-xs opacity-95">🆘 緊急代打打診</div>
+          <div class="font-bold text-base mt-1">${escapeHtml(o.originalStaffName || "?")}さんの代打を募集中</div>
+          <div class="text-sm mt-1 bg-white/15 rounded p-2">
+            📅 ${escapeHtml(o.date)} (${dow})<br>
+            ⏰ ${escapeHtml(o.startTime)}〜${escapeHtml(o.endTime)}<br>
+            💼 ${escapeHtml(posLabel(o.position))}
+          </div>
+          <div class="mt-3 flex gap-2">
+            <button class="sub-accept-btn flex-1 bg-white text-red-700 rounded py-2 font-bold text-sm" data-offer-id="${escapeAttr(o.id)}">
+              ✅ やります
+            </button>
+            <button class="sub-decline-btn px-4 bg-white/20 text-white rounded py-2 text-xs" data-offer-id="${escapeAttr(o.id)}">
+              ✗ 不可
+            </button>
+          </div>
+          <div class="text-[10px] opacity-80 mt-2">先着順で決定。他の方が先に応えた場合は自動取消されます。</div>
+        </div>`;
+    }).join("");
+  }
+
+  async function respondSubOffer(offerId, response) {
+    if (response === "accept" && !confirm("この代打を引受けますか？\n\n受付後、店長承認は不要で自動的にあなたのシフトとして確定されます。")) return;
+    if (response === "decline" && !confirm("不可で応答しますか？")) return;
+    try {
+      const r = await window.ShiftyAPI.portalRespondSubOffer(token, offerId, response);
+      if (r.accepted) {
+        toast(`✓ 代打を引受けました。シフトは自動的にあなたのものになっています`, "success", 6000);
+      } else {
+        toast(response === "accept" ? "応答しました" : "不可で応答しました", "info");
+      }
+      data = await window.ShiftyAPI.portalGet(token, activeWeek);
+      if (data.weekStatus === "published") renderPublished(); else renderDraft();
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (msg.includes("already_taken")) {
+        toast("他のスタッフが先に引受けました", "info", 4000);
+        try {
+          data = await window.ShiftyAPI.portalGet(token, activeWeek);
+          if (data.weekStatus === "published") renderPublished(); else renderDraft();
+        } catch (_) {}
+      } else {
+        toast("応答失敗: " + msg, "error");
       }
     }
   }

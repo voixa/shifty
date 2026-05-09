@@ -909,6 +909,138 @@ function openMonthlyReport() {
   document.body.appendChild(wrap);
 }
 
+// ===== 売上予測 + 人件費シミュレーション (Round 27 TOP 2) =====
+function forecastSales(targetWeekStart) {
+  const sales = state.meta.dailySales || {};
+  const days = Array.from({ length: 7 }, (_, i) => addDays(targetWeekStart, i));
+  // 過去 4-8 週の同曜日売上の移動平均で予測
+  const allWeeks = state.weeks || {};
+  const sortedWk = Object.keys(allWeeks).sort();
+  const historicalWeeks = sortedWk.filter(w => w < targetWeekStart).slice(-8);
+
+  const forecast = {};
+  const confidences = {};
+  for (let i = 0; i < 7; i++) {
+    const dow = dayOfWeek(days[i]);
+    const samples = [];
+    for (const wk of historicalWeeks) {
+      const histDate = addDays(wk, i);
+      if (sales[histDate] && sales[histDate] > 0) samples.push(sales[histDate]);
+    }
+    if (samples.length === 0) {
+      forecast[days[i]] = null;
+      confidences[days[i]] = "low";
+      continue;
+    }
+    // 中央値ベース (外れ値に強い)
+    const sorted = samples.slice().sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    forecast[days[i]] = Math.round(median);
+    confidences[days[i]] = samples.length >= 4 ? "high" : samples.length >= 2 ? "med" : "low";
+  }
+  return { forecast, confidences, samplesUsed: historicalWeeks.length };
+}
+
+function openSimulationDialog() {
+  const w0 = state.meta.currentWeekStart || "";
+  if (!w0) { toast("対象週がありません", "error"); return; }
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+
+  // 売上予測
+  const fc = forecastSales(w0);
+  const sales = state.meta.dailySales || {};
+  const target = state.meta.laborCostRatioTarget || 0.28;
+
+  // 現在の配置
+  const ass = curAssignments();
+  const totalCost = ass.reduce((s, a) => s + (a.cost || 0), 0);
+  const totalForecast = Object.values(fc.forecast).reduce((s, v) => s + (v || 0), 0);
+  const inputSales = days.reduce((s, d) => s + (Number(sales[d]) || 0), 0);
+  const usedSales = inputSales > 0 ? inputSales : totalForecast;
+  const ratio = usedSales > 0 ? totalCost / usedSales : null;
+
+  // What-if: 人数を 1 つ減らした場合の予測
+  function calcWhatIf(deltaPercent) {
+    const newCost = totalCost * (1 + deltaPercent / 100);
+    return usedSales > 0 ? newCost / usedSales : null;
+  }
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🔮 売上予測 + 人件費シミュレーション"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    `対象週: ${w0} 〜 ${addDays(w0, 6)} / 過去 ${fc.samplesUsed} 週の売上を学習`));
+
+  // 予測テーブル
+  const fcTable = el("table", { class: "w-full text-xs border-collapse" });
+  let fcHtml = `<thead><tr class="bg-slate-100"><th class="border p-1.5 text-left">日付</th><th class="border p-1.5">入力</th><th class="border p-1.5">AI 予測</th><th class="border p-1.5">使用値</th><th class="border p-1.5">信頼度</th></tr></thead><tbody>`;
+  for (const d of days) {
+    const dow = ["日","月","火","水","木","金","土"][dayOfWeek(d)];
+    const dowColor = dayOfWeek(d) === 0 ? "text-red-600" : dayOfWeek(d) === 6 ? "text-blue-600" : "";
+    const inputV = Number(sales[d]) || 0;
+    const fcV = fc.forecast[d];
+    const used = inputV > 0 ? inputV : (fcV || 0);
+    const conf = fc.confidences[d];
+    const confLabel = { high: "🟢 高", med: "🟡 中", low: "🔴 低" }[conf] || "—";
+    fcHtml += `<tr>
+      <td class="border p-1.5 ${dowColor}"><span class="font-mono">${d.slice(5)}</span> (${dow})</td>
+      <td class="border p-1.5 text-right">${inputV > 0 ? fmtYen(inputV) : "—"}</td>
+      <td class="border p-1.5 text-right text-slate-500">${fcV ? fmtYen(fcV) : "—"}</td>
+      <td class="border p-1.5 text-right font-semibold ${inputV > 0 ? "text-blue-700" : "text-slate-700"}">${used > 0 ? fmtYen(used) : "—"}</td>
+      <td class="border p-1.5 text-center text-[10px]">${confLabel}</td>
+    </tr>`;
+  }
+  fcHtml += `<tr class="bg-slate-50 font-bold"><td class="border p-1.5">週合計</td><td class="border p-1.5 text-right">${fmtYen(inputSales)}</td><td class="border p-1.5 text-right text-slate-500">${fmtYen(totalForecast)}</td><td class="border p-1.5 text-right text-blue-700">${fmtYen(usedSales)}</td><td class="border p-1.5"></td></tr>`;
+  fcHtml += `</tbody>`;
+  fcTable.innerHTML = fcHtml;
+  body.appendChild(fcTable);
+
+  // 現在の指標
+  body.appendChild(el("div", { class: "grid grid-cols-3 gap-2 text-xs mt-2" }, [
+    el("div", { class: "bg-slate-50 rounded p-2 text-center" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "今週の人件費"),
+      el("div", { class: "font-bold text-base" }, fmtYen(Math.round(totalCost))),
+    ]),
+    el("div", { class: "bg-slate-50 rounded p-2 text-center" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "売上 (使用値)"),
+      el("div", { class: "font-bold text-base" }, fmtYen(usedSales)),
+    ]),
+    el("div", { class: "bg-slate-50 rounded p-2 text-center" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "予想人件費率"),
+      el("div", { class: `font-bold text-base ${ratio === null ? "" : ratio <= target ? "text-emerald-700" : ratio <= target + 0.05 ? "text-amber-700" : "text-red-700"}` },
+        ratio === null ? "—" : (ratio * 100).toFixed(1) + "%"),
+    ]),
+  ]));
+
+  // What-if 分析
+  if (usedSales > 0) {
+    body.appendChild(el("div", { class: "border-t pt-2 mt-2" }, [
+      el("div", { class: "text-xs font-semibold mb-1" }, "💡 What-if 分析"),
+    ]));
+    const whatIf = el("div", { class: "space-y-1 text-xs" });
+    for (const dPct of [-20, -10, 0, 10]) {
+      const r = calcWhatIf(dPct);
+      const label = dPct === 0 ? "現状" : dPct > 0 ? `+${dPct}%` : `${dPct}%`;
+      const newCost = totalCost * (1 + dPct / 100);
+      const dr = r === null ? "—" : (r * 100).toFixed(1) + "%";
+      const cls = r === null ? "" : r <= target ? "text-emerald-700" : r <= target + 0.05 ? "text-amber-700" : "text-red-700";
+      whatIf.innerHTML += `
+        <div class="flex justify-between bg-slate-50 rounded px-2 py-1 ${dPct === 0 ? 'border-l-4 border-blue-500' : ''}">
+          <span>人件費 ${label}</span>
+          <span class="font-mono">${fmtYen(Math.round(newCost))}</span>
+          <span class="font-bold ${cls}">${dr}</span>
+        </div>`;
+    }
+    body.appendChild(whatIf);
+    body.appendChild(el("div", { class: "text-[10px] text-slate-500 mt-1" },
+      `💡 目標 ${(target * 100).toFixed(0)}% を達成するには、人件費を ${fmtYen(Math.round(usedSales * target))} 以下にする必要があります${totalCost > usedSales * target ? ` (現状から ${fmtYen(Math.round(totalCost - usedSales * target))} 削減)` : " (✓ 目標達成見込み)"}.`));
+  }
+
+  body.appendChild(el("div", { class: "flex justify-end pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "閉じる"),
+  ]));
+  modal(body);
+}
+
 // ===== ヘルプセンター (Round 25 TOP 1) =====
 const FAQ_DATA = [
   // 基本操作
@@ -1445,12 +1577,18 @@ function renderLaborCostRatio() {
   const ratio = weekSales > 0 ? weekCost / weekSales : null;
 
   const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
-  const headerRow = el("div", { class: "flex items-center justify-between mb-2" }, [
+  const headerRow = el("div", { class: "flex items-center justify-between mb-2 flex-wrap gap-1" }, [
     el("div", { class: "font-semibold text-sm" }, "💰 今週の人件費率"),
-    el("button", {
-      class: "text-xs text-slate-500 hover:text-slate-700 underline decoration-dotted",
-      onclick: () => openSalesInputDialog(),
-    }, "📝 売上を入力"),
+    el("div", { class: "flex gap-2" }, [
+      el("button", {
+        class: "text-xs text-purple-600 hover:text-purple-800 underline decoration-dotted",
+        onclick: () => openSimulationDialog(),
+      }, "🔮 予測+シミュ"),
+      el("button", {
+        class: "text-xs text-slate-500 hover:text-slate-700 underline decoration-dotted",
+        onclick: () => openSalesInputDialog(),
+      }, "📝 売上を入力"),
+    ]),
   ]);
   card.appendChild(headerRow);
 
@@ -5145,6 +5283,17 @@ function openAssignmentDetail(a) {
   ]));
   body.appendChild(el("div", { class: "text-sm text-slate-600" }, `${a.date} ${a.startTime}〜${a.endTime} (${calcHours(a.startTime, a.endTime)}h, ${fmtYen(a.cost)})`));
 
+  // Round 27 TOP 1: AI 配置理由 (自然言語)
+  if (a.reason) {
+    body.appendChild(el("div", { class: "bg-blue-50 border border-blue-200 rounded-md p-2 text-xs flex items-start gap-2" }, [
+      el("span", { class: "text-base" }, "🧠"),
+      el("div", { class: "flex-1" }, [
+        el("span", { class: "font-semibold text-blue-900" }, "AI が選んだ理由: "),
+        el("span", { class: "text-blue-800" }, a.reason),
+      ]),
+    ]));
+  }
+
   // 新フォーマット: breakdown (0..1正規化値 × 重み) + 旧 reasons 互換
   if (a.breakdown && a.breakdown.length) {
     const tbl = el("div", { class: "bg-slate-50 rounded-md p-3 text-xs space-y-1" });
@@ -7122,6 +7271,33 @@ function openEmergencySubstituteFlow(message) {
       list.appendChild(row);
     });
     body.appendChild(list);
+  }
+
+  // Round 27 TOP 3: 一斉打診ボタン
+  if (subs.length > 0) {
+    body.appendChild(el("div", { class: "border-t pt-3 mt-3" }, [
+      el("div", { class: "text-xs font-semibold mb-2" }, "💡 まだ代打が決まらない場合"),
+      el("button", {
+        class: "w-full bg-purple-600 hover:bg-purple-700 text-white rounded-md py-2 text-sm font-bold",
+        onclick: async () => {
+          const top3 = subs.slice(0, 3);
+          if (!confirm(
+            `候補上位 3 名 (${top3.map(c => c.staff.name).join(", ")}) に一斉打診メールを送信します。\n\n` +
+            `先着で「やります」と応えた人へ自動的にアサインが切り替わります。`
+          )) return;
+          try {
+            const r = await window.ShiftyAPI.createSubstituteOffer({
+              assignmentId: todayShift.id,
+              candidateIds: top3.map(c => c.staff.id),
+            });
+            toast(`✓ ${r.candidatesSent} 名へ打診メール送信。応答を待っています`, "success", 5000);
+            closeModal();
+          } catch (e) {
+            toast("打診失敗: " + (e?.message || ""), "error");
+          }
+        },
+      }, "📞 候補上位 3 名へ一斉打診 (先着順で決定)"),
+    ]));
   }
 
   body.appendChild(el("div", { class: "flex justify-between gap-2 pt-2 border-t" }, [
