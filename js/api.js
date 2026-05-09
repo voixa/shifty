@@ -163,6 +163,24 @@
       : jsonReq(`/api/portal/${encodeURIComponent(token)}/preferences`, {
           method: "POST", body: JSON.stringify(prefs),
         }),
+    // 長期休暇申請 (Round 16 TOP 1)
+    portalSubmitVacation: (token, payload) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/vacation-request`, {
+          method: "POST", body: JSON.stringify(payload),
+        })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
+
+    // シフト交換 (Round 16 TOP 2)
+    portalCreateSwap: (token, payload) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/swap-request`, {
+          method: "POST", body: JSON.stringify(payload),
+        })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
+    portalTakeSwap: (token, sid) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/swap-request/${encodeURIComponent(sid)}/take`, {
+          method: "POST",
+        })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
 
     isDemo,
   };

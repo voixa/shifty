@@ -367,11 +367,15 @@
         </div>`;
     }
 
+    // 長期休暇申請カード (Round 16 TOP 1)
+    const vacCard = renderVacationCard();
+
     $("#app").innerHTML = `
       ${weekTabsHtml}
       ${draftNoticeCard}
       ${deadlineCard}
       ${tplCard}
+      ${vacCard}
       ${prefHistCard}
       ${monthCard}
       <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
@@ -513,6 +517,10 @@
         if (wk) switchWeek(wk);
       };
     });
+
+    // 長期休暇申請ボタン (Round 16 TOP 1)
+    const vacBtn = document.getElementById("vac-new-btn");
+    if (vacBtn) vacBtn.onclick = openVacationDialog;
 
     // 通し勤務ボタン
     grid.querySelectorAll(".all-day-btn").forEach(btn => {
@@ -836,10 +844,17 @@
         </div>`;
     }
 
+    // 長期休暇申請カード (Round 16 TOP 1) — 確定モードでも表示
+    const vacCard2 = renderVacationCard();
+    // シフト交換掲示板カード (Round 16 TOP 2)
+    const swapCard2 = renderSwapBoardCard();
+
     $("#app").innerHTML = `
       ${weekTabsHtml2}
       ${nextShiftCard}
       ${noticeCard}
+      ${swapCard2}
+      ${vacCard2}
       ${monthCard}
       <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>
@@ -939,6 +954,18 @@
               ⛔ 今日休みたい（緊急連絡）
             </button>` : "";
 
+          // シフト交換に出すボタン (Round 16 TOP 2) — 未来のシフト & まだ募集してない
+          const isOpenSwap = (data.swapsOpen || []).some(sw => sw.assignmentId === a.id);
+          const swapBtn = (isFuture && !isOpenSwap) ? `
+            <button class="swap-create-btn mt-2 text-xs bg-blue-50 border border-blue-300 hover:bg-blue-100 text-blue-700 rounded-md px-3 py-1.5 font-semibold w-full"
+              data-aid="${escapeAttr(a.id)}"
+              aria-label="このシフトを交換に出す">
+              🔄 このシフトを交換に出す
+            </button>` : (isOpenSwap ? `
+            <div class="mt-2 text-xs bg-amber-50 border border-amber-300 text-amber-800 rounded-md px-3 py-1.5 font-semibold text-center">
+              📢 交換募集中
+            </div>` : "");
+
           // 個別シフトメモ (Round 14 TOP 3) — 店長が設定した申し送り
           const noteHtml = (a.note && a.note.trim()) ? `
             <div class="mt-2 bg-amber-50 border border-amber-300 rounded-md px-2 py-1.5 text-[12px] text-amber-900 flex items-start gap-1.5">
@@ -956,6 +983,7 @@
             </div>
             ${noteHtml}
             ${cwHtml}
+            ${swapBtn}
             ${emergencyBtn}`;
           inner.appendChild(div);
         }
@@ -969,6 +997,18 @@
         const wk = btn.getAttribute("data-week");
         if (wk) switchWeek(wk);
       };
+    });
+
+    // 長期休暇申請ボタン (Round 16 TOP 1 — 確定モード)
+    const vacBtn2 = document.getElementById("vac-new-btn");
+    if (vacBtn2) vacBtn2.onclick = openVacationDialog;
+
+    // シフト交換掲示板 (Round 16 TOP 2)
+    document.querySelectorAll(".swap-take-btn").forEach(btn => {
+      btn.onclick = () => takeSwapClick(btn.getAttribute("data-sid"));
+    });
+    document.querySelectorAll(".swap-create-btn").forEach(btn => {
+      btn.onclick = () => createSwapClick(btn.getAttribute("data-aid"));
     });
 
     // メッセージ送信ボタン
@@ -991,6 +1031,199 @@
         openEmergencyAbsenceDialog(shiftTime);
       };
     });
+  }
+
+  // ===== シフト交換掲示板 (Round 16 TOP 2) =====
+  function renderSwapBoardCard() {
+    const open = (data && data.swapsOpen) || [];
+    const mine = (data && data.swapsMine) || [];
+    const myId = data?.staff?.id;
+    // 自分以外が出した募集中のもの
+    const others = open.filter(sw => sw.fromStaffId !== myId);
+    if (others.length === 0 && mine.length === 0) return "";
+    const STATUS_LABEL = {
+      open: `<span class="bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px]">募集中</span>`,
+      claimed: `<span class="bg-blue-100 text-blue-800 rounded px-1.5 py-0.5 text-[10px]">引受・店長承認待ち</span>`,
+      approved: `<span class="bg-emerald-100 text-emerald-800 rounded px-1.5 py-0.5 text-[10px]">✓ 承認・交換済</span>`,
+      rejected: `<span class="bg-red-100 text-red-800 rounded px-1.5 py-0.5 text-[10px]">✗ 却下</span>`,
+      cancelled: `<span class="bg-slate-200 text-slate-700 rounded px-1.5 py-0.5 text-[10px]">取消</span>`,
+    };
+    const positions = data.positions || [];
+    const posLabel = (pid) => (positions.find(p => p.id === pid) || {}).label || pid;
+    const othersHtml = others.length > 0 ? `
+      <div class="space-y-1 mt-2">
+        <div class="text-[10px] text-slate-500">📢 他のスタッフが交換に出しているシフト (${others.length})</div>
+        ${others.map(sw => `
+          <div class="border border-blue-200 bg-blue-50 rounded-md p-2 text-xs">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="font-semibold">${escapeHtml(sw.fromStaffName || "?")}</span>さん
+                <span class="text-slate-500 ml-1">${escapeHtml(sw.date)} ${escapeHtml(sw.startTime)}〜${escapeHtml(sw.endTime)} (${escapeHtml(posLabel(sw.position))})</span>
+              </div>
+              <button class="swap-take-btn bg-emerald-500 hover:bg-emerald-600 text-white rounded px-2 py-1 text-[10px] font-semibold"
+                data-sid="${escapeAttr(sw.id)}">
+                ✋ 引受
+              </button>
+            </div>
+            ${sw.note ? `<div class="text-[10px] text-slate-600 mt-1">伝言: ${escapeHtml(sw.note)}</div>` : ""}
+          </div>`).join("")}
+      </div>` : "";
+    const mineHtml = mine.length > 0 ? `
+      <div class="space-y-1 mt-2">
+        <div class="text-[10px] text-slate-500">🗒 自分の交換履歴 (${mine.length})</div>
+        ${mine.slice(0, 5).map(sw => `
+          <div class="border border-slate-200 bg-slate-50 rounded p-1.5 text-xs">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-slate-600">${escapeHtml(sw.date)} ${escapeHtml(sw.startTime)}〜${escapeHtml(sw.endTime)}</span>
+                ${sw.fromStaffId === myId ? "" : `<span class="text-slate-500 ml-1">(${escapeHtml(sw.fromStaffName)}さんから引受)</span>`}
+              </div>
+              ${STATUS_LABEL[sw.status] || ""}
+            </div>
+          </div>`).join("")}
+      </div>` : "";
+    return `
+      <div class="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+        <details ${others.length > 0 ? "open" : ""}>
+          <summary class="text-sm font-semibold cursor-pointer select-none flex items-center gap-2">
+            🔄 シフト交換掲示板
+            ${others.length > 0 ? `<span class="bg-blue-100 text-blue-800 rounded px-1.5 py-0.5 text-[10px]">${others.length} 件募集中</span>` : ""}
+          </summary>
+          <div class="text-xs text-slate-500 mt-2">他のスタッフが交換に出したシフトを引受できます。引受後は店長承認で正式交換になります。</div>
+          ${othersHtml}
+          ${mineHtml}
+        </details>
+      </div>`;
+  }
+
+  async function takeSwapClick(sid) {
+    const sw = (data.swapsOpen || []).find(x => x.id === sid);
+    if (!sw) { toast("対象が見つかりません", "error"); return; }
+    if (!confirm(`${sw.fromStaffName} さんの ${sw.date} ${sw.startTime}〜${sw.endTime} を引受けますか？\n\n店長承認後、正式に交換されます。`)) return;
+    try {
+      await window.ShiftyAPI.portalTakeSwap(token, sid);
+      toast("✓ 引受しました。店長承認をお待ちください", "success", 4000);
+      data = await window.ShiftyAPI.portalGet(token, activeWeek);
+      if (data.weekStatus === "published") renderPublished(); else renderDraft();
+    } catch (e) {
+      toast("引受失敗: " + (e?.message || ""), "error");
+    }
+  }
+
+  async function createSwapClick(assignmentId) {
+    const a = (data.assignments || []).find(x => x.id === assignmentId);
+    if (!a) { toast("シフトが見つかりません", "error"); return; }
+    const note = prompt(`このシフトを交換に出します:\n${a.date} ${a.startTime}〜${a.endTime}\n\n他のスタッフへの伝言があれば入力してください (任意・200 字以内):`, "");
+    if (note === null) return; // キャンセル
+    try {
+      await window.ShiftyAPI.portalCreateSwap(token, {
+        assignmentId,
+        weekStart: data.weekStart,
+        note: (note || "").slice(0, 200),
+      });
+      toast("✓ 交換掲示板に出しました。他のスタッフに通知メールが送信されます", "success", 5000);
+      data = await window.ShiftyAPI.portalGet(token, activeWeek);
+      if (data.weekStatus === "published") renderPublished(); else renderDraft();
+    } catch (e) {
+      toast("送信失敗: " + (e?.message || ""), "error");
+    }
+  }
+
+  // ===== 長期休暇申請 (Round 16 TOP 1) =====
+  function renderVacationCard() {
+    const my = (data && data.vacationRequests) || [];
+    const pending = my.filter(v => v.status === "pending");
+    const approved = my.filter(v => v.status === "approved");
+    const rejected = my.filter(v => v.status === "rejected");
+    const STATUS_LABEL = {
+      pending: `<span class="bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px]">⏳ 申請中</span>`,
+      approved: `<span class="bg-emerald-100 text-emerald-800 rounded px-1.5 py-0.5 text-[10px]">✓ 承認</span>`,
+      rejected: `<span class="bg-red-100 text-red-800 rounded px-1.5 py-0.5 text-[10px]">✗ 却下</span>`,
+    };
+    const items = my.slice(0, 5).map(v => `
+      <div class="flex items-center justify-between bg-slate-50 rounded p-1.5 text-xs">
+        <div>
+          <span class="font-mono">${escapeHtml(v.startDate.slice(5))}〜${escapeHtml(v.endDate.slice(5))}</span>
+          ${v.reason ? `<span class="ml-2 text-slate-500">「${escapeHtml(v.reason)}」</span>` : ""}
+        </div>
+        ${STATUS_LABEL[v.status] || ""}
+      </div>`).join("");
+    return `
+      <div class="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+        <details>
+          <summary class="text-sm font-semibold cursor-pointer select-none flex items-center gap-2">
+            🏖 長期休暇申請
+            ${pending.length > 0 ? `<span class="bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px]">承認待ち ${pending.length}</span>` : ""}
+          </summary>
+          <div class="mt-2 space-y-2">
+            <div class="text-xs text-slate-500">帰省・旅行・体調管理など、まとまった期間の休みを申請できます。承認されると該当期間が自動的に「不可」希望になります。</div>
+            <button id="vac-new-btn" class="w-full bg-blue-500 hover:bg-blue-600 text-white rounded-md px-3 py-2 text-sm font-semibold">
+              📅 新規休暇申請
+            </button>
+            ${my.length > 0 ? `<div class="space-y-1 pt-1"><div class="text-[10px] text-slate-400">最近の申請 (${approved.length} 承認 / ${pending.length} 申請中 / ${rejected.length} 却下)</div>${items}</div>` : ""}
+          </div>
+        </details>
+      </div>`;
+  }
+
+  function openVacationDialog() {
+    const today = new Date().toISOString().slice(0, 10);
+    // デフォルト: 1 週間後 〜 1 週間後 + 3日
+    const baseDt = new Date(); baseDt.setDate(baseDt.getDate() + 7);
+    const defStart = baseDt.toISOString().slice(0, 10);
+    baseDt.setDate(baseDt.getDate() + 3);
+    const defEnd = baseDt.toISOString().slice(0, 10);
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4";
+    overlay.innerHTML = `
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-3">
+        <h3 class="font-bold text-lg">🏖 長期休暇申請</h3>
+        <p class="text-xs text-slate-600">承認されると、申請期間中の全シフト希望が自動的に「不可 (avoid)」に設定されます。AI 自動生成時にも反映されます。</p>
+        <label class="block text-sm">
+          <span class="text-slate-700">開始日</span>
+          <input id="vac-start" type="date" class="mt-1 w-full border rounded-md px-3 py-2" min="${today}" value="${defStart}">
+        </label>
+        <label class="block text-sm">
+          <span class="text-slate-700">終了日</span>
+          <input id="vac-end" type="date" class="mt-1 w-full border rounded-md px-3 py-2" min="${today}" value="${defEnd}">
+        </label>
+        <label class="block text-sm">
+          <span class="text-slate-700">理由 (任意)</span>
+          <textarea id="vac-reason" maxlength="300" rows="2" class="mt-1 w-full border rounded-md px-3 py-2"
+            placeholder="例: 帰省・体調回復・家族の用事 (300 字まで)"></textarea>
+        </label>
+        <div class="flex justify-end gap-2 pt-2">
+          <button id="vac-cancel" class="px-3 py-1.5 text-sm bg-slate-200 rounded-md">キャンセル</button>
+          <button id="vac-submit" class="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md font-semibold">申請を送信</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#vac-cancel").onclick = () => overlay.remove();
+    overlay.querySelector("#vac-submit").onclick = async () => {
+      const startDate = overlay.querySelector("#vac-start").value;
+      const endDate = overlay.querySelector("#vac-end").value;
+      const reason = overlay.querySelector("#vac-reason").value.trim().slice(0, 300);
+      if (!startDate || !endDate) { toast("日付を入力してください", "error"); return; }
+      if (endDate < startDate) { toast("終了日は開始日以降にしてください", "error"); return; }
+      const days = Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1;
+      if (days > 90) { toast("申請期間は最大 90 日までです", "error"); return; }
+      if (!confirm(`${startDate} 〜 ${endDate} (${days} 日間) の休暇を申請します。\n\n店長に通知メールが送信されます。`)) return;
+      const submitBtn = overlay.querySelector("#vac-submit");
+      submitBtn.disabled = true; submitBtn.textContent = "送信中…";
+      try {
+        await window.ShiftyAPI.portalSubmitVacation(token, { startDate, endDate, reason });
+        toast("✓ 申請を送信しました。承認をお待ちください", "success", 4000);
+        overlay.remove();
+        // データ再取得して表示更新
+        try {
+          data = await window.ShiftyAPI.portalGet(token, activeWeek);
+          if (data.weekStatus === "published") renderPublished(); else renderDraft();
+        } catch (_) {}
+      } catch (e) {
+        submitBtn.disabled = false; submitBtn.textContent = "申請を送信";
+        toast("送信失敗: " + (e?.message || ""), "error");
+      }
+    };
   }
 
   // 初回ガイドツアー (Round 10)

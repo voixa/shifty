@@ -158,6 +158,427 @@ function regenerateCurSlots() {
   curWeek().slots = buildSlots(state.meta, state.meta.currentWeekStart);
 }
 
+// ===== 長期休暇申請 (Round 16 TOP 1) =====
+function renderVacationRequestsCard() {
+  const reqs = (state.meta && state.meta.vacationRequests) || [];
+  if (reqs.length === 0) return null;
+  const pending = reqs.filter(r => r.status === "pending");
+  const recent = reqs.slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, 10);
+  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  card.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
+    el("div", { class: "font-semibold text-sm" }, [
+      el("span", {}, "🏖 長期休暇申請"),
+      pending.length > 0 ? el("span", { class: "ml-2 bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px]" },
+        `承認待ち ${pending.length}`) : null,
+    ]),
+    el("button", {
+      class: "text-[10px] text-slate-500 hover:text-slate-700 underline decoration-dotted",
+      onclick: () => openVacationHistoryDialog(reqs),
+    }, "全件表示"),
+  ]));
+  const list = el("div", { class: "space-y-1.5" });
+  for (const r of recent) {
+    const staff = state.staff.find(s => s.id === r.staffId);
+    const days = Math.round((new Date(r.endDate) - new Date(r.startDate)) / 86400000) + 1;
+    const row = el("div", { class: "border border-slate-100 rounded-md p-2 text-xs flex items-center justify-between gap-2" });
+    const STATUS_BADGE = {
+      pending: `<span class="bg-amber-100 text-amber-800 rounded px-1.5 py-0.5">⏳ 申請中</span>`,
+      approved: `<span class="bg-emerald-100 text-emerald-800 rounded px-1.5 py-0.5">✓ 承認</span>`,
+      rejected: `<span class="bg-red-100 text-red-800 rounded px-1.5 py-0.5">✗ 却下</span>`,
+    };
+    row.innerHTML = `
+      <div class="flex-1 min-w-0">
+        <div class="font-medium">${escapeHtml(staff?.name || r.staffName || "?")}
+          <span class="text-slate-500 ml-1">${escapeHtml(r.startDate)}〜${escapeHtml(r.endDate)} (${days}日)</span>
+        </div>
+        ${r.reason ? `<div class="text-slate-500 text-[10px] mt-0.5 truncate">理由: ${escapeHtml(r.reason)}</div>` : ""}
+        ${r.decidedAt ? `<div class="text-slate-400 text-[10px] mt-0.5">${new Date(r.decidedAt).toLocaleDateString("ja-JP")} 決定${r.decidedNote ? "・" + escapeHtml(r.decidedNote) : ""}</div>` : ""}
+      </div>
+      <div class="flex items-center gap-1">
+        ${STATUS_BADGE[r.status] || ""}
+      </div>
+    `;
+    if (r.status === "pending") {
+      const btnGroup = el("div", { class: "flex gap-1" });
+      btnGroup.appendChild(el("button", {
+        class: "text-[10px] bg-emerald-500 hover:bg-emerald-600 text-white rounded px-2 py-1 font-semibold",
+        onclick: () => decideVacationRequest(r.id, "approved"),
+      }, "✓ 承認"));
+      btnGroup.appendChild(el("button", {
+        class: "text-[10px] bg-red-500 hover:bg-red-600 text-white rounded px-2 py-1 font-semibold",
+        onclick: () => decideVacationRequest(r.id, "rejected"),
+      }, "✗ 却下"));
+      row.appendChild(btnGroup);
+    }
+    list.appendChild(row);
+  }
+  card.appendChild(list);
+  return card;
+}
+
+async function decideVacationRequest(reqId, decision) {
+  const reqs = (state.meta && state.meta.vacationRequests) || [];
+  const req = reqs.find(r => r.id === reqId);
+  if (!req) { toast("申請が見つかりません", "error"); return; }
+  const staff = state.staff.find(s => s.id === req.staffId);
+
+  let note = "";
+  if (decision === "rejected") {
+    note = prompt(`却下理由 (任意・スタッフに通知されません):`, "") || "";
+  }
+  const verb = decision === "approved" ? "承認" : "却下";
+  if (!confirm(
+    `${staff?.name || req.staffName} さんの ${req.startDate}〜${req.endDate} の休暇申請を「${verb}」しますか？\n\n` +
+    (decision === "approved"
+      ? "承認すると、該当期間の全シフトに「不可」希望が自動追加されます (該当週がまだ存在しない場合は何もしません — 後で週を作成すれば反映されます)。"
+      : "却下した場合、希望は変更されません。スタッフのポータルでステータスが「却下」と表示されます。")
+  )) return;
+
+  req.status = decision;
+  req.decidedAt = new Date().toISOString();
+  req.decidedNote = note;
+
+  // 承認時: 該当期間の avoid 希望を該当週に追加
+  if (decision === "approved") {
+    addAvoidPrefsForRange(req.staffId, req.startDate, req.endDate);
+  }
+  logChange("vacation_" + decision, `${staff?.name || req.staffName} の休暇申請を${verb} (${req.startDate}〜${req.endDate})`);
+  await persist();
+  render();
+  toast(`✓ 休暇申請を${verb}しました`, "success");
+}
+
+function addAvoidPrefsForRange(staffId, startDate, endDate) {
+  const sd = new Date(startDate); const ed = new Date(endDate);
+  const sessions = state.meta.sessions || [];
+  let added = 0;
+  for (let d = new Date(sd); d <= ed; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().slice(0, 10);
+    // 該当する週を見つける (date を含む週開始)
+    const dow = d.getDay(); // 0=Sun
+    // 月曜起点で週開始を計算
+    const offsetToMonday = (dow + 6) % 7;
+    const wkStart = new Date(d); wkStart.setDate(d.getDate() - offsetToMonday);
+    const wkKey = wkStart.toISOString().slice(0, 10);
+    const wk = (state.weeks || {})[wkKey];
+    if (!wk) continue; // 週が未作成 — スキップ
+    if (wk.status === "published") continue; // 確定済はスキップ
+    wk.preferences = wk.preferences || [];
+    // 既存の自分の希望を該当日付分は削除
+    wk.preferences = wk.preferences.filter(p => !(p.staffId === staffId && p.date === dateStr));
+    for (const sess of sessions) {
+      wk.preferences.push({
+        id: "p_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+        staffId,
+        date: dateStr,
+        startTime: sess.startTime,
+        endTime: sess.endTime,
+        priority: "avoid",
+      });
+      added++;
+    }
+  }
+  if (added > 0) toast(`📅 ${added} 件の avoid 希望を週データに追加しました`, "info", 4000);
+}
+
+function openVacationHistoryDialog(reqs) {
+  const sorted = reqs.slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🏖 長期休暇申請 全履歴"));
+  body.appendChild(el("div", { class: "text-xs text-slate-500" }, `合計 ${sorted.length} 件`));
+  const list = el("div", { class: "space-y-1 max-h-96 overflow-y-auto text-xs" });
+  for (const r of sorted) {
+    const staff = state.staff.find(s => s.id === r.staffId);
+    const STATUS_LABEL = { pending: "⏳ 申請中", approved: "✓ 承認", rejected: "✗ 却下" };
+    const days = Math.round((new Date(r.endDate) - new Date(r.startDate)) / 86400000) + 1;
+    const row = el("div", { class: "border border-slate-100 rounded p-2" });
+    row.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="font-medium">${escapeHtml(staff?.name || r.staffName || "?")}</div>
+        <div class="text-slate-600">${STATUS_LABEL[r.status] || ""}</div>
+      </div>
+      <div class="text-slate-500">${escapeHtml(r.startDate)} 〜 ${escapeHtml(r.endDate)} (${days} 日)</div>
+      ${r.reason ? `<div class="text-slate-500">理由: ${escapeHtml(r.reason)}</div>` : ""}
+      <div class="text-slate-400 text-[10px]">申請: ${r.createdAt ? new Date(r.createdAt).toLocaleString("ja-JP") : "—"}</div>
+    `;
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+  body.appendChild(el("button", {
+    class: "w-full text-sm bg-slate-200 rounded-md py-1.5",
+    onclick: closeModal,
+  }, "閉じる"));
+  modal(body);
+}
+
+// ===== スタッフ・インサイト (Round 16 TOP 3) =====
+function renderStaffInsights() {
+  // 過去 8 週分の確定済シフトと希望データから、各スタッフの指標を集計
+  const allWeeks = state.weeks || {};
+  const sortedWeekKeys = Object.keys(allWeeks).sort();
+  const last8 = sortedWeekKeys.slice(-8);
+  if (last8.length === 0) return null;
+
+  // 各スタッフのメトリクス
+  const insights = {};
+  for (const s of state.staff) {
+    insights[s.id] = {
+      staff: s,
+      totalHours: 0,
+      shiftCount: 0,
+      prefSubmitWeeks: 0, // 希望提出した週数
+      mustHonored: 0, mustTotal: 0,    // 必須希望の充足率
+      avoidViolated: 0, avoidTotal: 0, // 不可なのに割当てられた回数
+      vacReqCount: 0, swapReqCount: 0,
+      weeksWorked: new Set(),
+    };
+  }
+  let weeksConsidered = 0;
+  for (const wkey of last8) {
+    const wk = allWeeks[wkey];
+    if (wk.status !== "published") continue;
+    weeksConsidered++;
+    const submitted = new Set();
+    for (const p of (wk.preferences || [])) submitted.add(p.staffId);
+    for (const sid of submitted) if (insights[sid]) insights[sid].prefSubmitWeeks++;
+
+    for (const a of (wk.assignments || [])) {
+      const ins = insights[a.staffId];
+      if (!ins) continue;
+      const h = calcHours(a.startTime, a.endTime);
+      ins.totalHours += h;
+      ins.shiftCount++;
+      ins.weeksWorked.add(wkey);
+    }
+    // 必須・不可の達成度
+    for (const p of (wk.preferences || [])) {
+      const ins = insights[p.staffId];
+      if (!ins) continue;
+      const matched = (wk.assignments || []).some(a =>
+        a.staffId === p.staffId && a.date === p.date
+        && _timeOverlap(a.startTime, a.endTime, p.startTime, p.endTime)
+      );
+      if (p.priority === "must") {
+        ins.mustTotal++;
+        if (matched) ins.mustHonored++;
+      } else if (p.priority === "avoid") {
+        ins.avoidTotal++;
+        if (matched) ins.avoidViolated++;
+      }
+    }
+  }
+
+  // 申請履歴
+  for (const vr of (state.meta.vacationRequests || [])) {
+    if (insights[vr.staffId]) insights[vr.staffId].vacReqCount++;
+  }
+  for (const sw of (state.meta.swapRequests || [])) {
+    if (insights[sw.fromStaffId]) insights[sw.fromStaffId].swapReqCount++;
+  }
+
+  // ソート (働いた時間が多い順)
+  const sorted = Object.values(insights).sort((a, b) => b.totalHours - a.totalHours);
+  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  card.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
+    el("div", { class: "font-semibold text-sm" }, `📊 スタッフ・インサイト (直近 ${weeksConsidered} 週)`),
+    el("div", { class: "text-[10px] text-slate-500" }, "希望提出率 / 必須充足率 / 燃え尽きリスク"),
+  ]));
+  if (weeksConsidered === 0) {
+    card.appendChild(el("div", { class: "text-xs text-slate-500 text-center py-2" }, "確定済の週がまだありません"));
+    return card;
+  }
+  const list = el("div", { class: "space-y-2" });
+  for (const ins of sorted) {
+    if (ins.totalHours === 0 && ins.prefSubmitWeeks === 0) continue;
+    const submitRate = weeksConsidered > 0 ? ins.prefSubmitWeeks / weeksConsidered : 0;
+    const mustRate = ins.mustTotal > 0 ? ins.mustHonored / ins.mustTotal : null;
+    const avoidViolationRate = ins.avoidTotal > 0 ? ins.avoidViolated / ins.avoidTotal : 0;
+    const avgWeeklyHours = weeksConsidered > 0 ? ins.totalHours / weeksConsidered : 0;
+    // 燃え尽きリスク: 平均週時間が高い + avoid 違反率が高い
+    let burnoutScore = 0;
+    if (avgWeeklyHours > 35) burnoutScore += 2;
+    else if (avgWeeklyHours > 28) burnoutScore += 1;
+    if (avoidViolationRate > 0.3) burnoutScore += 2;
+    else if (avoidViolationRate > 0.1) burnoutScore += 1;
+    if (ins.swapReqCount > 2) burnoutScore += 1;
+    const burnoutLabel = burnoutScore >= 3 ? `<span class="bg-red-100 text-red-800 rounded px-1.5 py-0.5 text-[10px]">🔥 高</span>`
+                       : burnoutScore >= 2 ? `<span class="bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px]">⚠️ 中</span>`
+                       : `<span class="bg-emerald-100 text-emerald-800 rounded px-1.5 py-0.5 text-[10px]">✓ 低</span>`;
+    const submitColor = submitRate >= 0.8 ? "#10b981" : submitRate >= 0.5 ? "#f59e0b" : "#dc2626";
+    const reliabilityLabel = (() => {
+      if (ins.prefSubmitWeeks === weeksConsidered && submitRate >= 1.0) return `<span class="text-[10px] text-emerald-600">⭐ 皆勤</span>`;
+      return "";
+    })();
+
+    const row = el("div", { class: "border border-slate-100 rounded-md p-2" });
+    row.innerHTML = `
+      <div class="flex items-center justify-between flex-wrap gap-1 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold">${escapeHtml(ins.staff.name)}</span>
+          <span class="text-[10px] text-slate-500">${escapeHtml(posCfg(ins.staff.position).label)}</span>
+          ${reliabilityLabel}
+        </div>
+        <div class="flex items-center gap-1.5">燃え尽き: ${burnoutLabel}</div>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 text-[11px]">
+        <div>
+          <div class="text-slate-500 text-[10px]">希望提出率</div>
+          <div class="font-semibold" style="color:${submitColor}">${Math.round(submitRate*100)}%</div>
+          <div class="text-[9px] text-slate-400">${ins.prefSubmitWeeks}/${weeksConsidered} 週</div>
+        </div>
+        <div>
+          <div class="text-slate-500 text-[10px]">必須充足率</div>
+          <div class="font-semibold">${mustRate === null ? "—" : Math.round(mustRate*100) + "%"}</div>
+          <div class="text-[9px] text-slate-400">${ins.mustHonored}/${ins.mustTotal}</div>
+        </div>
+        <div>
+          <div class="text-slate-500 text-[10px]">平均週時間</div>
+          <div class="font-semibold">${avgWeeklyHours.toFixed(1)}h</div>
+          <div class="text-[9px] text-slate-400">合計 ${ins.totalHours.toFixed(0)}h / ${ins.shiftCount} 件</div>
+        </div>
+        <div>
+          <div class="text-slate-500 text-[10px]">不可割当率</div>
+          <div class="font-semibold ${avoidViolationRate > 0.1 ? 'text-red-600' : ''}">${ins.avoidTotal === 0 ? "—" : Math.round(avoidViolationRate*100) + "%"}</div>
+          <div class="text-[9px] text-slate-400">${ins.avoidViolated}/${ins.avoidTotal}</div>
+        </div>
+      </div>
+      ${(ins.vacReqCount > 0 || ins.swapReqCount > 0) ? `
+        <div class="mt-1.5 text-[10px] text-slate-500 flex gap-2">
+          ${ins.vacReqCount > 0 ? `<span>🏖 休暇申請 ${ins.vacReqCount}回</span>` : ""}
+          ${ins.swapReqCount > 0 ? `<span>🔄 交換申請 ${ins.swapReqCount}回</span>` : ""}
+        </div>` : ""}
+    `;
+    list.appendChild(row);
+  }
+  if (list.children.length === 0) {
+    card.appendChild(el("div", { class: "text-xs text-slate-500 text-center py-2" },
+      "データが不足しています (確定済の週・希望データが必要)"));
+  } else {
+    card.appendChild(list);
+  }
+  return card;
+}
+
+function _timeOverlap(s1, e1, s2, e2) {
+  function _t(s) { const [h, m] = s.split(":").map(Number); return h * 60 + m; }
+  return _t(s1) < _t(e2) && _t(s2) < _t(e1);
+}
+
+// ===== シフト交換掲示板 (Round 16 TOP 2) =====
+function renderSwapRequestsCard() {
+  const swaps = (state.meta && state.meta.swapRequests) || [];
+  if (swaps.length === 0) return null;
+  const claimed = swaps.filter(s => s.status === "claimed");
+  const open = swaps.filter(s => s.status === "open");
+  const recent = swaps.slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, 10);
+
+  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  card.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
+    el("div", { class: "font-semibold text-sm" }, [
+      el("span", {}, "🔄 シフト交換"),
+      claimed.length > 0 ? el("span", { class: "ml-2 bg-blue-100 text-blue-800 rounded px-1.5 py-0.5 text-[10px]" },
+        `承認待ち ${claimed.length}`) : null,
+      open.length > 0 ? el("span", { class: "ml-2 bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px]" },
+        `募集中 ${open.length}`) : null,
+    ]),
+  ]));
+  const list = el("div", { class: "space-y-1.5" });
+  for (const sw of recent) {
+    const fromStaff = state.staff.find(s => s.id === sw.fromStaffId);
+    const claimedBy = state.staff.find(s => s.id === sw.claimedBy);
+    const STATUS_BADGE = {
+      open: `<span class="bg-amber-100 text-amber-800 rounded px-1.5 py-0.5">募集中</span>`,
+      claimed: `<span class="bg-blue-100 text-blue-800 rounded px-1.5 py-0.5">承認待ち</span>`,
+      approved: `<span class="bg-emerald-100 text-emerald-800 rounded px-1.5 py-0.5">✓ 承認</span>`,
+      rejected: `<span class="bg-red-100 text-red-800 rounded px-1.5 py-0.5">✗ 却下</span>`,
+      cancelled: `<span class="bg-slate-200 text-slate-700 rounded px-1.5 py-0.5">取消</span>`,
+    };
+    const row = el("div", { class: "border border-slate-100 rounded-md p-2 text-xs flex items-center justify-between gap-2" });
+    row.innerHTML = `
+      <div class="flex-1 min-w-0">
+        <div class="font-medium">
+          ${escapeHtml(fromStaff?.name || sw.fromStaffName || "?")}
+          ${sw.claimedBy ? `<span class="text-slate-500">→ ${escapeHtml(claimedBy?.name || sw.claimedByName || "?")}</span>` : ""}
+        </div>
+        <div class="text-slate-500">${escapeHtml(sw.date)} ${escapeHtml(sw.startTime)}〜${escapeHtml(sw.endTime)} (${escapeHtml(posCfg(sw.position).label)})</div>
+        ${sw.note ? `<div class="text-slate-400 text-[10px] truncate">伝言: ${escapeHtml(sw.note)}</div>` : ""}
+      </div>
+      <div class="flex items-center gap-1">${STATUS_BADGE[sw.status] || ""}</div>
+    `;
+    if (sw.status === "claimed") {
+      const btnGroup = el("div", { class: "flex gap-1" });
+      btnGroup.appendChild(el("button", {
+        class: "text-[10px] bg-emerald-500 hover:bg-emerald-600 text-white rounded px-2 py-1 font-semibold",
+        onclick: () => decideSwapRequest(sw.id, "approved"),
+      }, "✓ 承認"));
+      btnGroup.appendChild(el("button", {
+        class: "text-[10px] bg-red-500 hover:bg-red-600 text-white rounded px-2 py-1 font-semibold",
+        onclick: () => decideSwapRequest(sw.id, "rejected"),
+      }, "✗ 却下"));
+      row.appendChild(btnGroup);
+    } else if (sw.status === "open") {
+      row.appendChild(el("button", {
+        class: "text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 rounded px-2 py-1",
+        onclick: () => decideSwapRequest(sw.id, "cancelled"),
+      }, "取消"));
+    }
+    list.appendChild(row);
+  }
+  card.appendChild(list);
+  return card;
+}
+
+async function decideSwapRequest(swapId, decision) {
+  const swaps = state.meta.swapRequests || [];
+  const sw = swaps.find(s => s.id === swapId);
+  if (!sw) { toast("対象が見つかりません", "error"); return; }
+  const fromStaff = state.staff.find(s => s.id === sw.fromStaffId);
+  const claimedBy = state.staff.find(s => s.id === sw.claimedBy);
+
+  if (decision === "approved") {
+    if (sw.status !== "claimed") { toast("承認には引受が必要です", "error"); return; }
+    if (!confirm(`${fromStaff?.name || sw.fromStaffName} → ${claimedBy?.name || sw.claimedByName} へのシフト交換 (${sw.date} ${sw.startTime}〜) を承認しますか？\n\n承認すると該当アサインの担当者を変更します。`)) return;
+
+    // 該当 assignment を変更
+    const wk = state.weeks?.[sw.weekStart];
+    if (!wk) { toast("該当週が見つかりません", "error"); return; }
+    const idx = (wk.assignments || []).findIndex(a => a.id === sw.assignmentId);
+    if (idx < 0) { toast("該当アサインが見つかりません", "error"); return; }
+    const orig = wk.assignments[idx];
+    const newStaff = state.staff.find(s => s.id === sw.claimedBy);
+    if (!newStaff) { toast("引受スタッフが見つかりません", "error"); return; }
+    // 適格性チェック
+    const elig = newStaff.position === orig.position || (newStaff.canCover || []).includes(orig.position);
+    if (!elig && !confirm(`${newStaff.name} さんは ${posCfg(orig.position).label} を担当できないと設定されています。\nそれでも交換を承認しますか？`)) return;
+    // 入替実行
+    wk.assignments[idx] = {
+      ...orig,
+      staffId: newStaff.id,
+      cost: newStaff.hourlyWage * calcHours(orig.startTime, orig.endTime),
+    };
+    sw.status = "approved";
+    sw.decidedAt = new Date().toISOString();
+    logChange("swap_approved", `${fromStaff?.name || "?"} → ${newStaff.name} のシフト交換を承認 (${sw.date} ${sw.startTime}〜)`);
+  } else if (decision === "rejected") {
+    if (!confirm(`このシフト交換を却下しますか？\n却下すると元のスタッフのシフトとして残ります。`)) return;
+    sw.status = "rejected";
+    sw.decidedAt = new Date().toISOString();
+    logChange("swap_rejected", `${fromStaff?.name || "?"} のシフト交換を却下 (${sw.date} ${sw.startTime}〜)`);
+  } else if (decision === "cancelled") {
+    if (!confirm(`このシフト交換募集を取消しますか？`)) return;
+    sw.status = "cancelled";
+    sw.decidedAt = new Date().toISOString();
+    logChange("swap_cancelled", `シフト交換募集を取消 (${sw.date} ${sw.startTime}〜)`);
+  }
+  await persist(); render();
+  toast(`✓ シフト交換を${decision === "approved" ? "承認" : decision === "rejected" ? "却下" : "取消"}しました`, "success");
+
+  // 承認の場合は対象スタッフへ変更通知
+  if (decision === "approved") {
+    await notifyShiftChanges([sw.fromStaffId, sw.claimedBy]);
+  }
+}
+
 // ===== 月次労務リスク (Round 15 TOP 1) =====
 function renderMonthlyLaborRisk() {
   // 当月キー (現在週の月を採用)
@@ -427,6 +848,12 @@ function viewDashboard() {
   if (state.staff.length > 0) {
     const monthCard = renderMonthlyLaborRisk();
     if (monthCard) wrap.appendChild(monthCard);
+  }
+
+  // スタッフ・インサイト (Round 16 TOP 3) — 希望提出率・カバレッジ貢献・燃え尽きリスク
+  if (state.staff.length > 0) {
+    const insightCard = renderStaffInsights();
+    if (insightCard) wrap.appendChild(insightCard);
   }
 
   // 人件費推移グラフ (Round 11) — 過去 8 週分の確定済シフト人件費
@@ -1584,6 +2011,14 @@ function viewPreferences() {
     ]),
   ]));
 
+  // 長期休暇申請カード (Round 16 TOP 1)
+  const vacReqCard = renderVacationRequestsCard();
+  if (vacReqCard) wrap.appendChild(vacReqCard);
+
+  // シフト交換掲示板カード (Round 16 TOP 2)
+  const swapCard = renderSwapRequestsCard();
+  if (swapCard) wrap.appendChild(swapCard);
+
   const submitted = state.staff.filter(s => curPrefs().some(p => p.staffId === s.id));
   const notSubmitted = state.staff.filter(s => !curPrefs().some(p => p.staffId === s.id));
   wrap.appendChild(el("div", { class: "grid grid-cols-2 gap-3" }, [
@@ -1861,7 +2296,7 @@ function viewSchedule() {
       el("summary", { class: "text-sm font-semibold cursor-pointer select-none" },
         `📜 変更履歴 (${changeLog.length} 件)`),
       el("div", { class: "mt-3 space-y-1 text-xs max-h-80 overflow-y-auto" }, changeLog.slice().reverse().map(log => {
-        const TYPE_EMOJI = { publish: "✅", unpublish: "📝", delete: "🗑", swap: "🔄", substitute: "🆘", add: "➕", autogenerate: "🤖", note: "📝" };
+        const TYPE_EMOJI = { publish: "✅", unpublish: "📝", delete: "🗑", swap: "🔄", substitute: "🆘", add: "➕", autogenerate: "🤖", note: "📝", vacation_approved: "🏖", vacation_rejected: "🏖", swap_approved: "🔄", swap_rejected: "🔄", swap_cancelled: "🔄" };
         const emoji = TYPE_EMOJI[log.type] || "📌";
         const ts = log.at ? new Date(log.at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
         const row = el("div", { class: "flex items-start gap-2 bg-slate-50 rounded p-2" });
@@ -1888,7 +2323,13 @@ function renderChangeLog() {
   summary.innerHTML = `<span>📜 変更履歴 <span class="text-xs text-slate-500 font-normal">(${log.length}件)</span></span><span class="text-xs text-slate-400">クリックで開閉 ▾</span>`;
   card.appendChild(summary);
   const list = el("div", { class: "mt-3 space-y-1.5 text-xs" });
-  const TYPE_LABEL = { publish: "✅ 確定", unpublish: "📝 下書きに戻す", delete: "🗑 削除", swap: "🔄 入替", substitute: "🆘 代打", add: "➕ 追加", autogenerate: "🤖 AI生成", note: "📝 メモ更新" };
+  const TYPE_LABEL = {
+    publish: "✅ 確定", unpublish: "📝 下書きに戻す", delete: "🗑 削除",
+    swap: "🔄 入替", substitute: "🆘 代打", add: "➕ 追加",
+    autogenerate: "🤖 AI生成", note: "📝 メモ更新",
+    vacation_approved: "🏖 休暇承認", vacation_rejected: "🏖 休暇却下",
+    swap_approved: "🔄 交換承認", swap_rejected: "🔄 交換却下", swap_cancelled: "🔄 交換取消",
+  };
   sorted.forEach(entry => {
     const at = new Date(entry.at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
     const row = el("div", { class: "flex items-start gap-2 border-b border-slate-100 pb-1.5" });

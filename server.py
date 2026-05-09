@@ -1932,6 +1932,35 @@ def api_t_portal_get(slug, token):
         except Exception:
             pass
 
+    # シフト交換掲示板 (Round 16 TOP 2): 公開中のすべて + 自分が出した分の履歴
+    swap_open = []
+    swap_mine = []
+    for sw in (meta.get("swapRequests") or []):
+        if sw.get("status") == "open":
+            swap_open.append(sw)
+        if sw.get("fromStaffId") == staff_id or sw.get("claimedBy") == staff_id:
+            swap_mine.append(sw)
+    swap_open.sort(key=lambda x: (x.get("date", ""), x.get("startTime", "")))
+    swap_mine.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+    swap_mine = swap_mine[:10]
+
+    # 長期休暇申請の自分の履歴 (Round 16 TOP 1)
+    my_vacations = []
+    for vr in (meta.get("vacationRequests") or []):
+        if vr.get("staffId") == staff_id:
+            my_vacations.append({
+                "id": vr.get("id"),
+                "startDate": vr.get("startDate"),
+                "endDate": vr.get("endDate"),
+                "reason": vr.get("reason", ""),
+                "status": vr.get("status", "pending"),
+                "createdAt": vr.get("createdAt"),
+                "decidedAt": vr.get("decidedAt"),
+                "decidedNote": vr.get("decidedNote", ""),
+            })
+    my_vacations.sort(key=lambda v: v.get("createdAt", ""), reverse=True)
+    my_vacations = my_vacations[:10]
+
     # 複数週対応 (Round 15 TOP 2): 提出可能な週リスト
     available_weeks = []
     if current_wk:
@@ -1973,6 +2002,9 @@ def api_t_portal_get(slug, token):
         },
         "history": history_assignments,
         "prefHistory": pref_history,
+        "vacationRequests": my_vacations,
+        "swapsOpen": swap_open,
+        "swapsMine": swap_mine,
     })
 
 
@@ -2144,6 +2176,255 @@ def api_t_portal_message(slug, token):
         to_addr=_safe_header(notify_to),
         subject=_safe_header(f"【Shifty】{KIND_LABEL.get(kind, '連絡')}: {staff.get('name', '?')}"),
         body=f"スタッフ「{staff.get('name', '?')}」から{KIND_LABEL.get(kind, '連絡')}が届きました。\n\n{msg}\n\n---\n受信日時: {record['createdAt']}\n店舗: {tenant.get('restaurantName') if tenant else slug}",
+    )
+    return jsonify({"ok": True})
+
+
+# ============================================================
+# 長期休暇申請 (Round 16 TOP 1)
+# ============================================================
+@app.post("/api/t/<slug>/portal/<token>/vacation-request")
+def api_t_portal_vacation_request(slug, token):
+    if _rate_check("portal_vac"):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    payload = _get_json()
+    import re as _re_v
+    date_re = _re_v.compile(r"^\d{4}-\d{2}-\d{2}$")
+    start_date = (payload.get("startDate") or "").strip()
+    end_date = (payload.get("endDate") or "").strip()
+    reason = (payload.get("reason") or "").strip()[:300]
+    if not date_re.match(start_date) or not date_re.match(end_date):
+        return jsonify({"error": "invalid_date"}), 400
+    if end_date < start_date:
+        return jsonify({"error": "end_before_start"}), 400
+    # 期間が 90 日を超えるリクエストは拒否
+    import datetime as _dt_v
+    try:
+        sd = _dt_v.datetime.strptime(start_date, "%Y-%m-%d")
+        ed = _dt_v.datetime.strptime(end_date, "%Y-%m-%d")
+        if (ed - sd).days > 90:
+            return jsonify({"error": "range_too_long"}), 400
+    except Exception:
+        return jsonify({"error": "invalid_date"}), 400
+
+    state = s.get_state()
+    staff = next((st for st in (state.get("staff") or []) if st["id"] == staff_id), None) if state else None
+    if not staff:
+        return jsonify({"error": "staff_not_found"}), 404
+
+    req_id = "v_" + secrets.token_urlsafe(8)
+    new_req = {
+        "id": req_id,
+        "staffId": staff_id,
+        "staffName": staff.get("name", ""),
+        "startDate": start_date,
+        "endDate": end_date,
+        "reason": reason,
+        "status": "pending",
+        "createdAt": _dt_v.datetime.utcnow().isoformat() + "Z",
+    }
+
+    def _mutate(current):
+        if current is None:
+            return current
+        meta = current.setdefault("meta", {})
+        reqs = meta.setdefault("vacationRequests", [])
+        # 重複チェック (同期間の重複は許可しない)
+        for r in reqs:
+            if r.get("staffId") == staff_id and r.get("status") == "pending" \
+               and r.get("startDate") == start_date and r.get("endDate") == end_date:
+                # Already exists
+                return current
+        # 上限 200 件 (古いものから削除)
+        if len(reqs) >= 200:
+            reqs[:] = reqs[-199:]
+        reqs.append(new_req)
+        return current
+
+    s.transactional_update(_mutate)
+
+    # オーナーへメール通知
+    tm = get_tenant_manager()
+    tenant = tm.get(slug)
+    notify_to = tenant.get("email") if tenant else NOTIFY_TO
+    days_count = (ed - sd).days + 1
+    send_email(
+        to_addr=_safe_header(notify_to),
+        subject=_safe_header(f"【Shifty】長期休暇申請: {staff.get('name', '?')} ({start_date}〜{end_date})"),
+        body=(
+            f"スタッフ「{staff.get('name', '?')}」から長期休暇申請が届きました。\n\n"
+            f"期間: {start_date} 〜 {end_date} ({days_count} 日間)\n"
+            f"理由: {reason or '(未記入)'}\n\n"
+            f"管理画面の「希望収集」タブで承認/却下を行ってください。\n"
+            f"承認すると該当期間の希望が自動的に「不可」に設定されます。\n\n"
+            f"店舗: {tenant.get('restaurantName') if tenant else slug}\n"
+        ),
+    )
+    return jsonify({"ok": True, "id": req_id})
+
+
+# ============================================================
+# シフト交換掲示板 (Round 16 TOP 2)
+# ============================================================
+@app.post("/api/t/<slug>/portal/<token>/swap-request")
+def api_t_portal_swap_create(slug, token):
+    if _rate_check("portal_swap"):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    payload = _get_json()
+    assignment_id = (payload.get("assignmentId") or "").strip()[:64]
+    week_start = (payload.get("weekStart") or "").strip()
+    note = (payload.get("note") or "").strip()[:200]
+    if not assignment_id:
+        return jsonify({"error": "missing_assignment_id"}), 400
+
+    state = s.get_state()
+    if state is None:
+        return jsonify({"error": "no_state"}), 404
+    staff = next((st for st in (state.get("staff") or []) if st["id"] == staff_id), None)
+    if not staff:
+        return jsonify({"error": "staff_not_found"}), 404
+
+    # 該当 assignment を探す (週指定が無ければ全週から)
+    target = None
+    target_week = None
+    weeks = state.get("weeks") or {}
+    if week_start and week_start in weeks:
+        for a in (weeks[week_start].get("assignments") or []):
+            if a.get("id") == assignment_id and a.get("staffId") == staff_id:
+                target = a; target_week = week_start; break
+    if not target:
+        for wkey, wdata in weeks.items():
+            for a in (wdata.get("assignments") or []):
+                if a.get("id") == assignment_id and a.get("staffId") == staff_id:
+                    target = a; target_week = wkey; break
+            if target: break
+    if not target:
+        return jsonify({"error": "assignment_not_found"}), 404
+
+    import datetime as _dt_s
+    swap_id = "sw_" + secrets.token_urlsafe(8)
+    new_swap = {
+        "id": swap_id,
+        "fromStaffId": staff_id,
+        "fromStaffName": staff.get("name", ""),
+        "weekStart": target_week,
+        "assignmentId": assignment_id,
+        "date": target.get("date"),
+        "startTime": target.get("startTime"),
+        "endTime": target.get("endTime"),
+        "position": target.get("position"),
+        "note": note,
+        "status": "open",  # open | claimed | approved | rejected | cancelled
+        "createdAt": _dt_s.datetime.utcnow().isoformat() + "Z",
+    }
+
+    def _mutate(current):
+        if current is None:
+            return current
+        meta = current.setdefault("meta", {})
+        swaps = meta.setdefault("swapRequests", [])
+        # 重複チェック (open 状態の同 assignment)
+        for sw in swaps:
+            if sw.get("assignmentId") == assignment_id and sw.get("status") == "open":
+                return current
+        if len(swaps) >= 200:
+            swaps[:] = swaps[-199:]
+        swaps.append(new_swap)
+        return current
+
+    s.transactional_update(_mutate)
+
+    # オーナー & 全スタッフ (メールあり) に通知
+    tm = get_tenant_manager()
+    tenant = tm.get(slug)
+    notify_to = tenant.get("email") if tenant else NOTIFY_TO
+    pos = next((p for p in (state.get("meta", {}).get("positions") or []) if p.get("id") == target.get("position")), {})
+    pos_label = pos.get("label", target.get("position", ""))
+    send_email(
+        to_addr=_safe_header(notify_to),
+        subject=_safe_header(f"【Shifty】シフト交換募集: {staff.get('name', '?')} ({target.get('date')})"),
+        body=(
+            f"スタッフ「{staff.get('name', '?')}」がシフト交換を募集しました。\n\n"
+            f"日付: {target.get('date')}\n"
+            f"時間: {target.get('startTime')}〜{target.get('endTime')}\n"
+            f"ポジション: {pos_label}\n"
+            f"伝言: {note or '(未記入)'}\n\n"
+            f"スタッフポータルで他のスタッフが「引受」した場合、店長承認が必要です。\n"
+        ),
+    )
+    return jsonify({"ok": True, "id": swap_id})
+
+
+@app.post("/api/t/<slug>/portal/<token>/swap-request/<sid>/take")
+def api_t_portal_swap_take(slug, token, sid):
+    if _rate_check("portal_swap"):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+
+    state = s.get_state()
+    if state is None:
+        return jsonify({"error": "no_state"}), 404
+    taker = next((st for st in (state.get("staff") or []) if st["id"] == staff_id), None)
+    if not taker:
+        return jsonify({"error": "staff_not_found"}), 404
+
+    import datetime as _dt_s
+    target_swap = {"swap": None}
+
+    def _mutate(current):
+        if current is None:
+            return current
+        meta = current.setdefault("meta", {})
+        swaps = meta.setdefault("swapRequests", [])
+        for sw in swaps:
+            if sw.get("id") == sid and sw.get("status") == "open":
+                if sw.get("fromStaffId") == staff_id:
+                    target_swap["self"] = True
+                    return current
+                sw["status"] = "claimed"
+                sw["claimedBy"] = staff_id
+                sw["claimedByName"] = taker.get("name", "")
+                sw["claimedAt"] = _dt_s.datetime.utcnow().isoformat() + "Z"
+                target_swap["swap"] = sw
+                return current
+        target_swap["notfound"] = True
+        return current
+
+    s.transactional_update(_mutate)
+    if target_swap.get("self"):
+        return jsonify({"error": "cannot_take_own_swap"}), 400
+    if target_swap.get("notfound") or not target_swap["swap"]:
+        return jsonify({"error": "swap_not_open"}), 404
+
+    sw = target_swap["swap"]
+    tm = get_tenant_manager()
+    tenant = tm.get(slug)
+    notify_to = tenant.get("email") if tenant else NOTIFY_TO
+    send_email(
+        to_addr=_safe_header(notify_to),
+        subject=_safe_header(f"【Shifty】シフト交換引受: {taker.get('name', '?')} → 承認待ち"),
+        body=(
+            f"スタッフ「{taker.get('name', '?')}」が、{sw.get('fromStaffName')} さんのシフト ({sw.get('date')} {sw.get('startTime')}〜{sw.get('endTime')}) を引受しました。\n\n"
+            f"管理画面の「希望収集」タブで承認/却下を行ってください。\n"
+            f"承認すると該当アサインの担当者が自動的に切り替わります。\n"
+        ),
     )
     return jsonify({"ok": True})
 
