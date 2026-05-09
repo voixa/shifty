@@ -179,9 +179,13 @@
     },
     skill: {
       label: "スキル",
-      rationale: "スキルレベルが高いほど高得点（1〜5を 0..1 に正規化）",
-      compute(staff) {
-        return { value: (staff.skill || 1) / 5, detail: `スキル${staff.skill || 1}/5` };
+      rationale: "スキルレベルが高いほど高得点（1〜5を 0..1 に正規化）。Round 22: ポジション別スキル優先",
+      compute(staff, slot) {
+        // Round 22: タスク別スキル (slot.position に対する熟練度) を優先、無ければ本職スキル
+        let skillVal = (staff.skills && staff.skills[slot.position] != null)
+          ? staff.skills[slot.position]
+          : (staff.skill || 1);
+        return { value: skillVal / 5, detail: `${slot.position} スキル ${skillVal}/5` };
       },
     },
   };

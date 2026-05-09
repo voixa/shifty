@@ -909,6 +909,98 @@ function openMonthlyReport() {
   document.body.appendChild(wrap);
 }
 
+// ===== グループ通知 (Round 22 TOP 2) =====
+function openBroadcastDialog() {
+  if (state.staff.length === 0) { toast("送信先のスタッフがいません", "error"); return; }
+  const candidates = state.staff.filter(s => !s.archived);
+  const withEmail = candidates.filter(s => (s.email || "").trim()).length;
+  const withWebhook = candidates.filter(s => (s.webhookUrl || "").trim()).length;
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "📢 全員に通知"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    `${candidates.length} 名のうち、メール登録 ${withEmail} 名 / Webhook 登録 ${withWebhook} 名へ送信されます。`));
+
+  const sevSelect = el("select", { id: "br-sev", class: "w-full border rounded px-2 py-1 text-sm" });
+  for (const [val, label] of [["normal", "📢 通常 (お知らせ)"], ["important", "❗ 重要 (会議・変更)"], ["urgent", "🚨 緊急 (台風・休業)"]]) {
+    sevSelect.appendChild(el("option", { value: val }, label));
+  }
+
+  body.appendChild(el("label", { class: "block text-sm" }, [
+    el("span", { class: "text-slate-700" }, "緊急度"),
+    sevSelect,
+  ]));
+
+  const subjInput = el("input", {
+    id: "br-subj", class: "w-full border rounded px-2 py-1 text-sm", maxlength: "200",
+    placeholder: "件名 (例: 来週の営業時間変更について)",
+  });
+  body.appendChild(el("label", { class: "block text-sm" }, [
+    el("span", { class: "text-slate-700" }, "件名 (任意)"),
+    subjInput,
+  ]));
+
+  const bodyInput = el("textarea", {
+    id: "br-body", rows: "5", maxlength: "3000",
+    class: "w-full border rounded px-2 py-1 text-sm",
+    placeholder: "メッセージ本文 (3000 字まで)\n\n例:\nお疲れ様です。台風 5 号接近のため、明日 (5/15) は営業時間を 12:00〜18:00 に短縮します。\n出勤予定のシフトは変更なし、終了時刻のみ早まります。\nご確認お願いします。",
+  });
+  body.appendChild(el("label", { class: "block text-sm" }, [
+    el("span", { class: "text-slate-700" }, "本文"),
+    bodyInput,
+  ]));
+
+  // 送信先選択
+  const targetWrap = el("details", { class: "border border-slate-200 rounded p-2" });
+  targetWrap.appendChild(el("summary", { class: "text-sm cursor-pointer" }, "送信先 (絞込)"));
+  const checkAllRow = el("div", { class: "mt-2 mb-1 flex gap-2 text-xs" }, [
+    el("button", { class: "text-blue-600 hover:underline", type: "button",
+      onclick: () => targetWrap.querySelectorAll("input[data-target]").forEach(i => i.checked = true) }, "全選択"),
+    el("button", { class: "text-slate-500 hover:underline", type: "button",
+      onclick: () => targetWrap.querySelectorAll("input[data-target]").forEach(i => i.checked = false) }, "全解除"),
+  ]);
+  targetWrap.appendChild(checkAllRow);
+  const targetGrid = el("div", { class: "grid grid-cols-2 sm:grid-cols-3 gap-1" });
+  for (const s of candidates) {
+    const hasContact = (s.email || s.webhookUrl);
+    targetGrid.appendChild(el("label", { class: `inline-flex items-center gap-1 text-xs ${hasContact ? "" : "opacity-50"}` }, [
+      (() => {
+        const cb = el("input", { type: "checkbox", "data-target": s.id });
+        cb.checked = !!hasContact; // デフォルトで連絡先ありのみ ON
+        return cb;
+      })(),
+      el("span", {}, `${s.name}${!hasContact ? " (連絡先なし)" : ""}`),
+    ]));
+  }
+  targetWrap.appendChild(targetGrid);
+  body.appendChild(targetWrap);
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-md font-semibold",
+      onclick: async () => {
+        const severity = sevSelect.value;
+        const subject = subjInput.value.trim();
+        const bodyText = bodyInput.value.trim();
+        if (!bodyText) { toast("本文を入力してください", "error"); return; }
+        const targets = Array.from(targetWrap.querySelectorAll("input[data-target]:checked")).map(i => i.getAttribute("data-target"));
+        if (targets.length === 0) { toast("送信先を 1 名以上選んでください", "error"); return; }
+        const sevLabel = { normal: "通常", important: "重要", urgent: "緊急" }[severity];
+        if (!confirm(`${targets.length} 名へ「${sevLabel}」通知を送信します。よろしいですか？`)) return;
+        try {
+          const r = await window.ShiftyAPI.broadcast({ severity, subject, body: bodyText, staffIds: targets });
+          toast(`✓ ${r.sentEmail} 名にメール送信、${r.sentWebhook} Webhook 送信 (${r.skipped} 名スキップ)`, "success", 6000);
+          closeModal();
+        } catch (e) {
+          toast("送信失敗: " + (e?.message || ""), "error");
+        }
+      },
+    }, "📢 送信"),
+  ]));
+  modal(body);
+}
+
 // ===== モデルシフト (Round 21 TOP 1) =====
 // 過去の確定済シフトと売上から「曜日×セッション×ポジション」の最適人数を学習
 function computeModelShift() {
@@ -2504,9 +2596,16 @@ function aggregateByStaff() {
 // ===== View: Staff =====
 function viewStaff() {
   const wrap = el("div", { class: "space-y-4" });
+  // Round 22: 検索 & アーカイブ表示の状態
+  if (typeof window._staffSearchQuery === "undefined") window._staffSearchQuery = "";
+  if (typeof window._showArchived === "undefined") window._showArchived = false;
+  if (typeof window._positionFilter === "undefined") window._positionFilter = "all";
+
   wrap.appendChild(el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
-    el("h2", { class: "text-xl font-bold" }, `スタッフ管理 (${state.staff.length}名)`),
+    el("h2", { class: "text-xl font-bold" }, `スタッフ管理 (${state.staff.filter(s => !s.archived).length}名${state.staff.some(s => s.archived) ? ` + アーカイブ${state.staff.filter(s => s.archived).length}名` : ""})`),
     el("div", { class: "flex gap-2 flex-wrap" }, [
+      state.staff.length > 0 ? el("button", { class: "text-sm border border-purple-300 text-purple-700 hover:bg-purple-50 rounded-md px-3 py-1.5",
+        onclick: () => openBroadcastDialog() }, "📢 全員に通知") : null,
       el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50",
         onclick: () => importCsvDialog() }, "📥 CSV取込"),
       state.staff.length > 0 ? el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50",
@@ -2515,6 +2614,48 @@ function viewStaff() {
         onclick: () => openStaffEdit() }, "＋ スタッフ追加"),
     ]),
   ]));
+
+  // Round 22: 検索 & フィルタ UI
+  if (state.staff.length >= 5) {
+    const searchRow = el("div", { class: "bg-slate-50 rounded-md p-2 flex items-center gap-2 flex-wrap text-sm" });
+    const searchInput = el("input", {
+      type: "search",
+      placeholder: "🔍 名前で検索",
+      class: "flex-1 min-w-32 border rounded px-2 py-1",
+      value: window._staffSearchQuery,
+    });
+    searchInput.oninput = () => {
+      window._staffSearchQuery = searchInput.value;
+      render();
+    };
+    searchRow.appendChild(searchInput);
+
+    const posSelect = el("select", { class: "border rounded px-2 py-1" });
+    const allOpt = el("option", { value: "all" }, "全ポジション");
+    if (window._positionFilter === "all") allOpt.selected = true;
+    posSelect.appendChild(allOpt);
+    for (const p of state.meta.positions) {
+      const opt = el("option", { value: p.id }, p.label);
+      if (window._positionFilter === p.id) opt.selected = true;
+      posSelect.appendChild(opt);
+    }
+    posSelect.onchange = () => { window._positionFilter = posSelect.value; render(); };
+    searchRow.appendChild(posSelect);
+
+    if (state.staff.some(s => s.archived)) {
+      const archToggle = el("label", { class: "inline-flex items-center gap-1 text-xs cursor-pointer" }, [
+        (() => {
+          const cb = el("input", { type: "checkbox" });
+          if (window._showArchived) cb.checked = true;
+          cb.onchange = () => { window._showArchived = cb.checked; render(); };
+          return cb;
+        })(),
+        el("span", {}, "アーカイブ表示"),
+      ]);
+      searchRow.appendChild(archToggle);
+    }
+    wrap.appendChild(searchRow);
+  }
 
   // 空状態の wizard 風 onboarding (Round 6)
   if (state.staff.length === 0 && !window.__SHIFTY_DEMO_MODE__) {
@@ -2592,7 +2733,17 @@ function viewStaff() {
       <tbody></tbody>
     </table>`;
   const tbody = table.querySelector("tbody");
-  state.staff.forEach((s, idx) => {
+  // Round 22: 検索 & フィルタを適用
+  const filteredStaff = state.staff.filter(s => {
+    if (s.archived && !window._showArchived) return false;
+    if (window._positionFilter && window._positionFilter !== "all" && s.position !== window._positionFilter) return false;
+    if (window._staffSearchQuery) {
+      const q = window._staffSearchQuery.toLowerCase();
+      if (!s.name.toLowerCase().includes(q) && !(s.notes || "").toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+  filteredStaff.forEach((s, idx) => {
     const tr = el("tr", {
       class: "border-t border-slate-100 hover:bg-slate-50",
       draggable: "true",
@@ -2615,9 +2766,10 @@ function viewStaff() {
         toast(`${moved.name} の並び順を変更`, "success");
       },
     });
+    const archMark = s.archived ? `<span class="text-[9px] bg-slate-200 text-slate-600 rounded px-1 ml-1">📁 アーカイブ</span>` : "";
     tr.innerHTML = `
       <td class="px-2 py-2.5 text-center text-slate-400 cursor-move" title="ドラッグで並び替え">⋮⋮</td>
-      <td class="px-3 py-2.5 font-medium">${escapeHtml(s.name)}</td>
+      <td class="px-3 py-2.5 font-medium ${s.archived ? "text-slate-400" : ""}">${escapeHtml(s.name)}${archMark}</td>
       <td class="px-3 py-2.5">${posBadge(s.position)}</td>
       <td class="px-3 py-2.5">${s.canCover.length ? s.canCover.map(p => escapeHtml(posCfg(p).label)).join("・") : "<span class=\"text-slate-400\">—</span>"}</td>
       <td class="px-3 py-2.5 text-right">${fmtYen(s.hourlyWage)}</td>
@@ -2636,9 +2788,19 @@ function viewStaff() {
         onclick: () => regenerateStaffLink(s) }, "🔄 再発行"),
       el("button", { class: "text-xs text-brand-600 hover:underline mr-2",
         onclick: () => openStaffEdit(s) }, "編集"),
+      // Round 22: アーカイブ ボタン (削除より安全)
+      el("button", {
+        class: "text-xs text-slate-500 hover:underline mr-2",
+        title: s.archived ? "アーカイブから戻す" : "退職者などをアーカイブ (削除しない)",
+        onclick: () => {
+          s.archived = !s.archived;
+          persist(); render();
+          toast(s.archived ? `${s.name} をアーカイブしました` : `${s.name} を復帰しました`, "success");
+        },
+      }, s.archived ? "📤 復帰" : "📁 アーカイブ"),
       el("button", { class: "text-xs text-red-600 hover:underline",
         onclick: () => {
-          if (!confirm(`${s.name} を削除しますか？`)) return;
+          if (!confirm(`${s.name} を完全削除しますか？\n\n💡 退職対応なら「📁 アーカイブ」のほうが安全です (履歴・給与計算データを保持)。`)) return;
           state.staff = state.staff.filter(x => x.id !== s.id);
           // 全週から該当スタッフのデータを除去
           for (const wk of Object.values(state.weeks)) {
@@ -2829,6 +2991,22 @@ function openStaffEdit(s = null) {
             ${escapeHtml(p.label)}</label>`).join("")}
       </div>
     </div>
+    <details class="border border-slate-200 rounded-md p-2">
+      <summary class="text-sm cursor-pointer text-slate-700 select-none">🎯 ポジション別スキル (Round 22) <span class="text-[10px] text-slate-400">— ピーク帯配置の判定に使用</span></summary>
+      <div class="mt-2 space-y-1.5">
+        ${state.meta.positions.map(p => {
+          const cur = (data.skills && data.skills[p.id] != null) ? data.skills[p.id] : (p.id === data.position ? data.skill : 1);
+          return `<label class="flex items-center gap-2 text-xs">
+            <span class="w-20 ${p.id === data.position ? "font-semibold" : "text-slate-600"}">${escapeHtml(p.label)} ${p.id === data.position ? "(本職)" : ""}</span>
+            <input type="range" min="1" max="5" data-task-skill="${p.id}" value="${cur}" class="flex-1">
+            <span class="w-10 text-right text-slate-700" data-task-skill-display="${p.id}">${cur}/5</span>
+          </label>`;
+        }).join("")}
+      </div>
+      <div class="text-[10px] text-slate-500 mt-2">
+        💡 1=未経験 / 2=研修中 / 3=一人前 / 4=熟練 / 5=指導者。AI はピーク帯に平均スキル ≥ 3 を満たすよう配置します。
+      </div>
+    </details>
     <div>
       <span class="text-slate-600 block mb-1">固定休</span>
       <div class="flex gap-1 flex-wrap">
@@ -2880,6 +3058,14 @@ function openStaffEdit(s = null) {
   body.appendChild(form);
   // Webhook テストボタンの配線 (Round 17 TOP 2)
   setTimeout(() => {
+    // Round 22: タスク別スキルのライブ表示
+    form.querySelectorAll("[data-task-skill]").forEach(inp => {
+      inp.addEventListener("input", () => {
+        const k = inp.getAttribute("data-task-skill");
+        const disp = form.querySelector(`[data-task-skill-display="${k}"]`);
+        if (disp) disp.textContent = `${inp.value}/5`;
+      });
+    });
     const wt = document.getElementById("webhook-test-btn");
     if (wt) wt.onclick = async () => {
       const url = (form.querySelector("[data-k=webhookUrl]")?.value || "").trim();
@@ -2910,6 +3096,16 @@ function openStaffEdit(s = null) {
         dow: Number(i.dataset.fixedDow),
         sessionId: i.dataset.fixedSess,
       }));
+      // Round 22: タスク別スキル収集
+      const skills = {};
+      $$("input[data-task-skill]", form).forEach(inp => {
+        const k = inp.getAttribute("data-task-skill");
+        const v = Number(inp.value);
+        if (v >= 1 && v <= 5) skills[k] = v;
+      });
+      data.skills = skills;
+      // 後方互換: skill (本職スキル) も同期
+      if (skills[data.position]) data.skill = skills[data.position];
       if (!data.name) { toast("名前を入力してください", "error"); return; }
       if (isNew) state.staff.push(data);
       else state.staff = state.staff.map(x => x.id === data.id ? data : x);

@@ -2517,6 +2517,85 @@ def api_t_portal_swap_take(slug, token, sid):
 
 
 # ============================================================
+# グループ通知 (Round 22 TOP 2) — オーナーから全員へ一斉送信
+# ============================================================
+@app.post("/api/t/<slug>/broadcast")
+@require_tenant_admin()
+def api_t_broadcast(slug):
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    payload = _get_json()
+    severity = (payload.get("severity") or "normal").strip()
+    if severity not in {"normal", "important", "urgent"}:
+        severity = "normal"
+    subject = (payload.get("subject") or "").strip()[:200]
+    body_text = (payload.get("body") or "").strip()[:3000]
+    target_ids = payload.get("staffIds")  # null = 全員
+    if not body_text:
+        return jsonify({"error": "missing_body"}), 400
+
+    s = get_tenant_storage(slug)
+    state = s.get_state()
+    if state is None:
+        return jsonify({"error": "no_state"}), 404
+
+    tm = get_tenant_manager()
+    tenant = tm.get(slug)
+    restaurant = tenant.get("restaurantName", slug) if tenant else slug
+    SEVERITY_LABEL = {"normal": "📢 連絡", "important": "❗ 重要", "urgent": "🚨 緊急"}
+    SEVERITY_PREFIX = {"normal": "【お知らせ】", "important": "【重要】", "urgent": "【緊急】"}
+    full_subject = f"{SEVERITY_PREFIX[severity]}{subject or '店舗からの連絡'}"
+
+    sent_email, sent_webhook, skipped = 0, 0, 0
+    for st in (state.get("staff") or []):
+        if target_ids and st.get("id") not in target_ids:
+            continue
+        email = (st.get("email") or "").strip()
+        webhook_url = (st.get("webhookUrl") or "").strip()
+        if not email and not webhook_url:
+            skipped += 1
+            continue
+        full_body = (
+            f"{st.get('name', '')} 様\n\n"
+            f"{restaurant} より {SEVERITY_LABEL[severity]} のお知らせがあります。\n\n"
+            f"{body_text}\n\n"
+            "---\n"
+            f"発信日時: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+            "返信はスタッフポータルの「店長に連絡」からお願いします。\n"
+        )
+        if email:
+            ok = send_email(_safe_header(email), _safe_header(full_subject), full_body)
+            if ok: sent_email += 1
+        if webhook_url:
+            ok = send_webhook(webhook_url, full_body, title=full_subject)
+            if ok: sent_webhook += 1
+
+    # 状態に通知履歴を保存
+    import datetime as _dt_b
+    rec = {
+        "id": "br_" + secrets.token_urlsafe(8),
+        "createdAt": _dt_b.datetime.utcnow().isoformat() + "Z",
+        "severity": severity,
+        "subject": subject,
+        "body": body_text,
+        "sentEmail": sent_email,
+        "sentWebhook": sent_webhook,
+        "skipped": skipped,
+        "targetIds": target_ids,
+    }
+    def _mutate(current):
+        if current is None: return current
+        meta = current.setdefault("meta", {})
+        broadcasts = meta.setdefault("broadcasts", [])
+        broadcasts.append(rec)
+        if len(broadcasts) > 100:
+            broadcasts[:] = broadcasts[-100:]
+        return current
+    s.transactional_update(_mutate)
+    return jsonify({"ok": True, "sentEmail": sent_email, "sentWebhook": sent_webhook, "skipped": skipped})
+
+
+# ============================================================
 # 打刻 (Round 19) — Clock-in / Clock-out
 # ============================================================
 def _find_clockable_assignment(state, staff_id, kind="in"):

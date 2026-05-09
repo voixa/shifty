@@ -138,6 +138,13 @@
           method: "POST", body: JSON.stringify({ url }),
         }),
 
+    // グループ通知 (Round 22 TOP 2)
+    broadcast: (payload) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/broadcast`, {
+          method: "POST", body: JSON.stringify(payload),
+        })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
+
     // Snapshots (admin)
     listSnapshots: () => jsonReq("/api/admin/snapshots"),
     restoreSnapshot: (date) => jsonReq(`/api/admin/snapshots/${encodeURIComponent(date)}/restore`, { method: "POST" }),
