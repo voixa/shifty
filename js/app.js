@@ -1722,6 +1722,44 @@ function renderHelpCenter() {
   card.appendChild(el("div", { class: "text-xs text-slate-500" },
     `${FAQ_DATA.length} 件の Q&A から検索できます。`));
 
+  // Round 35 TOP 2: 操作デモ (CSS アニメーション)
+  const demos = el("details", { class: "border border-slate-200 dark:border-slate-700 rounded-md p-2 mb-3" });
+  demos.appendChild(el("summary", { class: "cursor-pointer text-sm font-semibold" }, "📺 操作デモを見る (動画なし、CSS のみ)"));
+  const demoBody = el("div", { class: "mt-3 space-y-3" });
+  // デモ 1: AI 自動生成
+  demoBody.appendChild(el("div", { class: "demo-frame", style: { height: "120px" } }, [
+    el("div", { class: "demo-cursor demo-anim-1" }),
+    el("div", { class: "absolute top-2 left-2 text-xs font-semibold" }, "1. シフトタブで AI 自動生成"),
+    el("div", { class: "absolute bottom-3 right-3 bg-brand-600 text-white rounded px-3 py-1.5 text-sm font-bold" }, "🤖 AI 自動生成"),
+    el("div", { class: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl" }, "📅 → 🤖 → ✓"),
+  ]));
+  demoBody.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
+    "💡 シフトタブの「🤖 AI 自動生成」ボタンをタップ。3 秒で配置案ができます。"));
+
+  // デモ 2: 希望入力 (スタッフ側)
+  demoBody.appendChild(el("div", { class: "demo-frame mt-3 grid grid-cols-4 gap-1 p-2" }, [
+    el("div", { class: "bg-red-100 text-red-700 rounded text-center py-1 text-[10px]" }, "🔥 必須"),
+    el("div", { class: "bg-emerald-500 text-white rounded text-center py-1 text-[10px]" }, "✅ 希望"),
+    el("div", { class: "bg-slate-200 text-slate-700 rounded text-center py-1 text-[10px]" }, "🚫 不可"),
+    el("div", { class: "bg-slate-100 text-slate-500 rounded text-center py-1 text-[10px]" }, "— 未定"),
+  ]));
+  demoBody.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
+    "💡 スタッフは 4 ボタンから 1 つを選ぶだけ。または「⏰ 自由時間で希望」で時間範囲を直接入力できます。"));
+
+  // デモ 3: 確定 → 通知
+  demoBody.appendChild(el("div", { class: "demo-frame mt-3 flex items-center justify-around", style: { height: "60px" } }, [
+    el("div", { class: "text-3xl" }, "📝"),
+    el("div", { class: "text-2xl text-slate-400" }, "→"),
+    el("div", { class: "text-3xl" }, "✓"),
+    el("div", { class: "text-2xl text-slate-400" }, "→"),
+    el("div", { class: "text-3xl" }, "📧"),
+  ]));
+  demoBody.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
+    "💡 「確定」ボタンを押すと、ヘルスチェック表示 → 確定 → スタッフへメール自動送信。"));
+
+  demos.appendChild(demoBody);
+  card.appendChild(demos);
+
   const searchInput = el("input", {
     type: "search",
     placeholder: "🔍 質問を検索 (例: 打刻 / 希望 / 給与)",
@@ -9360,6 +9398,22 @@ function openCrossStoreDashboard() {
 }
 
 async function loadAndRender() {
+  // Round 35 TOP 1: スケルトン UI 表示
+  const main = document.getElementById("main");
+  if (main && !main.innerHTML) {
+    main.innerHTML = `
+      <div class="space-y-3">
+        <div class="skeleton skeleton-text" style="width: 30%; height: 24px;"></div>
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="skeleton skeleton-card" style="height: 90px;"></div>
+          <div class="skeleton skeleton-card" style="height: 90px;"></div>
+          <div class="skeleton skeleton-card" style="height: 90px;"></div>
+          <div class="skeleton skeleton-card" style="height: 90px;"></div>
+        </div>
+      </div>`;
+  }
   try {
     // Round 26: 多店舗スイッチャー初期化 (失敗しても続行)
     initShopSwitcher().then(() => {
@@ -9379,7 +9433,21 @@ async function loadAndRender() {
     }
   } catch (e) {
     if (String(e.message).includes("401")) { showAuthOverlay("login"); return; }
-    $("#main").innerHTML = `<div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-900">読み込み失敗: ${escapeHtml(e.message)}</div>`;
+    // Round 35 TOP 1: わかりやすいエラー UI + 再試行ボタン
+    const isNetwork = String(e.message).match(/network|fetch|offline/i);
+    const friendly = isNetwork
+      ? "📡 ネットワーク接続に問題があります。Wi-Fi や 4G を確認して再試行してください。"
+      : "❌ データの読み込みに失敗しました。";
+    $("#main").innerHTML = "";
+    const errCard = el("div", { class: "bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-xl p-6 text-center space-y-3" });
+    errCard.appendChild(el("div", { class: "text-4xl" }, isNetwork ? "📡" : "⚠️"));
+    errCard.appendChild(el("div", { class: "text-base font-semibold text-red-900 dark:text-red-200" }, friendly));
+    errCard.appendChild(el("div", { class: "text-xs text-red-700 dark:text-red-400 font-mono" }, e.message));
+    errCard.appendChild(el("button", {
+      class: "bg-red-600 hover:bg-red-700 text-white rounded-md px-4 py-2 text-sm font-bold",
+      onclick: () => loadAndRender(),
+    }, "🔄 再試行"));
+    $("#main").appendChild(errCard);
   }
 }
 

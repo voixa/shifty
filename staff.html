@@ -32,6 +32,22 @@
   </script>
 </head>
 <body class="bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 min-h-screen">
+  <!-- Round 35 TOP 1: オフラインバナー -->
+  <div id="offlineBanner" class="offline-banner" role="status" aria-live="polite">
+    📡 ネットワークが切れています。再接続を待っています…
+  </div>
+  <script>
+    (function() {
+      const b = document.getElementById("offlineBanner");
+      function update() {
+        if (navigator.onLine) b.classList.remove("visible");
+        else b.classList.add("visible");
+      }
+      window.addEventListener("online", update);
+      window.addEventListener("offline", update);
+      update();
+    })();
+  </script>
   <div id="app" class="max-w-md mx-auto p-4 pb-32"></div>
   <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 space-y-2"></div>
   <script src="js/api.js"></script>

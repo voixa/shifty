@@ -115,6 +115,70 @@
 .assignment-chip .name { font-weight: 600; }
 .assignment-chip .time { color: #64748b; font-size: 10px; }
 
+/* Round 35 TOP 1: スケルトン UI (ローディング状態) */
+.skeleton {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s infinite;
+  border-radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  .skeleton {
+    background: linear-gradient(90deg, #334155 25%, #1e293b 50%, #334155 75%);
+    background-size: 200% 100%;
+  }
+}
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-text { height: 12px; margin: 4px 0; }
+.skeleton-card { height: 80px; margin-bottom: 12px; }
+
+/* オフラインバナー */
+.offline-banner {
+  position: fixed; top: 0; left: 0; right: 0;
+  background: #b45309; color: white;
+  padding: 6px 12px; text-align: center; font-size: 12px;
+  z-index: 9999;
+  transform: translateY(-100%);
+  transition: transform 0.2s;
+}
+.offline-banner.visible { transform: translateY(0); }
+
+/* Round 35 TOP 2: 操作デモ (CSS アニメーション) */
+.demo-frame {
+  background: #f8fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+  position: relative;
+  overflow: hidden;
+}
+.demo-frame.dark, .dark .demo-frame {
+  background: #1e293b;
+  border-color: #334155;
+}
+.demo-cursor {
+  position: absolute;
+  width: 14px; height: 14px;
+  background: rgba(79, 70, 229, 0.9);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 0 12px rgba(79, 70, 229, 0.5);
+  transition: top 0.6s ease, left 0.6s ease, opacity 0.3s;
+}
+@keyframes demo-cursor-move-1 {
+  0%   { top: 10%; left: 10%; }
+  30%  { top: 30%; left: 50%; }
+  60%  { top: 60%; left: 80%; transform: scale(0.8); }
+  61%  { transform: scale(1.5); }
+  62%  { transform: scale(1); }
+  100% { top: 60%; left: 80%; opacity: 0.6; }
+}
+.demo-anim-1 { animation: demo-cursor-move-1 4s infinite; }
+
 /* Round 28 TOP 3: アクセシビリティ強化 */
 *:focus-visible {
   outline: 2px solid #4f46e5;

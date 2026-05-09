@@ -43,6 +43,23 @@
   <!-- Round 28 TOP 3: Skip link (アクセシビリティ) -->
   <a href="#main" class="skip-link">メインコンテンツへスキップ</a>
 
+  <!-- Round 35 TOP 1: オフライン検知バナー -->
+  <div id="offlineBanner" class="offline-banner" role="status" aria-live="polite">
+    📡 ネットワークが切れています。再接続を待っています…
+  </div>
+  <script>
+    (function() {
+      const b = document.getElementById("offlineBanner");
+      function update() {
+        if (navigator.onLine) b.classList.remove("visible");
+        else b.classList.add("visible");
+      }
+      window.addEventListener("online", update);
+      window.addEventListener("offline", update);
+      update();
+    })();
+  </script>
+
   <!-- Auth Overlay -->
   <div id="authOverlay" class="hidden fixed inset-0 z-[60] bg-slate-100 flex items-center justify-center p-4">
     <div class="bg-white rounded-xl shadow-xl p-8 w-full max-w-md">

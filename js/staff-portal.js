@@ -1139,11 +1139,34 @@
 
     const installBannerHtml = renderInstallBanner();
 
+    // Round 35 TOP 3: 重要なお知らせ要約バー
+    const summaryItems = [];
+    if ((data.substituteOffers || []).length > 0) {
+      summaryItems.push(`<a href="#sec-suboffer" class="text-red-700 dark:text-red-300 font-bold">🆘 代打打診あり</a>`);
+    }
+    if ((todayShifts || []).some(a => !a.clockOut)) {
+      const next = (todayShifts || []).find(a => !a.clockIn);
+      if (next) {
+        summaryItems.push(`<a href="#sec-clock" class="text-emerald-700 dark:text-emerald-300">⏰ 今日 ${next.startTime}〜 出勤予定</a>`);
+      }
+    }
+    if (data.preferenceDeadline) {
+      const dl = new Date(data.preferenceDeadline);
+      const diffH = Math.floor((dl - new Date()) / 3600000);
+      if (diffH > 0 && diffH < 24) {
+        summaryItems.push(`<a href="#grid" class="text-amber-700 dark:text-amber-300">⏰ 締切まで ${diffH}h</a>`);
+      }
+    }
+    const summaryBar = summaryItems.length > 0
+      ? `<div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg p-2 mb-3 text-xs flex flex-wrap gap-3">${summaryItems.join("")}</div>`
+      : "";
+
     $("#app").innerHTML = `
       ${weekTabsHtml2}
+      ${summaryBar}
       ${installBannerHtml}
-      ${subOfferCard}
-      ${clockCard}
+      <div id="sec-suboffer">${subOfferCard}</div>
+      <div id="sec-clock">${clockCard}</div>
       ${nextShiftCard}
       ${noticeCard}
       ${swapCard2}
