@@ -438,6 +438,21 @@
     if (!Array.isArray(state.meta.auditLog)) state.meta.auditLog = [];
     // テーマ (Round 25 TOP 3) — "auto" | "light" | "dark"
     if (state.meta.theme === undefined) state.meta.theme = "auto";
+    // ダッシュボードウィジェットの ON/OFF (Round 28 TOP 1)
+    if (!state.meta.dashboardWidgets || typeof state.meta.dashboardWidgets !== "object") {
+      state.meta.dashboardWidgets = {
+        alerts: true,
+        todayAttendance: true,
+        laborCostRatio: true,
+        monthlyLaborRisk: true,
+        staffInsights: true,
+        costChart: true,
+        kpis: true,
+        budgetGauge: true,
+        statusCard: true,
+        monthlyRanking: true,
+      };
+    }
     // 自動アップグレード: 旧デフォルト 8h は飲食店現実に合わずカバー率が壊滅するため 12h に引き上げ
     // (lunch 11-15 + dinner 17-22 = 9h を許可。意図的に 8h 設定済みの顧客がいないので無条件で書き換え)
     if (state.meta.laborRules.maxHoursPerDay <= 8) state.meta.laborRules.maxHoursPerDay = 12;

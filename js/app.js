@@ -1041,6 +1041,153 @@ function openSimulationDialog() {
   modal(body);
 }
 
+// ===== ダッシュボードカスタマイズ (Round 28 TOP 1) =====
+function openDashboardCustomizeDialog() {
+  const settings = state.meta.dashboardWidgets || {};
+  const widgets = [
+    { id: "alerts", label: "⚠️ 注意事項", desc: "希望未提出・予算超過などの警告" },
+    { id: "todayAttendance", label: "☀ 本日の出勤者", desc: "今日のシフト + 打刻ステータス" },
+    { id: "laborCostRatio", label: "💰 人件費率", desc: "売上 vs 人件費のゲージ + トレンド" },
+    { id: "monthlyLaborRisk", label: "📊 月次労務リスク", desc: "スタッフ別の月次累積時間" },
+    { id: "staffInsights", label: "📈 スタッフインサイト", desc: "希望提出率・燃え尽きリスク" },
+    { id: "costChart", label: "📈 人件費推移グラフ", desc: "直近 8 週のトレンド" },
+    { id: "monthlyRanking", label: "🏅 月間労働時間ランキング", desc: "スタッフ別の今月集計" },
+  ];
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "⚙️ ダッシュボードのカスタマイズ"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    "表示する項目を選択してください。OFF にした項目はダッシュボードに表示されません。"));
+
+  const list = el("div", { class: "space-y-2" });
+  for (const w of widgets) {
+    const enabled = settings[w.id] !== false;
+    const row = el("label", { class: "flex items-center gap-3 border border-slate-200 rounded p-2.5 cursor-pointer hover:bg-slate-50" });
+    const cb = el("input", { type: "checkbox", "data-widget-id": w.id });
+    if (enabled) cb.checked = true;
+    row.appendChild(cb);
+    row.appendChild(el("div", { class: "flex-1" }, [
+      el("div", { class: "font-semibold text-sm" }, w.label),
+      el("div", { class: "text-xs text-slate-500" }, w.desc),
+    ]));
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-semibold",
+      onclick: () => {
+        const newSettings = { ...settings };
+        list.querySelectorAll("[data-widget-id]").forEach(cb => {
+          newSettings[cb.getAttribute("data-widget-id")] = cb.checked;
+        });
+        state.meta.dashboardWidgets = newSettings;
+        persist();
+        closeModal();
+        render();
+        toast("✓ ダッシュボード設定を保存しました", "success");
+      },
+    }, "💾 保存"),
+  ]));
+  modal(body);
+}
+
+// ===== キーボードショートカット (Round 28 TOP 2) =====
+const SHORTCUTS = {
+  "?": { desc: "ショートカット一覧", action: () => showShortcutsHelp() },
+  "g d": { desc: "ダッシュボードへ", action: () => setTab("dashboard") },
+  "g s": { desc: "スタッフ管理へ", action: () => setTab("staff") },
+  "g p": { desc: "希望収集へ", action: () => setTab("preferences") },
+  "g r": { desc: "シフト編成へ", action: () => setTab("schedule") },
+  "g e": { desc: "エクスポートへ", action: () => setTab("export") },
+  "g c": { desc: "設定へ", action: () => setTab("settings") },
+  "n": { desc: "新規スタッフ追加 (スタッフタブで)", action: () => { if (currentTab === "staff") openStaffEdit(); } },
+  "a": { desc: "AI 自動生成 (シフト編成タブで)", action: () => { if (currentTab === "schedule") autoGenerate(); } },
+  "p": { desc: "印刷 (シフト編成タブで)", action: () => { if (currentTab === "schedule") openPrintMenuDialog(); } },
+  "/": { desc: "検索フォーカス", action: () => {
+    const inp = document.querySelector("input[type=search]");
+    if (inp) { inp.focus(); inp.select(); }
+  } },
+  "Esc": { desc: "モーダル閉じる", action: () => closeModal() },
+};
+
+function showShortcutsHelp() {
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "⌨️ キーボードショートカット"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    "効率的に操作できるキー。いつでも「?」で再表示できます。"));
+  const list = el("div", { class: "space-y-1 text-sm" });
+  for (const [key, def] of Object.entries(SHORTCUTS)) {
+    const row = el("div", { class: "flex items-center justify-between bg-slate-50 dark:bg-slate-800 rounded px-3 py-2" });
+    row.innerHTML = `
+      <span>${escapeHtml(def.desc)}</span>
+      <kbd class="bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded px-2 py-0.5 text-xs font-mono">${escapeHtml(key)}</kbd>`;
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+  body.appendChild(el("div", { class: "flex justify-end pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "閉じる"),
+  ]));
+  modal(body);
+}
+
+(function _initShortcuts() {
+  let buffer = "";
+  let bufferTimer = null;
+  document.addEventListener("keydown", (e) => {
+    // 入力中はスキップ
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT" || active.isContentEditable)) {
+      // 例外: Esc は許可
+      if (e.key === "Escape") {
+        if (active && active.blur) active.blur();
+      }
+      return;
+    }
+    // モディファイアキー付きはスキップ (ブラウザショートカットを邪魔しない)
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+    if (e.key === "?") {
+      e.preventDefault(); showShortcutsHelp(); return;
+    }
+    if (e.key === "Escape") {
+      closeModal(); return;
+    }
+    if (e.key === "/") {
+      e.preventDefault();
+      const inp = document.querySelector("input[type=search]");
+      if (inp) { inp.focus(); inp.select(); }
+      return;
+    }
+    // g + key シーケンス
+    if (e.key === "g") {
+      buffer = "g ";
+      if (bufferTimer) clearTimeout(bufferTimer);
+      bufferTimer = setTimeout(() => { buffer = ""; }, 1500);
+      return;
+    }
+    if (buffer.startsWith("g ")) {
+      const combo = buffer + e.key.toLowerCase();
+      const def = SHORTCUTS[combo];
+      if (def) {
+        e.preventDefault();
+        def.action();
+      }
+      buffer = "";
+      if (bufferTimer) clearTimeout(bufferTimer);
+      return;
+    }
+    // 単独キー
+    const single = SHORTCUTS[e.key.toLowerCase()];
+    if (single) {
+      e.preventDefault();
+      single.action();
+    }
+  });
+})();
+
 // ===== ヘルプセンター (Round 25 TOP 1) =====
 const FAQ_DATA = [
   // 基本操作
@@ -2141,11 +2288,25 @@ function renderHeader() {
 }
 
 // ===== View: Dashboard =====
+// Round 28 TOP 1: ダッシュボード ウィジェット ON/OFF 判定
+function dashboardWidgetOn(widgetId) {
+  if (!state || !state.meta || !state.meta.dashboardWidgets) return true;
+  const v = state.meta.dashboardWidgets[widgetId];
+  return v !== false; // 未定義は ON 扱い
+}
+
 function viewDashboard() {
   const wrap = el("div", { class: "space-y-6" });
-  wrap.appendChild(el("div", { class: "flex items-center justify-between" }, [
+  wrap.appendChild(el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
     el("h2", { class: "text-xl font-bold" }, "今週の概要"),
-    el("div", { class: "text-sm text-slate-500" }, state.meta.currentWeekStart + " 〜"),
+    el("div", { class: "flex items-center gap-2" }, [
+      el("div", { class: "text-sm text-slate-500" }, state.meta.currentWeekStart + " 〜"),
+      el("button", {
+        class: "text-xs text-slate-500 hover:text-slate-700 underline decoration-dotted",
+        onclick: () => openDashboardCustomizeDialog(),
+        title: "ダッシュボードに表示する項目を選択",
+      }, "⚙️ カスタマイズ"),
+    ]),
   ]));
 
   // 初回オーナー向け: 完全に空の状態のみ表示するヒーロー empty state
@@ -2310,25 +2471,25 @@ function viewDashboard() {
   }
 
   // 売上連動の人件費率管理 (Round 20 TOP 1)
-  if (state.staff.length > 0) {
+  if (state.staff.length > 0 && dashboardWidgetOn("laborCostRatio")) {
     const lcrCard = renderLaborCostRatio();
     if (lcrCard) wrap.appendChild(lcrCard);
   }
 
   // 月次労務リスク (Round 15 TOP 1) — 当月の累積時間と労務上限への接近度
-  if (state.staff.length > 0) {
+  if (state.staff.length > 0 && dashboardWidgetOn("monthlyLaborRisk")) {
     const monthCard = renderMonthlyLaborRisk();
     if (monthCard) wrap.appendChild(monthCard);
   }
 
   // スタッフ・インサイト (Round 16 TOP 3) — 希望提出率・カバレッジ貢献・燃え尽きリスク
-  if (state.staff.length > 0) {
+  if (state.staff.length > 0 && dashboardWidgetOn("staffInsights")) {
     const insightCard = renderStaffInsights();
     if (insightCard) wrap.appendChild(insightCard);
   }
 
   // 人件費推移グラフ (Round 11) — 過去 8 週分の確定済シフト人件費
-  if (state.staff.length > 0 && typeof Chart !== "undefined") {
+  if (state.staff.length > 0 && typeof Chart !== "undefined" && dashboardWidgetOn("costChart")) {
     const chartCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
     chartCard.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
       el("div", { class: "font-semibold text-sm" }, "📈 人件費推移 (直近 8 週)"),
@@ -2407,7 +2568,7 @@ function viewDashboard() {
       if (found.length) { todayAssignments = found; break; }
     }
   }
-  if (todayAssignments.length > 0) {
+  if (todayAssignments.length > 0 && dashboardWidgetOn("todayAttendance")) {
     const todayCard = el("div", { class: "bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-300 rounded-xl p-3" });
     const dow = ["日","月","火","水","木","金","土"][new Date(todayStr + "T00:00:00").getDay()];
     // 打刻サマリ (Round 19)
@@ -2494,7 +2655,7 @@ function viewDashboard() {
     wrap.appendChild(todayCard);
   }
 
-  if (alerts.length > 0) {
+  if (alerts.length > 0 && dashboardWidgetOn("alerts")) {
     const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
     card.appendChild(el("div", { class: "font-semibold text-sm text-slate-700 mb-2" }, `⚠️ 注意事項 ${alerts.length} 件`));
     const list = el("div", { class: "space-y-1.5" });

@@ -115,6 +115,60 @@
 .assignment-chip .name { font-weight: 600; }
 .assignment-chip .time { color: #64748b; font-size: 10px; }
 
+/* Round 28 TOP 3: アクセシビリティ強化 */
+*:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+button:focus-visible, a:focus-visible {
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.35);
+}
+/* Skip to main content link (visually hidden until focused) */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 8px;
+  background: #4f46e5;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 4px;
+  z-index: 9999;
+  font-size: 13px;
+  font-weight: bold;
+}
+.skip-link:focus {
+  top: 8px;
+}
+/* スクリーンリーダー用 (visible 領域から外すが要素は残す) */
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+/* タッチターゲット最低サイズ (44x44 - WCAG 2.5.5) */
+@media (pointer: coarse) {
+  button, .tab-btn, [role="button"], a.btn {
+    min-height: 44px;
+  }
+}
+/* ハイコントラストモード */
+@media (prefers-contrast: more) {
+  body { color: #000; }
+  .toast-item { border: 2px solid white; }
+}
+/* Reduced motion (アニメーション軽減) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 .toast-item {
   background: #1e293b;
   color: white;
