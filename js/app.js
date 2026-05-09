@@ -1671,6 +1671,59 @@ function showShortcutsHelp() {
   });
 })();
 
+// ===== Undo (Round 37 TOP 1) =====
+let _lastUndoSnapshot = null;
+let _lastUndoLabel = "";
+let _lastUndoTimer = null;
+
+function showUndoToast(actionLabel) {
+  // 操作前の状態をキャプチャ → 30秒以内に取り消し可能
+  _lastUndoSnapshot = {
+    meta: JSON.parse(JSON.stringify(state.meta)),
+    staff: JSON.parse(JSON.stringify(state.staff)),
+    weeks: JSON.parse(JSON.stringify(state.weeks)),
+  };
+  _lastUndoLabel = actionLabel;
+
+  // 既存の undo toast を削除
+  const existing = document.getElementById("undo-toast");
+  if (existing) existing.remove();
+  if (_lastUndoTimer) clearTimeout(_lastUndoTimer);
+
+  const toastEl = el("div", {
+    id: "undo-toast",
+    class: "fixed bottom-20 left-1/2 -translate-x-1/2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3 z-50 max-w-sm",
+    style: { animation: "slideUp 0.25s ease" },
+  });
+  toastEl.appendChild(el("span", { class: "text-sm" }, `↶ ${actionLabel}`));
+  toastEl.appendChild(el("button", {
+    class: "text-sm font-bold underline ml-2 hover:opacity-80",
+    onclick: () => {
+      if (!_lastUndoSnapshot) return;
+      // 復元
+      state.meta = _lastUndoSnapshot.meta;
+      state.staff = _lastUndoSnapshot.staff;
+      state.weeks = _lastUndoSnapshot.weeks;
+      _lastUndoSnapshot = null;
+      _lastUndoLabel = "";
+      persist();
+      render();
+      toast(`↶ 「${actionLabel}」を取り消しました`, "success");
+      toastEl.remove();
+    },
+  }, "取り消す"));
+  toastEl.appendChild(el("button", {
+    class: "text-xs opacity-60 hover:opacity-100 ml-1",
+    onclick: () => toastEl.remove(),
+    "aria-label": "閉じる",
+  }, "✕"));
+  document.body.appendChild(toastEl);
+  _lastUndoTimer = setTimeout(() => {
+    toastEl.remove();
+    _lastUndoSnapshot = null;
+  }, 30000);
+}
+
 // ===== コマンドパレット (Round 36 TOP 1) =====
 const COMMAND_PALETTE_ITEMS = [
   // ナビゲーション
@@ -1802,13 +1855,64 @@ function openCommandPalette() {
   setTimeout(() => inp.focus(), 50);
 }
 
-// グローバルショートカット (Cmd+K / Ctrl+K)
+// グローバルショートカット (Cmd+K / Ctrl+K) + シフトキーボードナビ (Round 37 TOP 2)
 document.addEventListener("keydown", (e) => {
+  // Cmd+K / Ctrl+K でコマンドパレット
   if ((e.metaKey || e.ctrlKey) && e.key === "k") {
     e.preventDefault();
     openCommandPalette();
+    return;
+  }
+  // 入力中はキーボードナビをスキップ
+  const a = document.activeElement;
+  if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable)) return;
+  // モディファイアキー付きはスキップ
+  if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+  // シフトタブのみキーボードナビ
+  if (currentTab !== "schedule") return;
+  // 矢印キー: chip 間移動
+  if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    handleScheduleArrowKey(e.key);
+    e.preventDefault();
+  }
+  // Enter: 選択中の chip の詳細
+  else if (e.key === "Enter") {
+    const focused = document.querySelector(".assignment-chip.kbd-focus");
+    if (focused) {
+      const aid = focused.getAttribute("data-assignment-id");
+      const a = curAssignments().find(x => x.id === aid);
+      if (a) { openAssignmentDetail(a); e.preventDefault(); }
+    }
+  }
+  // Delete: 削除
+  else if (e.key === "Delete" && curStatus() === "draft") {
+    const focused = document.querySelector(".assignment-chip.kbd-focus");
+    if (focused) {
+      const aid = focused.getAttribute("data-assignment-id");
+      const a = curAssignments().find(x => x.id === aid);
+      if (a && confirm(`${(state.staff.find(s => s.id === a.staffId) || {}).name || "?"} の ${a.date} ${a.startTime}〜 を削除？`)) {
+        showUndoToast(`シフト 1 件を削除`);
+        curWeek().assignments = curAssignments().filter(x => x.id !== a.id);
+        persist(); render();
+        toast("削除しました (30秒以内なら取り消せます)", "success");
+        e.preventDefault();
+      }
+    }
   }
 });
+
+function handleScheduleArrowKey(key) {
+  const chips = Array.from(document.querySelectorAll(".assignment-chip"));
+  if (chips.length === 0) return;
+  let curIdx = chips.findIndex(c => c.classList.contains("kbd-focus"));
+  if (curIdx < 0) curIdx = 0;
+  let next = curIdx;
+  if (key === "ArrowDown" || key === "ArrowRight") next = (curIdx + 1) % chips.length;
+  else if (key === "ArrowUp" || key === "ArrowLeft") next = (curIdx - 1 + chips.length) % chips.length;
+  chips.forEach(c => c.classList.remove("kbd-focus"));
+  chips[next].classList.add("kbd-focus");
+  chips[next].scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
 
 // ===== 機能ツアー (Round 36 TOP 3) =====
 const FEATURE_TOUR_STEPS = [
@@ -2436,6 +2540,20 @@ function openModelShiftDialog() {
   modal(body);
 }
 
+// ===== 業界ベンチマーク (Round 37 TOP 3) =====
+const INDUSTRY_BENCHMARKS = {
+  cafe:              { lcr: 0.30, label: "カフェ",            note: "比較的人件費率高め" },
+  izakaya:           { lcr: 0.28, label: "居酒屋・バー",      note: "深夜手当含む" },
+  ramen:             { lcr: 0.27, label: "ラーメン・定食店",  note: "回転率高めで効率的" },
+  family_restaurant: { lcr: 0.30, label: "ファミリーレストラン", note: "通し営業" },
+  fast_food:         { lcr: 0.32, label: "ファストフード",    note: "短時間多人数" },
+  custom:            { lcr: 0.28, label: "汎用",              note: "業界平均" },
+};
+function getBenchmark() {
+  const bt = state.meta.businessType || "custom";
+  return INDUSTRY_BENCHMARKS[bt] || INDUSTRY_BENCHMARKS.custom;
+}
+
 // ===== 売上連動の人件費率 (Round 20 TOP 1) =====
 function renderLaborCostRatio() {
   const w0 = state.meta.currentWeekStart || "";
@@ -2473,6 +2591,12 @@ function renderLaborCostRatio() {
     const status = ratio <= target ? "good" : ratio <= target + 0.05 ? "warn" : "danger";
     const color = status === "good" ? "#10b981" : status === "warn" ? "#f59e0b" : "#dc2626";
     const statusLabel = status === "good" ? `✓ 目標達成` : status === "warn" ? `⚠️ やや高め` : `🚨 大幅オーバー`;
+    // Round 37 TOP 3: 業界ベンチマーク併記
+    const bench = getBenchmark();
+    const vsBench = ratio - bench.lcr;
+    const benchCmp = vsBench < -0.02 ? `🌟 業界平均より ${Math.abs(vsBench * 100).toFixed(1)}pt 良い`
+                  : vsBench > 0.02   ? `⚠️ 業界平均より ${(vsBench * 100).toFixed(1)}pt 高い`
+                  : `≈ 業界平均並み`;
 
     const main = el("div", { class: "space-y-2" });
     main.innerHTML = `
@@ -2481,12 +2605,15 @@ function renderLaborCostRatio() {
         <span class="text-xs text-slate-600">目標 ${targetPct.toFixed(0)}% / ${statusLabel}</span>
       </div>
       <div class="gauge-bar"><div style="width:${Math.min(100, pctRatio*1.5)}%;background:${color}"></div></div>
+      <div class="text-[11px] text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-700 rounded p-1.5">
+        🎯 業界平均 (${escapeHtml(bench.label)}): <b>${(bench.lcr * 100).toFixed(0)}%</b> ・ ${benchCmp}
+      </div>
       <div class="grid grid-cols-2 gap-3 text-xs mt-2">
-        <div class="bg-slate-50 rounded p-2">
+        <div class="bg-slate-50 dark:bg-slate-700 rounded p-2">
           <div class="text-slate-500 text-[10px]">今週売上</div>
           <div class="font-semibold">${fmtYen(weekSales)}</div>
         </div>
-        <div class="bg-slate-50 rounded p-2">
+        <div class="bg-slate-50 dark:bg-slate-700 rounded p-2">
           <div class="text-slate-500 text-[10px]">今週人件費</div>
           <div class="font-semibold">${fmtYen(Math.round(weekCost))}</div>
         </div>
@@ -4738,15 +4865,15 @@ function viewStaff() {
       el("button", { class: "text-xs text-red-600 hover:underline",
         onclick: () => {
           if (!confirm(`${s.name} を完全削除しますか？\n\n💡 退職対応なら「📁 アーカイブ」のほうが安全です (履歴・給与計算データを保持)。`)) return;
+          // Round 37 TOP 1: Undo
+          showUndoToast(`${s.name} を削除`);
           state.staff = state.staff.filter(x => x.id !== s.id);
-          // 全週から該当スタッフのデータを除去
           for (const wk of Object.values(state.weeks)) {
             wk.preferences = wk.preferences.filter(p => p.staffId !== s.id);
             wk.assignments = wk.assignments.filter(a => a.staffId !== s.id);
           }
-          // トークンも失効
           window.ShiftyAPI.revokeStaffToken(s.id).catch(() => {});
-          persist(); render(); toast("削除しました（リンクも失効）", "success");
+          persist(); render(); toast("削除しました（30秒以内なら取り消せます）", "success");
         } }, "削除"),
     ]);
     tr.appendChild(td);
@@ -5448,8 +5575,10 @@ function viewSchedule() {
             if (curStatus() === "published") { toast("確定済の週はクリアできません。先に「下書きに戻す」してください。", "error"); return; }
             const n = curAssignments().length;
             if (n === 0) { toast("クリア対象がありません", "info"); return; }
-            if (!confirm(`今週の AI 生成シフト ${n} 件を全削除しますか？\nこの操作は取り消せません（希望データは残ります）。`)) return;
-            curWeek().assignments = []; persist(); render(); toast(`${n} 件をクリアしました`);
+            if (!confirm(`今週の AI 生成シフト ${n} 件を全削除しますか？\n直後 30 秒以内なら「取り消す」で復元できます。`)) return;
+            // Round 37 TOP 1: Undo 用にスナップショット
+            showUndoToast(`シフト ${n} 件を全削除`);
+            curWeek().assignments = []; persist(); render();
           },
         }, "🗑 シフトをクリア");
         dd.appendChild(btnClear);
@@ -7872,6 +8001,8 @@ function runAutoGenerate() {
       // AI 生成前に自動スナップショット (Round 17 TOP 1) — 既存アサインがある場合のみ
       if (curAssignments().length > 0) {
         try { createSnapshot("auto_autogen", `AI再生成前 (${state.meta.currentWeekStart})`); } catch (_) {}
+        // Round 37 TOP 1: Undo
+        showUndoToast("AI 再生成 (上書き前に戻す)");
       }
       // Round 13: 固定出勤を must preferences として注入
       const w0 = state.meta.currentWeekStart;

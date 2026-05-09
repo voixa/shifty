@@ -102,6 +102,12 @@
   box-shadow: 0 4px 12px rgba(79, 70, 229, 0.4);
   z-index: 10;
 }
+/* Round 37 TOP 2: キーボードナビフォーカス */
+.assignment-chip.kbd-focus {
+  outline: 3px solid #4f46e5;
+  outline-offset: 2px;
+  z-index: 5;
+}
 .assignment-chip.drop-target {
   outline: 2px solid #4f46e5;
   outline-offset: 2px;
