@@ -20,8 +20,9 @@
   };
 
   let data = null;
-  let prefs = {};       // {`${date}|${sessId}`: priority}
-  let customTimes = {}; // {`${date}|${sessId}`: {startTime, endTime}}  時間範囲指定がある場合
+  let prefs = {};       // {`${date}|${sessId}`: priority}  — セッション 4 ボタンモード
+  let customTimes = {}; // {`${date}|${sessId}`: {startTime, endTime}}  セッション内時間調整
+  let freePrefs = {};   // {date: [{ id, startTime, endTime, priority }, ...]} — Round 18: 自由時間希望
   let comments = {};    // {date: text}
   let dirty = false;
   let activeWeek = null; // 複数週対応 (Round 15 TOP 2): 選択中の週 (YYYY-MM-DD)
@@ -69,7 +70,7 @@
   function saveDraft() {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
-        prefs, customTimes, comments, savedAt: Date.now()
+        prefs, customTimes, freePrefs, comments, savedAt: Date.now()
       }));
     } catch (_) {}
   }
@@ -140,21 +141,32 @@
   }
 
   function loadPrefsFromData() {
-    prefs = {}; customTimes = {}; comments = {};
+    prefs = {}; customTimes = {}; freePrefs = {}; comments = {};
     for (const p of (data.preferences || [])) {
       const sess = (data.sessions || []).find(s => s.startTime === p.startTime && s.endTime === p.endTime);
       if (sess) {
+        // セッションぴったり一致 → 4 ボタンモード
         prefs[`${p.date}|${sess.id}`] = p.priority;
       } else {
-        // 時間が一致するセッションがない = カスタム時間
+        // セッションに収まる調整時間 → customTimes (1 セッションあたり 1 つだけ)
         const owner = (data.sessions || []).find(s =>
           timeToMin(p.startTime) >= timeToMin(s.startTime) &&
           timeToMin(p.endTime) <= timeToMin(s.endTime)
         );
-        if (owner) {
-          const k = `${p.date}|${owner.id}`;
+        const k = owner ? `${p.date}|${owner.id}` : null;
+        if (owner && !prefs[k]) {
+          // セッション内収まり、かつ同セッションにまだ pref 無し → customTimes
           prefs[k] = p.priority;
           customTimes[k] = { startTime: p.startTime, endTime: p.endTime };
+        } else {
+          // セッション跨ぎ or 同セッション 2 件目 → 自由時間希望 (Round 18)
+          if (!freePrefs[p.date]) freePrefs[p.date] = [];
+          freePrefs[p.date].push({
+            id: p.id || ("fp_" + Math.random().toString(36).slice(2, 9)),
+            startTime: p.startTime,
+            endTime: p.endTime,
+            priority: p.priority,
+          });
         }
       }
     }
@@ -189,17 +201,19 @@
 
     // restore localStorage draft if newer (週別キー)
     const draft = loadDraft();
-    if (draft && (Object.keys(draft.prefs || {}).length > 0 || Object.keys(draft.comments || {}).length > 0)) {
+    if (draft && (Object.keys(draft.prefs || {}).length > 0 || Object.keys(draft.comments || {}).length > 0 || Object.keys(draft.freePrefs || {}).length > 0)) {
       const keys = Object.keys(draft.prefs || {});
       const hasUnsavedChange = keys.some(k => draft.prefs[k] !== prefs[k])
         || Object.keys(draft.comments || {}).some(k => (draft.comments[k] || "") !== (comments[k] || ""))
-        || Object.keys(draft.customTimes || {}).some(k => JSON.stringify(draft.customTimes[k]) !== JSON.stringify(customTimes[k]));
+        || Object.keys(draft.customTimes || {}).some(k => JSON.stringify(draft.customTimes[k]) !== JSON.stringify(customTimes[k]))
+        || JSON.stringify(draft.freePrefs || {}) !== JSON.stringify(freePrefs);
       if (hasUnsavedChange && confirm(
         "前回未送信の入力があります。復元しますか？\n\n" +
         "「キャンセル」を押すと送信済みの内容を表示します。"
       )) {
         prefs = { ...prefs, ...(draft.prefs || {}) };
         customTimes = { ...customTimes, ...(draft.customTimes || {}) };
+        freePrefs = { ...freePrefs, ...(draft.freePrefs || {}) };
         comments = { ...comments, ...(draft.comments || {}) };
         dirty = true;
       } else {
@@ -244,8 +258,11 @@
     const days = Array.from({ length: 7 }, (_, i) => addDays(data.weekStart, i));
     const sessions = data.sessions || [];
     const totalCells = 7 * sessions.length;
-    const filledCells = Object.values(prefs).filter(v => v).length;
-    const progress = totalCells ? Math.round((filledCells / totalCells) * 100) : 0;
+    const sessionFilled = Object.values(prefs).filter(v => v).length;
+    const freeFilledDays = Object.keys(freePrefs).filter(d => (freePrefs[d] || []).length > 0).length;
+    const filledCells = sessionFilled + freeFilledDays;
+    // 自由時間希望は 1 日でカウント (= 7 日中 X 日に何かを入力)
+    const progress = totalCells ? Math.min(100, Math.round((filledCells / totalCells) * 100)) : 0;
 
     const m = data.monthlyStats || {};
     const monthLabel = m.monthKey ? m.monthKey.replace("-", "年") + "月" : "今月";
@@ -491,6 +508,39 @@
         }
         inner.appendChild(sessRow);
       }
+
+      // 自由時間希望セクション (Round 18 TOP 1)
+      const freeList = freePrefs[date] || [];
+      const freeRow = document.createElement("div");
+      freeRow.className = "border-t border-slate-100 pt-2 mt-1 px-1";
+      const freeId = `free-${date}`;
+      freeRow.innerHTML = `
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs font-semibold text-slate-700">⏰ 自由時間で希望</span>
+          <button class="add-free-btn text-[10px] bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 rounded px-2 py-1 font-semibold"
+            data-date="${date}" aria-label="自由時間希望を追加">＋ 時間を追加</button>
+        </div>
+        <div id="${freeId}" class="space-y-1"></div>
+        ${freeList.length === 0 ? `<div class="text-[10px] text-slate-400">例: 17:00〜23:00 で入りたい・10:00〜14:00 のみ可、など細かく指定したい場合はこちら</div>` : ""}`;
+      inner.appendChild(freeRow);
+      // 既存の自由時間希望を描画
+      const freeContainer = freeRow.querySelector(`#${CSS.escape(freeId)}`);
+      for (const fp of freeList) {
+        const PRIO_LABEL = {
+          must: { label: "必須", cls: "bg-red-50 border-red-300 text-red-800", emoji: "🔥" },
+          want: { label: "希望", cls: "bg-emerald-50 border-emerald-300 text-emerald-800", emoji: "✅" },
+          avoid: { label: "不可", cls: "bg-slate-100 border-slate-300 text-slate-700", emoji: "🚫" },
+        };
+        const meta = PRIO_LABEL[fp.priority] || PRIO_LABEL.want;
+        const item = document.createElement("div");
+        item.className = `flex items-center justify-between border rounded px-2 py-1 text-xs ${meta.cls}`;
+        item.innerHTML = `
+          <span class="font-mono">${escapeHtml(fp.startTime)}〜${escapeHtml(fp.endTime)}</span>
+          <span class="font-semibold">${meta.emoji} ${meta.label}</span>
+          <button class="del-free-btn text-slate-400 hover:text-red-600 ml-2" data-date="${date}" data-id="${escapeAttr(fp.id)}" aria-label="削除">🗑</button>`;
+        freeContainer.appendChild(item);
+      }
+
       // コメント欄 (日付ごと)
       const commentRow = document.createElement("div");
       commentRow.className = "px-1";
@@ -509,6 +559,21 @@
 
       grid.appendChild(dayCard);
     }
+
+    // 自由時間希望ボタン (Round 18 TOP 1)
+    grid.querySelectorAll(".add-free-btn").forEach(btn => {
+      btn.onclick = () => openFreeTimeDialog(btn.getAttribute("data-date"));
+    });
+    grid.querySelectorAll(".del-free-btn").forEach(btn => {
+      btn.onclick = () => {
+        const date = btn.getAttribute("data-date");
+        const id = btn.getAttribute("data-id");
+        if (!freePrefs[date]) return;
+        freePrefs[date] = freePrefs[date].filter(f => f.id !== id);
+        if (freePrefs[date].length === 0) delete freePrefs[date];
+        dirty = true; saveDraft(); renderDraft();
+      };
+    });
 
     // 週切替タブ (Round 15 TOP 2)
     document.querySelectorAll(".week-tab-btn").forEach(btn => {
@@ -647,6 +712,19 @@
           date, startTime, endTime, priority: prio,
         });
       }
+      // 自由時間希望 (Round 18 TOP 1) も送信
+      for (const [date, list] of Object.entries(freePrefs)) {
+        for (const fp of list) {
+          out.push({
+            id: fp.id || ("p_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)),
+            staffId: data.staff.id,
+            date,
+            startTime: fp.startTime,
+            endTime: fp.endTime,
+            priority: fp.priority,
+          });
+        }
+      }
       const btn = $("#saveBtn");
       btn.disabled = true;
       btn.textContent = "送信中...";
@@ -671,6 +749,107 @@
   }
 
   // ===== 時間調整モーダル =====
+  // ===== 自由時間希望ダイアログ (Round 18 TOP 1) =====
+  function openFreeTimeDialog(date) {
+    // 営業時間の最小・最大時刻 (sessions の min/max)
+    const sessions = data.sessions || [];
+    let minMin = 6 * 60, maxMin = 24 * 60;
+    if (sessions.length) {
+      minMin = Math.min(...sessions.map(s => timeToMin(s.startTime)));
+      maxMin = Math.max(...sessions.map(s => timeToMin(s.endTime)));
+    }
+    // 30 分刻みで選択肢生成
+    const options = [];
+    for (let m = minMin; m <= maxMin; m += 30) {
+      const h = String(Math.floor(m / 60)).padStart(2, "0");
+      const mm = String(m % 60).padStart(2, "0");
+      options.push(`${h}:${mm}`);
+    }
+    const defaultStart = options[Math.floor(options.length / 4)] || "11:00";
+    const defaultEnd = options[Math.floor(options.length * 3 / 4)] || "20:00";
+    const opts = (current) => options.map(o => `<option value="${o}" ${o === current ? "selected" : ""}>${o}</option>`).join("");
+
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4";
+    overlay.innerHTML = `
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 space-y-3">
+        <h3 class="font-bold text-base">⏰ ${date.slice(5)} の自由時間希望</h3>
+        <p class="text-xs text-slate-600">セッション(ランチ/ディナー)の枠に縛られず、自分の入れる時間を自由に登録できます。</p>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block text-sm">
+            <span class="text-slate-700">開始</span>
+            <select id="ft-start" class="mt-1 w-full border rounded-md px-3 py-2">${opts(defaultStart)}</select>
+          </label>
+          <label class="block text-sm">
+            <span class="text-slate-700">終了</span>
+            <select id="ft-end" class="mt-1 w-full border rounded-md px-3 py-2">${opts(defaultEnd)}</select>
+          </label>
+        </div>
+        <div>
+          <span class="text-sm text-slate-700">優先度</span>
+          <div class="grid grid-cols-3 gap-2 mt-1">
+            <button data-prio="must" class="ft-prio-btn text-xs font-semibold py-2 rounded-md border-2 bg-white text-red-600 border-red-200">🔥 必須</button>
+            <button data-prio="want" class="ft-prio-btn text-xs font-semibold py-2 rounded-md border-2 bg-emerald-500 text-white border-emerald-500">✅ 希望</button>
+            <button data-prio="avoid" class="ft-prio-btn text-xs font-semibold py-2 rounded-md border-2 bg-white text-slate-500 border-slate-200">🚫 不可</button>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button id="ft-cancel" class="px-3 py-1.5 text-sm bg-slate-200 rounded-md">キャンセル</button>
+          <button id="ft-add" class="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md font-semibold">追加</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    let chosenPrio = "want";
+    overlay.querySelectorAll(".ft-prio-btn").forEach(b => {
+      b.onclick = () => {
+        chosenPrio = b.getAttribute("data-prio");
+        overlay.querySelectorAll(".ft-prio-btn").forEach(x => {
+          const p = x.getAttribute("data-prio");
+          if (p === chosenPrio) {
+            x.className = `ft-prio-btn text-xs font-semibold py-2 rounded-md border-2 ${
+              p === "must" ? "bg-red-500 text-white border-red-500"
+              : p === "want" ? "bg-emerald-500 text-white border-emerald-500"
+              : "bg-slate-600 text-white border-slate-600"
+            }`;
+          } else {
+            x.className = `ft-prio-btn text-xs font-semibold py-2 rounded-md border-2 ${
+              p === "must" ? "bg-white text-red-600 border-red-200"
+              : p === "want" ? "bg-white text-emerald-600 border-emerald-200"
+              : "bg-white text-slate-500 border-slate-200"
+            }`;
+          }
+        });
+      };
+    });
+    overlay.querySelector("#ft-cancel").onclick = () => overlay.remove();
+    overlay.querySelector("#ft-add").onclick = () => {
+      const start = overlay.querySelector("#ft-start").value;
+      const end = overlay.querySelector("#ft-end").value;
+      if (timeToMin(end) <= timeToMin(start)) {
+        toast("終了時刻は開始時刻より後にしてください", "error"); return;
+      }
+      // 重複チェック (簡易): 同日の同優先度・同時間帯
+      const list = freePrefs[date] || [];
+      if (list.some(f => f.startTime === start && f.endTime === end)) {
+        toast("同じ時間帯が既に登録されています", "error"); return;
+      }
+      const newItem = {
+        id: "fp_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        startTime: start,
+        endTime: end,
+        priority: chosenPrio,
+      };
+      if (!freePrefs[date]) freePrefs[date] = [];
+      freePrefs[date].push(newItem);
+      // 開始時刻でソート
+      freePrefs[date].sort((a, b) => timeToMin(a.startTime) - timeToMin(b.startTime));
+      dirty = true; saveDraft();
+      overlay.remove();
+      renderDraft();
+      toast(`✓ ${date.slice(5)} ${start}〜${end} を「${chosenPrio === "must" ? "必須" : chosenPrio === "want" ? "希望" : "不可"}」で追加`, "success");
+    };
+  }
+
   function openTimeAdjustModal(key, sessStart, sessEnd) {
     const ct = customTimes[key];
     const curStart = (ct && ct.startTime) || sessStart;
