@@ -2517,6 +2517,152 @@ def api_t_portal_swap_take(slug, token, sid):
 
 
 # ============================================================
+# 打刻 (Round 19) — Clock-in / Clock-out
+# ============================================================
+def _find_clockable_assignment(state, staff_id, kind="in"):
+    """打刻対象の assignment を見つける。
+    今日の自分のシフトのうち、開始時刻の前後 2 時間以内のものを優先。
+    kind="in" は clockIn 未設定、kind="out" は clockIn あり clockOut 未設定。
+    """
+    import datetime as _dt_a
+    now = _dt_a.datetime.now(_dt_a.timezone(_dt_a.timedelta(hours=9)))
+    today = now.strftime("%Y-%m-%d")
+    weeks = state.get("weeks") or {}
+    candidates = []
+    for wk_data in weeks.values():
+        for a in (wk_data.get("assignments") or []):
+            if a.get("staffId") != staff_id:
+                continue
+            if a.get("date") != today:
+                continue
+            if kind == "in" and a.get("clockIn"):
+                continue  # 既に打刻済
+            if kind == "out" and not a.get("clockIn"):
+                continue  # 出勤前は退勤打刻不可
+            if kind == "out" and a.get("clockOut"):
+                continue  # 既に退勤打刻済
+            try:
+                target_h, target_m = (a.get("startTime" if kind == "in" else "endTime") or "00:00").split(":")
+                target_dt = now.replace(hour=int(target_h), minute=int(target_m), second=0, microsecond=0)
+                diff_min = abs((now - target_dt).total_seconds() / 60)
+                candidates.append((diff_min, a))
+            except Exception:
+                continue
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0])
+    closest_min, target = candidates[0]
+    # 開始/終了の前後 4 時間以内のシフトのみ打刻可 (誤打刻防止)
+    if closest_min > 240:
+        return None
+    return target
+
+
+@app.post("/api/t/<slug>/portal/<token>/clock-in")
+def api_t_portal_clock_in(slug, token):
+    if _rate_check("portal_clock"):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    state = s.get_state()
+    if state is None:
+        return jsonify({"error": "no_state"}), 404
+    target = _find_clockable_assignment(state, staff_id, kind="in")
+    if not target:
+        return jsonify({"error": "no_clockable_shift"}), 404
+
+    import datetime as _dt_c
+    now_iso = _dt_c.datetime.now(_dt_c.timezone(_dt_c.timedelta(hours=9))).isoformat()
+    target_id = target.get("id")
+    target_wk = None
+    weeks = state.get("weeks") or {}
+    for wk_key, wk_data in weeks.items():
+        for a in (wk_data.get("assignments") or []):
+            if a.get("id") == target_id:
+                target_wk = wk_key
+                break
+        if target_wk:
+            break
+
+    def _mutate(current):
+        if current is None:
+            return current
+        wks = current.setdefault("weeks", {})
+        wd = wks.get(target_wk)
+        if not wd:
+            return current
+        for a in (wd.get("assignments") or []):
+            if a.get("id") == target_id:
+                a["clockIn"] = now_iso
+                a["clockInBy"] = "self"
+                break
+        return current
+    s.transactional_update(_mutate)
+    return jsonify({
+        "ok": True,
+        "clockIn": now_iso,
+        "scheduledStart": target.get("startTime"),
+        "assignmentId": target_id,
+    })
+
+
+@app.post("/api/t/<slug>/portal/<token>/clock-out")
+def api_t_portal_clock_out(slug, token):
+    if _rate_check("portal_clock"):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    state = s.get_state()
+    if state is None:
+        return jsonify({"error": "no_state"}), 404
+    target = _find_clockable_assignment(state, staff_id, kind="out")
+    if not target:
+        return jsonify({"error": "no_clockable_shift"}), 404
+
+    import datetime as _dt_c
+    now_iso = _dt_c.datetime.now(_dt_c.timezone(_dt_c.timedelta(hours=9))).isoformat()
+    target_id = target.get("id")
+    target_wk = None
+    weeks = state.get("weeks") or {}
+    for wk_key, wk_data in weeks.items():
+        for a in (wk_data.get("assignments") or []):
+            if a.get("id") == target_id:
+                target_wk = wk_key
+                break
+        if target_wk:
+            break
+
+    def _mutate(current):
+        if current is None:
+            return current
+        wks = current.setdefault("weeks", {})
+        wd = wks.get(target_wk)
+        if not wd:
+            return current
+        for a in (wd.get("assignments") or []):
+            if a.get("id") == target_id:
+                a["clockOut"] = now_iso
+                a["clockOutBy"] = "self"
+                break
+        return current
+    s.transactional_update(_mutate)
+    return jsonify({
+        "ok": True,
+        "clockOut": now_iso,
+        "scheduledEnd": target.get("endTime"),
+        "assignmentId": target_id,
+    })
+
+
+# ============================================================
 # Tenant 用スタッフポータル HTML
 # /t/{slug}/staff?t={token}
 # ============================================================

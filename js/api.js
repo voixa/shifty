@@ -179,6 +179,14 @@
         })
       : Promise.reject(new Error("legacy_mode_not_supported")),
 
+    // 打刻 (Round 19)
+    portalClockIn: (token) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/clock-in`, { method: "POST" })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
+    portalClockOut: (token) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/clock-out`, { method: "POST" })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
+
     // シフト交換 (Round 16 TOP 2)
     portalCreateSwap: (token, payload) => tenantSlug
       ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/swap-request`, {

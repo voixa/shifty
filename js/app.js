@@ -1052,6 +1052,71 @@ function viewDashboard() {
     }
   }
 
+  // 6. 打刻未登録アラート (Round 19) — 開始予定時刻を 10 分以上過ぎても未打刻
+  const todayStrA = new Date().toISOString().slice(0, 10);
+  const allUnclock = [];
+  for (const wk of Object.values(state.weeks || {})) {
+    if (wk.status !== "published") continue;
+    for (const a of (wk.assignments || [])) {
+      if (a.date !== todayStrA) continue;
+      if (a.clockIn) continue;
+      const start = new Date(`${a.date}T${a.startTime}:00`);
+      const minLate = (Date.now() - start) / 60000;
+      if (minLate > 10) allUnclock.push({ a, minLate });
+    }
+  }
+  if (allUnclock.length > 0) {
+    allUnclock.sort((a, b) => b.minLate - a.minLate);
+    const names = allUnclock.slice(0, 3).map(x => {
+      const s = state.staff.find(st => st.id === x.a.staffId);
+      return `${s?.name || "?"}(${Math.floor(x.minLate)}分)`;
+    }).join("・");
+    alerts.push({
+      level: "error", emoji: "⏱",
+      text: `未打刻 ${allUnclock.length} 名`,
+      detail: names + (allUnclock.length > 3 ? ` 他 ${allUnclock.length - 3}` : ""),
+      action: () => { /* dashboard 内なので何もしない */ }, actionLabel: "確認",
+    });
+  }
+
+  // 7. 大幅な乖離アラート (Round 19) — 当月内で予定 vs 実績の差が大きいスタッフ
+  const monthKey = (state.meta.currentWeekStart || "").slice(0, 7);
+  if (monthKey) {
+    const deviationByStaff = {};
+    for (const wk of Object.values(state.weeks || {})) {
+      if (wk.status !== "published") continue;
+      for (const a of (wk.assignments || [])) {
+        if (!a.date.startsWith(monthKey)) continue;
+        if (!a.clockIn || !a.clockOut) continue;
+        try {
+          const inDt = new Date(a.clockIn), outDt = new Date(a.clockOut);
+          const sched = calcHours(a.startTime, a.endTime);
+          const actual = (outDt - inDt) / 3600000;
+          const diff = actual - sched;
+          if (Math.abs(diff) >= 0.5) { // 30分以上の乖離
+            if (!deviationByStaff[a.staffId]) deviationByStaff[a.staffId] = { count: 0, total: 0 };
+            deviationByStaff[a.staffId].count++;
+            deviationByStaff[a.staffId].total += diff;
+          }
+        } catch (_) {}
+      }
+    }
+    const bigDev = Object.entries(deviationByStaff).filter(([_, v]) => v.count >= 3 || Math.abs(v.total) >= 2);
+    if (bigDev.length > 0) {
+      const names = bigDev.slice(0, 2).map(([sid, v]) => {
+        const s = state.staff.find(st => st.id === sid);
+        const sign = v.total >= 0 ? "+" : "";
+        return `${s?.name || "?"}(${sign}${v.total.toFixed(1)}h, ${v.count}回)`;
+      }).join("・");
+      alerts.push({
+        level: "warn", emoji: "📊",
+        text: `予定/実績の乖離が大 ${bigDev.length} 名`,
+        detail: names + " — 月給与と CSV 集計に注意",
+        action: () => { setTab("export"); }, actionLabel: "給与CSV確認",
+      });
+    }
+  }
+
   // 月次労務リスク (Round 15 TOP 1) — 当月の累積時間と労務上限への接近度
   if (state.staff.length > 0) {
     const monthCard = renderMonthlyLaborRisk();
@@ -1147,9 +1212,24 @@ function viewDashboard() {
   if (todayAssignments.length > 0) {
     const todayCard = el("div", { class: "bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-300 rounded-xl p-3" });
     const dow = ["日","月","火","水","木","金","土"][new Date(todayStr + "T00:00:00").getDay()];
-    todayCard.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
+    // 打刻サマリ (Round 19)
+    const totalShifts = todayAssignments.length;
+    const clockedIn = todayAssignments.filter(a => a.clockIn).length;
+    const clockedOut = todayAssignments.filter(a => a.clockOut).length;
+    const lateUnclock = todayAssignments.filter(a => !a.clockIn && (Date.now() - new Date(`${a.date}T${a.startTime}:00`)) / 60000 > 5).length;
+    let summaryBadge = `<span class="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded">${totalShifts} シフト</span>`;
+    if (lateUnclock > 0) {
+      summaryBadge += `<span class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded ml-1">⚠️ 未打刻 ${lateUnclock}</span>`;
+    }
+    if (clockedIn - clockedOut > 0) {
+      summaryBadge += `<span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-1 rounded ml-1">勤務中 ${clockedIn - clockedOut}</span>`;
+    }
+    if (clockedOut > 0) {
+      summaryBadge += `<span class="text-xs bg-slate-100 text-slate-700 px-2 py-1 rounded ml-1">退勤済 ${clockedOut}</span>`;
+    }
+    todayCard.appendChild(el("div", { class: "flex items-center justify-between mb-2 flex-wrap gap-1" }, [
       el("div", { class: "font-semibold text-sm text-amber-900" }, `☀ 本日の出勤者 (${todayStr.slice(5)} ${dow}曜)`),
-      el("span", { class: "text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded" }, `${todayAssignments.length} シフト`),
+      el("div", { class: "flex flex-wrap gap-1", html: summaryBadge }),
     ]));
     // 時間順ソート
     const sortedAss = todayAssignments.slice().sort((a,b) => a.startTime.localeCompare(b.startTime));
@@ -1170,12 +1250,43 @@ function viewDashboard() {
         const s = state.staff.find(x => x.id === a.staffId);
         if (!s) continue;
         const cfg = posCfg(a.position);
+        // 打刻ステータス (Round 19)
+        const hasIn = !!a.clockIn;
+        const hasOut = !!a.clockOut;
+        let clockStatus = "";
+        let chipBg = "bg-white";
+        if (hasIn && !hasOut) {
+          clockStatus = `<span class="ml-1 text-[9px] bg-emerald-500 text-white rounded px-1">勤務中</span>`;
+          chipBg = "bg-emerald-50";
+        } else if (hasIn && hasOut) {
+          clockStatus = `<span class="ml-1 text-[9px] bg-slate-500 text-white rounded px-1">退勤済</span>`;
+          chipBg = "bg-slate-100";
+        } else {
+          // 未打刻
+          const startDt = new Date(`${a.date}T${a.startTime}:00`);
+          const minLate = (Date.now() - startDt) / 60000;
+          if (minLate > 5) {
+            clockStatus = `<span class="ml-1 text-[9px] bg-red-500 text-white rounded px-1">未打刻 ${Math.floor(minLate)}分経過</span>`;
+            chipBg = "bg-red-50";
+          }
+        }
+        // 遅刻情報
+        let lateInfo = "";
+        if (hasIn) {
+          try {
+            const inDt = new Date(a.clockIn);
+            const sched = new Date(`${a.date}T${a.startTime}:00`);
+            const diffMin = Math.round((inDt - sched) / 60000);
+            if (diffMin > 5) lateInfo = `<span class="text-[9px] text-red-600 ml-0.5">+${diffMin}分</span>`;
+            else if (diffMin < -10) lateInfo = `<span class="text-[9px] text-blue-600 ml-0.5">${diffMin}分</span>`;
+          } catch (_) {}
+        }
         const chip = el("span", {
-          class: "inline-flex items-center gap-1 bg-white border rounded px-2 py-0.5 text-[11px]",
+          class: `inline-flex items-center gap-1 ${chipBg} border rounded px-2 py-0.5 text-[11px]`,
           style: { borderColor: cfg.color },
-          title: `${s.name} (${cfg.label}) ${s.email ? '・' + s.email : ''}`,
+          title: `${s.name} (${cfg.label}) ${s.email ? '・' + s.email : ''}${hasIn ? '・出勤 ' + new Date(a.clockIn).toLocaleTimeString('ja-JP', {hour:'2-digit',minute:'2-digit'}) : ''}`,
         });
-        chip.innerHTML = `<span style="color:${cfg.color}">●</span><strong>${escapeHtml(s.name)}</strong><span class="text-slate-500">(${escapeHtml(cfg.label)})</span>`;
+        chip.innerHTML = `<span style="color:${cfg.color}">●</span><strong>${escapeHtml(s.name)}</strong><span class="text-slate-500">(${escapeHtml(cfg.label)})</span>${lateInfo}${clockStatus}`;
         staffList.appendChild(chip);
       }
       row.appendChild(staffList);
@@ -3389,6 +3500,116 @@ function openAssignmentDetail(a) {
   ]));
   body.appendChild(memoCard);
 
+  // 打刻管理カード (Round 19) — オーナーが手動で打刻時刻を編集 (修正・追加)
+  const clockCard = el("div", { class: "bg-blue-50 border border-blue-200 rounded-md p-3 space-y-2" });
+  clockCard.appendChild(el("div", { class: "text-xs font-semibold text-blue-900" }, "⏱ 打刻管理"));
+  function fmtClockLocal(iso) {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      const pad = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch (_) { return ""; }
+  }
+  const inVal = fmtClockLocal(a.clockIn);
+  const outVal = fmtClockLocal(a.clockOut);
+  const grid = el("div", { class: "grid grid-cols-1 md:grid-cols-2 gap-2 text-xs" });
+  grid.innerHTML = `
+    <label class="block">
+      <span class="text-slate-700">出勤打刻 (予定 ${escapeHtml(a.startTime)})</span>
+      <input id="clock-in-input" type="datetime-local" class="mt-1 w-full border rounded px-2 py-1" value="${escapeAttr(inVal)}">
+      ${a.clockInBy === "manual" ? '<span class="text-[10px] text-slate-500">店長手動修正</span>' : a.clockInBy === "self" ? '<span class="text-[10px] text-slate-500">セルフ打刻</span>' : ""}
+    </label>
+    <label class="block">
+      <span class="text-slate-700">退勤打刻 (予定 ${escapeHtml(a.endTime)})</span>
+      <input id="clock-out-input" type="datetime-local" class="mt-1 w-full border rounded px-2 py-1" value="${escapeAttr(outVal)}">
+      ${a.clockOutBy === "manual" ? '<span class="text-[10px] text-slate-500">店長手動修正</span>' : a.clockOutBy === "self" ? '<span class="text-[10px] text-slate-500">セルフ打刻</span>' : ""}
+    </label>`;
+  clockCard.appendChild(grid);
+  // 差分表示
+  if (a.clockIn || a.clockOut) {
+    const diffs = [];
+    if (a.clockIn) {
+      try {
+        const inDt = new Date(a.clockIn);
+        const sched = new Date(`${a.date}T${a.startTime}:00`);
+        const dm = Math.round((inDt - sched) / 60000);
+        if (dm > 5) diffs.push(`<span class="text-red-700">+${dm}分遅刻</span>`);
+        else if (dm < -10) diffs.push(`<span class="text-blue-700">${dm}分早出</span>`);
+      } catch (_) {}
+    }
+    if (a.clockOut) {
+      try {
+        const outDt = new Date(a.clockOut);
+        const sched = new Date(`${a.date}T${a.endTime}:00`);
+        const dm = Math.round((outDt - sched) / 60000);
+        if (dm > 5) diffs.push(`<span class="text-amber-700">+${dm}分残業</span>`);
+        else if (dm < -10) diffs.push(`<span class="text-blue-700">${dm}分早退</span>`);
+      } catch (_) {}
+    }
+    if (a.clockIn && a.clockOut) {
+      try {
+        const inDt = new Date(a.clockIn);
+        const outDt = new Date(a.clockOut);
+        const actualH = (outDt - inDt) / 3600000;
+        const schedH = calcHours(a.startTime, a.endTime);
+        diffs.push(`<span class="text-slate-700">実労働 <b>${actualH.toFixed(2)}h</b> / 予定 ${schedH.toFixed(1)}h</span>`);
+      } catch (_) {}
+    }
+    if (diffs.length > 0) {
+      clockCard.appendChild(el("div", { class: "text-[11px] flex flex-wrap gap-2 px-1", html: diffs.join(" ・ ") }));
+    }
+  }
+  clockCard.appendChild(el("div", { class: "flex justify-between gap-2 pt-1" }, [
+    (a.clockIn || a.clockOut) ? el("button", {
+      class: "text-xs text-red-600 hover:bg-red-50 rounded px-2 py-1",
+      onclick: async () => {
+        if (!confirm("このシフトの打刻データをクリアしますか？")) return;
+        const idx = curAssignments().findIndex(x => x.id === a.id);
+        if (idx < 0) return;
+        const upd = { ...a };
+        delete upd.clockIn; delete upd.clockInBy;
+        delete upd.clockOut; delete upd.clockOutBy;
+        curAssignments()[idx] = upd;
+        logChange("clock_clear", `${a.date} ${a.startTime}〜 (${s?.name || "?"}) の打刻をクリア`);
+        await persist(); closeModal(); render();
+        toast("打刻をクリアしました", "success");
+      },
+    }, "🗑 打刻クリア") : el("span", {}),
+    el("button", {
+      class: "text-xs bg-blue-600 hover:bg-blue-700 text-white rounded px-3 py-1",
+      onclick: async () => {
+        const inEl = document.getElementById("clock-in-input");
+        const outEl = document.getElementById("clock-out-input");
+        const newIn = inEl?.value || "";
+        const newOut = outEl?.value || "";
+        const idx = curAssignments().findIndex(x => x.id === a.id);
+        if (idx < 0) { toast("対象が見つかりません", "error"); return; }
+        function _toIso(localStr) {
+          if (!localStr) return "";
+          // datetime-local は "YYYY-MM-DDTHH:mm" を JST と解釈
+          return localStr + ":00+09:00";
+        }
+        const inIso = newIn ? _toIso(newIn) : "";
+        const outIso = newOut ? _toIso(newOut) : "";
+        if (inIso && outIso && new Date(outIso) <= new Date(inIso)) {
+          toast("退勤時刻は出勤時刻より後にしてください", "error"); return;
+        }
+        const upd = { ...a };
+        const oldIn = a.clockIn || "", oldOut = a.clockOut || "";
+        if (inIso && inIso !== oldIn) { upd.clockIn = inIso; upd.clockInBy = "manual"; }
+        else if (!inIso && oldIn) { delete upd.clockIn; delete upd.clockInBy; }
+        if (outIso && outIso !== oldOut) { upd.clockOut = outIso; upd.clockOutBy = "manual"; }
+        else if (!outIso && oldOut) { delete upd.clockOut; delete upd.clockOutBy; }
+        curAssignments()[idx] = upd;
+        logChange("clock_edit", `${a.date} ${a.startTime}〜 (${s?.name || "?"}) の打刻を手動修正`);
+        await persist(); closeModal(); render();
+        toast("打刻を保存しました", "success");
+      },
+    }, "💾 打刻を保存"),
+  ]));
+  body.appendChild(clockCard);
+
   if (curStatus() === "draft") {
     body.appendChild(el("button", { class: "w-full text-sm bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-md py-2 font-semibold",
       onclick: () => showSubstitutes(a) }, "🆘 欠勤想定 → 代打推薦"));
@@ -4158,6 +4379,18 @@ function openPayrollCsvDialog() {
     ]),
   ]));
 
+  // Round 19: 集計ベース選択
+  body.appendChild(el("label", { class: "block text-sm" }, [
+    el("span", { class: "text-slate-600" }, "集計ベース"),
+    el("select", { id: "pcsv-basis", class: "mt-1 w-full border rounded-md px-3 py-2" }, [
+      el("option", { value: "scheduled" }, "予定時間（シフト確定値）"),
+      el("option", { value: "actual" }, "実労働時間（打刻ベース）— 推奨"),
+      el("option", { value: "actual_with_diff" }, "実労働 + 予定との差分明細"),
+    ]),
+  ]));
+  body.appendChild(el("div", { class: "text-[10px] text-slate-500 -mt-1 pl-1" },
+    "💡 「実労働時間」は打刻された時刻から計算。打刻が無いシフトは予定時間で代用。"));
+
   body.appendChild(el("div", { class: "flex justify-end gap-2 pt-3" }, [
     el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
     el("button", {
@@ -4165,7 +4398,8 @@ function openPayrollCsvDialog() {
       onclick: () => {
         const month = $("#pcsv-month").value;
         const format = $("#pcsv-format").value;
-        downloadPayrollCsv(month, format);
+        const basis = $("#pcsv-basis").value;
+        downloadPayrollCsv(month, format, basis);
         closeModal();
       },
     }, "ダウンロード"),
@@ -4173,7 +4407,7 @@ function openPayrollCsvDialog() {
   modal(body);
 }
 
-function downloadPayrollCsv(monthKey, format) {
+function downloadPayrollCsv(monthKey, format, basis = "scheduled") {
   // 当月の確定済 assignments を全 weeks から集約
   const allWeeks = state.weeks || {};
   const monthAssignments = [];
@@ -4188,25 +4422,59 @@ function downloadPayrollCsv(monthKey, format) {
     return;
   }
 
-  // スタッフ別集計 (Round 10: 休憩控除 + Round 14: 深夜手当)
+  // 実労働時間を計算 (Round 19): clockIn/clockOut があればそれを使用、無ければ予定
+  const useActual = (basis === "actual" || basis === "actual_with_diff");
+  function getEffectiveHours(a) {
+    if (useActual && a.clockIn && a.clockOut) {
+      try {
+        const inDt = new Date(a.clockIn);
+        const outDt = new Date(a.clockOut);
+        const h = (outDt - inDt) / 3600000;
+        if (h > 0) return { hours: h, source: "actual" };
+      } catch (_) {}
+    }
+    return { hours: calcHours(a.startTime, a.endTime), source: "scheduled" };
+  }
+
+  // スタッフ別集計 (Round 10: 休憩控除 + Round 14: 深夜手当 + Round 19: 実労働)
   const byStaff = {};
   const ps = state.meta.payrollSettings || {};
   const nightOn = ps.nightAllowanceEnabled;
   const nightStart = ps.nightStartHour || 22;
   const nightRate = ps.nightRate || 1.25;
   function _t(s) { const [h, m] = s.split(":").map(Number); return h * 60 + m; }
+  // Round 19: HH:MM 形式で時刻表現を取り出す (実打刻 ISO → JST HH:MM)
+  function _isoToHHMM(iso) {
+    if (!iso) return null;
+    try {
+      const d = new Date(iso);
+      return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    } catch (_) { return null; }
+  }
   for (const a of monthAssignments) {
-    if (!byStaff[a.staffId]) byStaff[a.staffId] = { hours: 0, nightHours: 0, pay: 0, days: [] };
+    if (!byStaff[a.staffId]) byStaff[a.staffId] = { hours: 0, scheduledHours: 0, nightHours: 0, pay: 0, days: [], actualCount: 0, missingCount: 0 };
     const staffRec = state.staff.find(s => s.id === a.staffId);
     const breakMin = (staffRec && staffRec.breakMinutes) || 0;
-    let h = calcHours(a.startTime, a.endTime);
+    // 集計ベースに応じて使う時間を切り替え
+    const eff = getEffectiveHours(a);
+    let h = eff.hours;
+    const schedH = calcHours(a.startTime, a.endTime);
     if (h > 6 && breakMin > 0) h -= breakMin / 60;
+    let schedHForReport = schedH;
+    if (schedHForReport > 6 && breakMin > 0) schedHForReport -= breakMin / 60;
 
-    // 深夜時間の計算
+    // 深夜時間の計算 — 実打刻があればその時間、無ければ予定
+    let nightStartT = a.startTime;
+    let nightEndT = a.endTime;
+    if (useActual && a.clockIn && a.clockOut) {
+      const inH = _isoToHHMM(a.clockIn);
+      const outH = _isoToHHMM(a.clockOut);
+      if (inH && outH) { nightStartT = inH; nightEndT = outH; }
+    }
     let nightH = 0;
     if (nightOn && staffRec) {
-      const startMin = _t(a.startTime);
-      const endMin = _t(a.endTime);
+      const startMin = _t(nightStartT);
+      const endMin = _t(nightEndT);
       const nightStartMin = nightStart * 60;
       // シフトが深夜時間帯と重なるか
       if (endMin > nightStartMin) {
@@ -4218,8 +4486,11 @@ function downloadPayrollCsv(monthKey, format) {
     const wage = staffRec ? staffRec.hourlyWage : 1100;
     const pay = (wage * dayH) + (wage * nightRate * nightH);
     byStaff[a.staffId].hours += h;
+    byStaff[a.staffId].scheduledHours += schedHForReport;
     byStaff[a.staffId].nightHours += nightH;
     byStaff[a.staffId].pay += pay;
+    if (eff.source === "actual") byStaff[a.staffId].actualCount += 1;
+    else if (useActual) byStaff[a.staffId].missingCount += 1;
     byStaff[a.staffId].days.push(a);
   }
 
@@ -4227,36 +4498,63 @@ function downloadPayrollCsv(monthKey, format) {
   let filename = `payroll_${monthKey}_${format}.csv`;
 
   if (format === "summary") {
-    const head = nightOn
-      ? "スタッフID,氏名,本職,時給,通常時間(h),深夜時間(h),合計時間(h),合計給与(円)\n"
-      : "スタッフID,氏名,本職,時給,合計時間(h),合計給与(円)\n";
+    // Round 19: useActual の場合は実労働カラムも追加
+    let head;
+    if (useActual && nightOn) {
+      head = "スタッフID,氏名,本職,時給,予定時間(h),実労働時間(h),通常時間(h),深夜時間(h),合計時間(h),合計給与(円),打刻有効,打刻欠落\n";
+    } else if (useActual) {
+      head = "スタッフID,氏名,本職,時給,予定時間(h),実労働時間(h),合計給与(円),打刻有効,打刻欠落\n";
+    } else if (nightOn) {
+      head = "スタッフID,氏名,本職,時給,通常時間(h),深夜時間(h),合計時間(h),合計給与(円)\n";
+    } else {
+      head = "スタッフID,氏名,本職,時給,合計時間(h),合計給与(円)\n";
+    }
     csv = head;
     for (const s of state.staff) {
       const r = byStaff[s.id];
       if (!r) continue;
       const dayH = (r.hours - r.nightHours);
-      const row = nightOn
-        ? [s.id, s.name, posCfg(s.position).label, s.hourlyWage, dayH.toFixed(2), r.nightHours.toFixed(2), r.hours.toFixed(2), Math.round(r.pay)]
-        : [s.id, s.name, posCfg(s.position).label, s.hourlyWage, r.hours.toFixed(2), Math.round(r.pay)];
+      let row;
+      if (useActual && nightOn) {
+        row = [s.id, s.name, posCfg(s.position).label, s.hourlyWage, r.scheduledHours.toFixed(2), r.hours.toFixed(2), dayH.toFixed(2), r.nightHours.toFixed(2), r.hours.toFixed(2), Math.round(r.pay), r.actualCount, r.missingCount];
+      } else if (useActual) {
+        row = [s.id, s.name, posCfg(s.position).label, s.hourlyWage, r.scheduledHours.toFixed(2), r.hours.toFixed(2), Math.round(r.pay), r.actualCount, r.missingCount];
+      } else if (nightOn) {
+        row = [s.id, s.name, posCfg(s.position).label, s.hourlyWage, dayH.toFixed(2), r.nightHours.toFixed(2), r.hours.toFixed(2), Math.round(r.pay)];
+      } else {
+        row = [s.id, s.name, posCfg(s.position).label, s.hourlyWage, r.hours.toFixed(2), Math.round(r.pay)];
+      }
       csv += row.map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
     }
   } else if (format === "detail") {
-    const head = nightOn
-      ? "日付,曜日,スタッフID,氏名,開始,終了,時間(h),うち深夜(h),ポジション,給与(円),メモ\n"
-      : "日付,曜日,スタッフID,氏名,開始,終了,時間(h),ポジション,給与(円),メモ\n";
+    let head;
+    if (basis === "actual_with_diff") {
+      head = "日付,曜日,スタッフID,氏名,予定開始,予定終了,予定(h),出勤打刻,退勤打刻,実労働(h),差分(分),ポジション,給与(円),メモ\n";
+    } else if (nightOn) {
+      head = "日付,曜日,スタッフID,氏名,開始,終了,時間(h),うち深夜(h),ポジション,給与(円),メモ\n";
+    } else {
+      head = "日付,曜日,スタッフID,氏名,開始,終了,時間(h),ポジション,給与(円),メモ\n";
+    }
     csv = head;
     monthAssignments.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
     for (const a of monthAssignments) {
       const s = state.staff.find(x => x.id === a.staffId);
       if (!s) continue;
       const breakMin = (s.breakMinutes) || 0;
-      let h = calcHours(a.startTime, a.endTime);
+      const eff = getEffectiveHours(a);
+      let h = eff.hours;
       if (h > 6 && breakMin > 0) h -= breakMin / 60;
+      const schedH = calcHours(a.startTime, a.endTime);
       // 深夜時間を再計算
+      let nightStartT = a.startTime, nightEndT = a.endTime;
+      if (useActual && a.clockIn && a.clockOut) {
+        nightStartT = _isoToHHMM(a.clockIn) || a.startTime;
+        nightEndT = _isoToHHMM(a.clockOut) || a.endTime;
+      }
       let nightH = 0;
       if (nightOn) {
-        const startMin = _t(a.startTime);
-        const endMin = _t(a.endTime);
+        const startMin = _t(nightStartT);
+        const endMin = _t(nightEndT);
         const nightStartMin = nightStart * 60;
         if (endMin > nightStartMin) {
           const overlap = Math.max(0, Math.min(endMin, 24*60) - Math.max(startMin, nightStartMin));
@@ -4267,9 +4565,26 @@ function downloadPayrollCsv(monthKey, format) {
       const pay = (s.hourlyWage * dayH) + (s.hourlyWage * nightRate * nightH);
       const dow = DAY_LABELS[dayOfWeek(a.date)];
       const memo = a.note || "";
-      const row = nightOn
-        ? [a.date, dow, s.id, s.name, a.startTime, a.endTime, h.toFixed(2), nightH.toFixed(2), posCfg(a.position).label, Math.round(pay), memo]
-        : [a.date, dow, s.id, s.name, a.startTime, a.endTime, h.toFixed(2), posCfg(a.position).label, Math.round(pay), memo];
+      const inHHMM = _isoToHHMM(a.clockIn) || "";
+      const outHHMM = _isoToHHMM(a.clockOut) || "";
+      // 差分(分): 実労働 - 予定 (両方ある場合のみ)
+      let diffMin = "";
+      if (a.clockIn && a.clockOut) {
+        try {
+          const inDt = new Date(a.clockIn), outDt = new Date(a.clockOut);
+          const actualMin = (outDt - inDt) / 60000;
+          const schedMin = schedH * 60;
+          diffMin = Math.round(actualMin - schedMin);
+        } catch (_) {}
+      }
+      let row;
+      if (basis === "actual_with_diff") {
+        row = [a.date, dow, s.id, s.name, a.startTime, a.endTime, schedH.toFixed(2), inHHMM, outHHMM, h.toFixed(2), diffMin, posCfg(a.position).label, Math.round(pay), memo];
+      } else if (nightOn) {
+        row = [a.date, dow, s.id, s.name, a.startTime, a.endTime, h.toFixed(2), nightH.toFixed(2), posCfg(a.position).label, Math.round(pay), memo];
+      } else {
+        row = [a.date, dow, s.id, s.name, a.startTime, a.endTime, h.toFixed(2), posCfg(a.position).label, Math.round(pay), memo];
+      }
       csv += row.map(x => `"${String(x).replace(/"/g, "\"\"")}"`).join(",") + "\n";
     }
   } else if (format === "yayoi") {
@@ -4309,7 +4624,16 @@ function downloadPayrollCsv(monthKey, format) {
   const a = el("a", { href: url, download: filename });
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
-  toast(`${filename} をダウンロード (${Object.keys(byStaff).length} 名分)`, "success");
+  // Round 19: 集計ベースを toast に表示
+  let basisLabel = "";
+  if (useActual) {
+    const totalActual = Object.values(byStaff).reduce((s, r) => s + (r.actualCount || 0), 0);
+    const totalMissing = Object.values(byStaff).reduce((s, r) => s + (r.missingCount || 0), 0);
+    basisLabel = ` [実労働ベース: 打刻あり ${totalActual} / 欠落 ${totalMissing}]`;
+  } else {
+    basisLabel = " [予定時間ベース]";
+  }
+  toast(`${filename} をダウンロード (${Object.keys(byStaff).length} 名分)${basisLabel}`, "success", 5000);
 }
 
 function downloadCsv() {

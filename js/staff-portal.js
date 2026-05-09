@@ -964,6 +964,15 @@
       .map(a => ({ ...a, dt: new Date(`${a.date}T${a.startTime}:00`) }))
       .filter(a => a.dt > new Date())
       .sort((a, b) => a.dt - b.dt);
+    // 打刻カード (Round 19) — 今日のシフトに対する出勤/退勤打刻
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayShifts = (data.assignments || []).filter(a => a.date === todayStr)
+      .sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
+    let clockCard = "";
+    if (todayShifts.length > 0) {
+      clockCard = todayShifts.map(a => renderClockCard(a, data)).join("");
+    }
+
     let nextShiftCard = "";
     if (upcomingShifts.length > 0) {
       const next = upcomingShifts[0];
@@ -1030,6 +1039,7 @@
 
     $("#app").innerHTML = `
       ${weekTabsHtml2}
+      ${clockCard}
       ${nextShiftCard}
       ${noticeCard}
       ${swapCard2}
@@ -1178,6 +1188,14 @@
       };
     });
 
+    // 打刻ボタン (Round 19)
+    document.querySelectorAll(".clock-in-btn").forEach(btn => {
+      btn.onclick = () => handleClockClick("in");
+    });
+    document.querySelectorAll(".clock-out-btn").forEach(btn => {
+      btn.onclick = () => handleClockClick("out");
+    });
+
     // 長期休暇申請ボタン (Round 16 TOP 1 — 確定モード)
     const vacBtn2 = document.getElementById("vac-new-btn");
     if (vacBtn2) vacBtn2.onclick = openVacationDialog;
@@ -1210,6 +1228,121 @@
         openEmergencyAbsenceDialog(shiftTime);
       };
     });
+  }
+
+  // ===== 打刻カード (Round 19) =====
+  function renderClockCard(a, data) {
+    const pos = (data.positions || []).find(p => p.id === a.position) || { label: a.position };
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const startDt = new Date(`${a.date}T${a.startTime}:00`);
+    const endDt = new Date(`${a.date}T${a.endTime}:00`);
+    const minBeforeStart = (startDt - now) / 60000;
+    const minAfterEnd = (now - endDt) / 60000;
+
+    // 状態判定
+    const hasClockIn = !!a.clockIn;
+    const hasClockOut = !!a.clockOut;
+    const canClockIn = !hasClockIn && minBeforeStart < 240 && minBeforeStart > -240;
+    const canClockOut = hasClockIn && !hasClockOut && minAfterEnd < 240 && minAfterEnd > -240;
+
+    function fmtTime(iso) {
+      try {
+        const d = new Date(iso);
+        return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+      } catch (_) { return iso; }
+    }
+    function diffMin(scheduled, actual) {
+      try {
+        const [sh, sm] = scheduled.split(":").map(Number);
+        const sched = new Date(`${a.date}T${scheduled}:00`);
+        const act = new Date(actual);
+        return Math.round((act - sched) / 60000);
+      } catch (_) { return 0; }
+    }
+
+    let bgClass = "bg-gradient-to-br from-amber-400 to-orange-500";
+    let title = "🕐 今日のシフト";
+    if (hasClockIn && !hasClockOut) {
+      bgClass = "bg-gradient-to-br from-emerald-500 to-teal-600";
+      title = "✅ 勤務中";
+    } else if (hasClockIn && hasClockOut) {
+      bgClass = "bg-gradient-to-br from-slate-500 to-slate-600";
+      title = "🏁 本日の勤務終了";
+    }
+
+    let inStatus = "", outStatus = "";
+    if (hasClockIn) {
+      const dInMin = diffMin(a.startTime, a.clockIn);
+      const dInLabel = dInMin === 0 ? "定刻" : dInMin > 0 ? `${dInMin}分遅刻` : `${-dInMin}分早出`;
+      const dInColor = dInMin <= 5 && dInMin >= -10 ? "" : dInMin > 5 ? "text-red-200" : "text-blue-200";
+      inStatus = `<div class="text-xs opacity-90 mt-1">出勤: <b>${fmtTime(a.clockIn)}</b> <span class="${dInColor}">(予定 ${a.startTime} / ${dInLabel})</span></div>`;
+    }
+    if (hasClockOut) {
+      const dOutMin = diffMin(a.endTime, a.clockOut);
+      const dOutLabel = dOutMin === 0 ? "定刻" : dOutMin > 0 ? `${dOutMin}分残業` : `${-dOutMin}分早退`;
+      const dOutColor = Math.abs(dOutMin) <= 5 ? "" : dOutMin > 5 ? "text-amber-200" : "text-blue-200";
+      outStatus = `<div class="text-xs opacity-90 mt-0.5">退勤: <b>${fmtTime(a.clockOut)}</b> <span class="${dOutColor}">(予定 ${a.endTime} / ${dOutLabel})</span></div>`;
+    }
+    let actualHoursNote = "";
+    if (hasClockIn && hasClockOut) {
+      try {
+        const inDt = new Date(a.clockIn);
+        const outDt = new Date(a.clockOut);
+        const actualH = (outDt - inDt) / 3600000;
+        const schedH = calcHours(a.startTime, a.endTime);
+        actualHoursNote = `<div class="text-xs opacity-90 mt-1">実労働: <b>${actualH.toFixed(2)}h</b> / 予定 ${schedH.toFixed(1)}h</div>`;
+      } catch (_) {}
+    }
+
+    let buttons = "";
+    if (canClockIn) {
+      buttons = `<button class="clock-in-btn mt-3 w-full bg-white text-emerald-700 rounded-lg py-3 text-base font-bold shadow active:scale-95">
+        ⏱ 出勤打刻 (${fmtTime(now.toISOString())})
+      </button>`;
+    } else if (canClockOut) {
+      buttons = `<button class="clock-out-btn mt-3 w-full bg-white text-slate-700 rounded-lg py-3 text-base font-bold shadow active:scale-95">
+        ⏱ 退勤打刻 (${fmtTime(now.toISOString())})
+      </button>`;
+    } else if (!hasClockIn && minBeforeStart >= 240) {
+      buttons = `<div class="mt-2 text-xs opacity-90">⏳ 打刻可能になるまで <b>${Math.floor(minBeforeStart/60)}時間${Math.round(minBeforeStart%60)}分</b></div>`;
+    } else if (hasClockIn && hasClockOut) {
+      buttons = `<div class="mt-2 text-xs opacity-90">本日のシフトは終了です。お疲れ様でした！</div>`;
+    }
+
+    return `
+      <div class="${bgClass} rounded-xl p-4 mb-3 text-white shadow-lg" data-asgn-id="${escapeAttr(a.id)}">
+        <div class="text-xs opacity-90">${title}</div>
+        <div class="font-bold text-lg mt-0.5">${escapeHtml(a.startTime)}〜${escapeHtml(a.endTime)} <span class="text-sm opacity-80">${escapeHtml(pos.label)}</span></div>
+        ${inStatus}
+        ${outStatus}
+        ${actualHoursNote}
+        ${buttons}
+      </div>`;
+  }
+
+  async function handleClockClick(kind) {
+    if (!confirm(`${kind === "in" ? "出勤" : "退勤"}打刻しますか？\n\n打刻時刻はサーバ側で記録されます。`)) return;
+    try {
+      const r = kind === "in"
+        ? await window.ShiftyAPI.portalClockIn(token)
+        : await window.ShiftyAPI.portalClockOut(token);
+      const tHHMM = (() => {
+        try { const d = new Date(kind === "in" ? r.clockIn : r.clockOut); return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; }
+        catch (_) { return ""; }
+      })();
+      toast(`✓ ${kind === "in" ? "出勤" : "退勤"}打刻完了 ${tHHMM}`, "success", 4000);
+      // データ再取得して反映
+      data = await window.ShiftyAPI.portalGet(token, activeWeek);
+      if (data.weekStatus === "published") renderPublished(); else renderDraft();
+    } catch (e) {
+      const m = String(e?.message || e);
+      if (m.includes("no_clockable_shift")) {
+        toast("打刻可能なシフトがありません (シフト時刻の前後 4 時間以内のみ可)", "error", 5000);
+      } else {
+        toast("打刻失敗: " + m, "error");
+      }
+    }
   }
 
   // ===== シフト交換掲示板 (Round 16 TOP 2) =====
