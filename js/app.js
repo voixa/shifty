@@ -1138,6 +1138,358 @@ function toggleStaffDetailRow(tr, staff) {
   tr.parentNode.insertBefore(detailTr, tr.nextSibling);
 }
 
+// ===== AI 生成後の改善ポイント表示 (Round 32 TOP 3) =====
+function showPostGenFeedback(result) {
+  const m = result.metrics;
+  const issues = [];
+
+  // 1. 不足コマ
+  const unfilled = result.unfilled || [];
+  if (unfilled.length > 0) {
+    const top = unfilled.slice(0, 2);
+    issues.push({
+      level: "danger",
+      icon: "⚠️",
+      title: `${unfilled.length} コマが埋められませんでした`,
+      detail: top.map(u => `${u.date.slice(5)} ${u.startTime}〜 ${posCfg(u.position).label}`).join(" / ") + (unfilled.length > 2 ? ` 他 ${unfilled.length - 2}` : ""),
+      action: { label: "対象を確認", onclick: () => toast("シフト編成画面で「不足: ...」表示があるコマです", "info", 4000) },
+    });
+  }
+
+  // 2. 予算超過
+  const budget = state.meta.weeklyBudget || 0;
+  if (budget > 0 && m.totalCost > budget) {
+    const over = m.totalCost - budget;
+    issues.push({
+      level: "warn",
+      icon: "💸",
+      title: `予算を ${fmtYen(over)} 超過しました`,
+      detail: `予算 ${fmtYen(budget)} / 実績 ${fmtYen(Math.round(m.totalCost))}`,
+      action: { label: "AI 戦略を「コスト」に変更", onclick: () => {
+        state.meta.algorithmWeights = { preference: 0.22, positionMatch: 0.13, fairness: 0.13, cost: 0.35, skill: 0.10, skillMix: 0.07 };
+        persist();
+        toast("✓ コスト重視に切替。再生成で人件費削減を試みてください", "success", 5000);
+      } },
+    });
+  }
+
+  // 3. 希望充足が低い
+  if (m.preferenceSatisfaction < 0.7 && m.preferenceTotal > 0) {
+    issues.push({
+      level: "warn",
+      icon: "📝",
+      title: `希望充足率 ${fmtPct(m.preferenceSatisfaction)} は低めです`,
+      detail: `${m.preferenceHit}/${m.preferenceTotal} の希望が反映されました。スタッフの不満につながる可能性`,
+      action: { label: "AI 戦略を「希望優先」に変更", onclick: () => {
+        state.meta.algorithmWeights = { preference: 0.55, positionMatch: 0.10, fairness: 0.13, cost: 0.05, skill: 0.10, skillMix: 0.07 };
+        persist();
+        toast("✓ 希望優先に切替。再生成すると希望充足率が上がります", "success", 5000);
+      } },
+    });
+  }
+
+  // 4. 公平性 (時間の偏り)
+  if (m.fairness && m.fairness.cv > 0.5) {
+    const overMax = m.perStaff.filter(p => p.overMax);
+    issues.push({
+      level: "warn",
+      icon: "⚖️",
+      title: `スタッフ間の時間配分が不均等です (CV ${m.fairness.cv.toFixed(2)})`,
+      detail: overMax.length > 0
+        ? `週上限超過: ${overMax.slice(0, 2).map(p => p.name).join(", ")}`
+        : "一部のスタッフに時間が偏っています",
+      action: { label: "AI 戦略を「公平性重視」に変更", onclick: () => {
+        state.meta.algorithmWeights = { preference: 0.27, positionMatch: 0.10, fairness: 0.38, cost: 0.10, skill: 0.08, skillMix: 0.07 };
+        persist();
+        toast("✓ 公平性重視に切替。再生成すると時間が平準化されます", "success", 5000);
+      } },
+    });
+  }
+
+  // 5. avoid 違反
+  if (m.avoidViolations > 0) {
+    issues.push({
+      level: "warn",
+      icon: "🚫",
+      title: `不可希望に反する配置が ${m.avoidViolations} 件あります`,
+      detail: "他に候補が居ないなどの理由で配置されています。手動調整も検討",
+      action: null,
+    });
+  }
+
+  // 6. 個人別希望充足が極端に低い
+  if (state.staff.length >= 3 && m.preferenceTotal > 0) {
+    const lowStaff = m.perStaff.filter(p => p.hours > 0).slice(0, 5);
+    // 希望提出済みなのに反映されてないスタッフ
+    const submittedSet = new Set((curPrefs() || []).map(p => p.staffId));
+    const submittedStaff = state.staff.filter(s => !s.archived && submittedSet.has(s.id));
+    const cur = curAssignments();
+    const lowSatisfaction = submittedStaff.filter(s => {
+      const myPrefs = curPrefs().filter(p => p.staffId === s.id && p.priority !== "avoid");
+      if (myPrefs.length === 0) return false;
+      const hits = myPrefs.filter(p => cur.some(a => a.staffId === s.id && a.date === p.date)).length;
+      return hits / myPrefs.length < 0.4;
+    });
+    if (lowSatisfaction.length > 0) {
+      issues.push({
+        level: "info",
+        icon: "👤",
+        title: `希望充足率が低いスタッフが ${lowSatisfaction.length} 名います`,
+        detail: lowSatisfaction.slice(0, 3).map(s => s.name).join(", "),
+        action: { label: "確認", onclick: () => {} },
+      });
+    }
+  }
+
+  // 何も問題ない場合は祝福のみ
+  if (issues.length === 0) {
+    const body = el("div", { class: "p-6 space-y-3" });
+    body.appendChild(el("div", { class: "text-center" }, [
+      el("div", { class: "text-5xl" }, "🎉"),
+      el("h3", { class: "font-bold text-lg mt-2" }, "完璧な配置です"),
+      el("p", { class: "text-sm text-slate-600 dark:text-slate-400 mt-2" },
+        `カバー率 ${fmtPct(m.coverageRate)} / 希望充足 ${fmtPct(m.preferenceSatisfaction)} / 予算内。\n気になる点があれば手動で調整できます。`),
+    ]));
+    body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2 border-t" }, [
+      el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "閉じる"),
+      el("button", {
+        class: "px-4 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-semibold",
+        onclick: () => { closeModal(); publishWeek(); },
+      }, "✓ そのまま確定する"),
+    ]));
+    modal(body);
+    return;
+  }
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "💡 改善ポイント"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600 dark:text-slate-400" },
+    `AI 生成完了。${issues.length} 件の改善ポイントがあります。下記を確認してから確定してください。`));
+
+  // メトリクス表示
+  body.appendChild(el("div", { class: "grid grid-cols-3 gap-2 text-xs" }, [
+    el("div", { class: "bg-emerald-50 dark:bg-emerald-900/30 rounded p-2 text-center" }, [
+      el("div", { class: "text-[10px] text-emerald-700" }, "カバー率"),
+      el("div", { class: "font-bold text-base" }, fmtPct(m.coverageRate)),
+    ]),
+    el("div", { class: "bg-blue-50 dark:bg-blue-900/30 rounded p-2 text-center" }, [
+      el("div", { class: "text-[10px] text-blue-700" }, "希望充足"),
+      el("div", { class: "font-bold text-base" }, fmtPct(m.preferenceSatisfaction)),
+    ]),
+    el("div", { class: "bg-amber-50 dark:bg-amber-900/30 rounded p-2 text-center" }, [
+      el("div", { class: "text-[10px] text-amber-700" }, "人件費"),
+      el("div", { class: "font-bold text-base" }, fmtYen(Math.round(m.totalCost))),
+    ]),
+  ]));
+
+  const list = el("div", { class: "space-y-1.5" });
+  for (const iss of issues) {
+    const cls = iss.level === "danger" ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-700"
+              : iss.level === "warn"   ? "bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-700"
+              : "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700";
+    const row = el("div", { class: `border ${cls} rounded p-2.5 text-xs flex items-start gap-2` });
+    row.appendChild(el("span", { class: "text-base flex-none" }, iss.icon));
+    const main = el("div", { class: "flex-1 min-w-0" });
+    main.appendChild(el("div", { class: "font-semibold" }, iss.title));
+    main.appendChild(el("div", { class: "text-[11px] mt-0.5 opacity-90" }, iss.detail));
+    if (iss.action) {
+      main.appendChild(el("button", {
+        class: "mt-1.5 text-[11px] underline decoration-dotted hover:no-underline",
+        onclick: () => { iss.action.onclick(); closeModal(); render(); },
+      }, "→ " + iss.action.label));
+    }
+    row.appendChild(main);
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+
+  body.appendChild(el("div", { class: "flex justify-between gap-2 pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "閉じる (シフトを確認)"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-semibold",
+      onclick: () => { closeModal(); autoGenerate(); },
+    }, "🔄 再生成"),
+  ]));
+  modal(body);
+}
+
+// ===== クイックセットアップウィザード (Round 32 TOP 1) =====
+function openQuickSetupWizard() {
+  const BUSINESS_TYPES = (window.ShiftyData || {}).BUSINESS_TYPES || {};
+  const SESSION_PRESETS = (window.ShiftyData || {}).SESSION_PRESETS || {};
+  let step = 0;
+  let selectedType = null;
+  let selectedHours = null;
+  let staffCountTier = null;
+
+  const HOUR_PRESETS = [
+    { id: "lunch_dinner", label: "ランチ + ディナー", desc: "11:00〜15:00 + 17:00〜22:00 (典型的な飲食店)" },
+    { id: "all_day", label: "通し営業", desc: "10:00〜22:00 (カフェ・ファミレス向け)" },
+    { id: "night_only", label: "夜営業のみ", desc: "17:00〜深夜 (居酒屋・バー向け)" },
+    { id: "morning_only", label: "朝〜夕方", desc: "07:00〜18:00 (カフェ・モーニング向け)" },
+  ];
+
+  const STAFF_COUNT_TIERS = [
+    { id: "small", label: "小規模 (5-8 名)", desc: "家族経営、個人店、少人数運営" },
+    { id: "medium", label: "中規模 (9-15 名)", desc: "標準的な飲食店、複数シフト" },
+    { id: "large", label: "大規模 (16+ 名)", desc: "ファミレス、チェーン店" },
+  ];
+
+  function render() {
+    const body = el("div", { class: "p-6 space-y-4" });
+    body.appendChild(el("div", { class: "flex items-center gap-3 mb-2" }, [
+      el("div", { class: "text-3xl" }, "🚀"),
+      el("div", { class: "flex-1" }, [
+        el("div", { class: "text-xs text-slate-500" }, `ステップ ${step + 1} / 3`),
+        el("h3", { class: "font-bold text-lg" }, [
+          "クイックセットアップ",
+          el("span", { class: "ml-2 text-xs font-normal text-slate-500" }, "(後から変更可)"),
+        ]),
+      ]),
+    ]));
+
+    // 進捗ドット
+    const dots = el("div", { class: "flex gap-1.5 mb-3" });
+    for (let i = 0; i < 3; i++) {
+      dots.appendChild(el("div", {
+        class: `flex-1 h-1.5 rounded-full ${i <= step ? "bg-brand-600" : "bg-slate-200 dark:bg-slate-700"}`,
+      }));
+    }
+    body.appendChild(dots);
+
+    if (step === 0) {
+      body.appendChild(el("div", { class: "font-semibold text-sm" }, "1. お店の業態を選んでください"));
+      const list = el("div", { class: "space-y-2 max-h-64 overflow-y-auto" });
+      for (const [key, bt] of Object.entries(BUSINESS_TYPES)) {
+        const isSelected = key === selectedType;
+        const card = el("button", {
+          class: `block w-full text-left border-2 rounded-md p-3 transition ${isSelected ? "border-brand-600 bg-brand-50 dark:bg-brand-900/30" : "border-slate-200 dark:border-slate-700 hover:border-slate-400"}`,
+          onclick: () => { selectedType = key; renderModal(); },
+        });
+        card.innerHTML = `
+          <div class="font-semibold text-sm">${escapeHtml(bt.label)}</div>
+          <div class="text-xs text-slate-600 dark:text-slate-400 mt-0.5">${escapeHtml(bt.description)}</div>`;
+        list.appendChild(card);
+      }
+      body.appendChild(list);
+    } else if (step === 1) {
+      body.appendChild(el("div", { class: "font-semibold text-sm" }, "2. 営業時間のパターンを選んでください"));
+      body.appendChild(el("div", { class: "text-xs text-slate-500" },
+        "業態に応じて推奨パターンを表示しています。詳細時間は後で営業時間タブから個別調整できます。"));
+      const list = el("div", { class: "space-y-2" });
+      for (const opt of HOUR_PRESETS) {
+        const isSelected = opt.id === selectedHours;
+        const card = el("button", {
+          class: `block w-full text-left border-2 rounded-md p-3 transition ${isSelected ? "border-brand-600 bg-brand-50 dark:bg-brand-900/30" : "border-slate-200 dark:border-slate-700 hover:border-slate-400"}`,
+          onclick: () => { selectedHours = opt.id; renderModal(); },
+        });
+        card.innerHTML = `
+          <div class="font-semibold text-sm">${escapeHtml(opt.label)}</div>
+          <div class="text-xs text-slate-600 dark:text-slate-400 mt-0.5">${escapeHtml(opt.desc)}</div>`;
+        list.appendChild(card);
+      }
+      body.appendChild(list);
+    } else if (step === 2) {
+      body.appendChild(el("div", { class: "font-semibold text-sm" }, "3. 概ねのスタッフ人数は？"));
+      body.appendChild(el("div", { class: "text-xs text-slate-500" },
+        "必要人数の目安を自動設定します。後から「必要人数マトリクス」で個別調整可能です。"));
+      const list = el("div", { class: "space-y-2" });
+      for (const opt of STAFF_COUNT_TIERS) {
+        const isSelected = opt.id === staffCountTier;
+        const card = el("button", {
+          class: `block w-full text-left border-2 rounded-md p-3 transition ${isSelected ? "border-brand-600 bg-brand-50 dark:bg-brand-900/30" : "border-slate-200 dark:border-slate-700 hover:border-slate-400"}`,
+          onclick: () => { staffCountTier = opt.id; renderModal(); },
+        });
+        card.innerHTML = `
+          <div class="font-semibold text-sm">${escapeHtml(opt.label)}</div>
+          <div class="text-xs text-slate-600 dark:text-slate-400 mt-0.5">${escapeHtml(opt.desc)}</div>`;
+        list.appendChild(card);
+      }
+      body.appendChild(list);
+    }
+
+    // ナビボタン
+    body.appendChild(el("div", { class: "flex justify-between gap-2 pt-3 border-t" }, [
+      el("button", {
+        class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md",
+        onclick: () => step === 0 ? closeModal() : (step--, renderModal()),
+      }, step === 0 ? "キャンセル" : "← 戻る"),
+      el("button", {
+        class: `px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-semibold ${
+          (step === 0 && !selectedType) || (step === 1 && !selectedHours) || (step === 2 && !staffCountTier) ? "opacity-50 pointer-events-none" : ""
+        }`,
+        onclick: () => {
+          if (step < 2) { step++; renderModal(); }
+          else applyQuickSetup();
+        },
+      }, step < 2 ? "次へ →" : "✓ 適用"),
+    ]));
+    return body;
+  }
+
+  function renderModal() {
+    const m = $("#modal");
+    const mb = $("#modalBody");
+    if (mb) mb.innerHTML = "";
+    if (mb) mb.appendChild(render());
+    if (m) m.classList.remove("hidden");
+  }
+
+  function applyQuickSetup() {
+    const bt = BUSINESS_TYPES[selectedType];
+    if (!bt) { toast("業態が未選択です", "error"); return; }
+
+    // スナップショット
+    try { createSnapshot("manual", `クイックセットアップ適用前 (${bt.label})`); } catch (_) {}
+
+    // 業態適用
+    state.meta.businessType = selectedType;
+
+    // 営業時間: hours preset とビジネスタイプの session preset を組み合わせ
+    let presetKey = bt.sessionPreset;
+    if (selectedHours === "all_day") presetKey = "early_mid_late";
+    else if (selectedHours === "night_only") presetKey = "izakaya";
+    else if (selectedHours === "morning_only") presetKey = "cafe_allday";
+    else if (selectedHours === "lunch_dinner") presetKey = "simple_lunch_dinner";
+
+    const sessionPreset = SESSION_PRESETS[presetKey];
+    if (sessionPreset) {
+      state.meta.sessions = JSON.parse(JSON.stringify(sessionPreset.sessions));
+    }
+
+    // スタッフ規模に応じた必要人数調整
+    const tierMultiplier = staffCountTier === "small" ? 0.8 : staffCountTier === "large" ? 1.5 : 1.0;
+    const newPlan = {};
+    for (const sess of state.meta.sessions) {
+      newPlan[sess.id] = {};
+      for (let dow = 0; dow < 7; dow++) {
+        newPlan[sess.id][dow] = {};
+        const isWeekend = dow === 0 || dow === 6;
+        const isPeak = sess.id.includes("peak") || sess.id.includes("lunch") || sess.id.includes("dinner");
+        for (const pos of state.meta.positions) {
+          let base = bt.defaultStaffCount[pos.id] != null ? bt.defaultStaffCount[pos.id] : 1;
+          if (isWeekend && isPeak) base += 1;
+          base = Math.round(base * tierMultiplier);
+          if (pos.id === "manager") base = 1;
+          newPlan[sess.id][dow][pos.id] = Math.max(0, base);
+        }
+      }
+    }
+    state.meta.staffingPlan = newPlan;
+    state.meta.laborRules = { ...bt.laborRules };
+    state.meta.algorithmWeights = { ...bt.weights };
+    state.meta.payrollSettings = { ...bt.payrollSettings };
+    state.meta.laborCostRatioTarget = bt.laborCostRatioTarget;
+    regenerateCurSlots();
+    persist();
+    closeModal();
+    render();
+    toast(`✓ ${bt.label} の設定を適用しました。スタッフ&希望タブでスタッフ追加を進めましょう`, "success", 6000);
+  }
+
+  modal(render());
+}
+
 // ===== 設定検索 (Round 30) =====
 function filterSettingsBySearch(query) {
   const q = (query || "").toLowerCase().trim();
@@ -4597,36 +4949,72 @@ function viewSchedule() {
     return wrap;
   }
 
+  // Round 32 TOP 2: ヘッダー整理 — 第一級ボタンを大きく、二級は「⋮ もっと」に格納
   const headerRow = el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
     el("h2", { class: "text-xl font-bold" }, phase === "published" ? "📅 シフト (確定済)" : "📅 シフト編成"),
-    el("div", { class: "flex gap-2 flex-wrap" }, [
-      el("button", { class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50",
-        onclick: () => {
-          if (curStatus() === "published") { toast("確定済の週はクリアできません。先に「下書きに戻す」してください。", "error"); return; }
-          const n = curAssignments().length;
-          if (n === 0) return;
-          if (!confirm(`今週の AI 生成シフト ${n} 件を全削除しますか？\nこの操作は取り消せません（希望データは残ります）。`)) return;
-          curWeek().assignments = []; persist(); render(); toast(`${n} 件をクリアしました`);
-        } }, "クリア"),
-      el("button", { class: "text-sm border border-emerald-600 text-emerald-700 rounded-md px-3 py-1.5 hover:bg-emerald-50",
-        onclick: copyFromPreviousWeek }, "📋 先週からコピー"),
-      el("button", { class: "text-sm border border-purple-600 text-purple-700 rounded-md px-3 py-1.5 hover:bg-purple-50",
-        onclick: openTemplateDialog }, "📑 テンプレ"),
+    el("div", { class: "flex gap-2 flex-wrap items-center" }, [
+      // 第一級: 入替モード (頻繁に使う)
       el("button", {
-        class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50 " + (swapModeActive ? "bg-amber-500 text-white border-amber-500 hover:bg-amber-600" : ""),
+        class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 " + (swapModeActive ? "bg-amber-500 text-white border-amber-500 hover:bg-amber-600" : ""),
         onclick: toggleSwapMode,
         title: "タップでスタッフ入替（モバイル対応）",
-      }, swapModeActive ? "🔁 入替モード ON" : "🔁 入替モード"),
-      curAssignments().length > 0 ? el("button", {
-        class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50",
-        onclick: openPrintView,
-        title: "店内掲示用 / 紙シフトの印刷",
-      }, "🖨️ 印刷") : null,
-      el("button", {
-        class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50 " + (multiWeekView ? "bg-blue-500 text-white border-blue-500" : ""),
-        onclick: toggleMultiWeekView,
-        title: "今週 + 翌3週 を一覧表示",
-      }, multiWeekView ? "📆 4週表示 ON" : "📆 4週表示"),
+      }, swapModeActive ? "🔁 入替モード ON" : "🔁 入替"),
+      // ⋮ もっと メニュー
+      (() => {
+        const wrap = el("div", { class: "relative inline-block" });
+        const btn = el("button", {
+          class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700",
+          title: "他のアクション",
+          onclick: (e) => {
+            e.stopPropagation();
+            const dd = wrap.querySelector(".more-dropdown");
+            if (dd) dd.classList.toggle("hidden");
+          },
+        }, "⋮ もっと");
+        wrap.appendChild(btn);
+        const dd = el("div", { class: "more-dropdown hidden absolute top-full right-0 mt-1 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-30" });
+        // クリア
+        const btnClear = el("button", {
+          class: "block w-full text-left px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-700",
+          onclick: () => {
+            dd.classList.add("hidden");
+            if (curStatus() === "published") { toast("確定済の週はクリアできません。先に「下書きに戻す」してください。", "error"); return; }
+            const n = curAssignments().length;
+            if (n === 0) { toast("クリア対象がありません", "info"); return; }
+            if (!confirm(`今週の AI 生成シフト ${n} 件を全削除しますか？\nこの操作は取り消せません（希望データは残ります）。`)) return;
+            curWeek().assignments = []; persist(); render(); toast(`${n} 件をクリアしました`);
+          },
+        }, "🗑 シフトをクリア");
+        dd.appendChild(btnClear);
+        // 先週からコピー
+        dd.appendChild(el("button", {
+          class: "block w-full text-left px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-700",
+          onclick: () => { dd.classList.add("hidden"); copyFromPreviousWeek(); },
+        }, "📋 先週からコピー"));
+        // テンプレ
+        dd.appendChild(el("button", {
+          class: "block w-full text-left px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-700",
+          onclick: () => { dd.classList.add("hidden"); openTemplateDialog(); },
+        }, "📑 シフトテンプレ"));
+        // 4 週表示
+        dd.appendChild(el("button", {
+          class: "block w-full text-left px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-700",
+          onclick: () => { dd.classList.add("hidden"); toggleMultiWeekView(); },
+        }, multiWeekView ? "📆 4週表示 (現在 ON)" : "📆 4週表示"));
+        // 印刷
+        if (curAssignments().length > 0) {
+          dd.appendChild(el("button", {
+            class: "block w-full text-left px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 border-t border-slate-100 dark:border-slate-700",
+            onclick: () => { dd.classList.add("hidden"); openPrintMenuDialog(); },
+          }, "🖨️ 印刷ビュー"));
+        }
+        wrap.appendChild(dd);
+        // クリック外で閉じる
+        document.addEventListener("click", (e) => {
+          if (!wrap.contains(e.target)) dd.classList.add("hidden");
+        }, { once: true });
+        return wrap;
+      })(),
       // Round 24 TOP 3: AI 戦略ピッカー
       (() => {
         const PRESETS_QUICK = {
@@ -7049,7 +7437,9 @@ function runAutoGenerate() {
       setTimeout(() => {
         closeModal();
         render();
-        toast(`✅ 完成 (${totalElapsed}s): カバー${fmtPct(m.coverageRate)} / 希望${fmtPct(m.preferenceSatisfaction)} / ${fmtYen(m.totalCost)}`, "success", 5000);
+        toast(`✅ 完成 (${totalElapsed}s): カバー${fmtPct(m.coverageRate)} / 希望${fmtPct(m.preferenceSatisfaction)} / ${fmtYen(m.totalCost)}`, "success", 4000);
+        // Round 32 TOP 3: 改善ポイント自動表示
+        setTimeout(() => showPostGenFeedback(result), 800);
       }, 400);
     } catch (e) {
       clearInterval(progressTimer);
@@ -7428,6 +7818,27 @@ function viewSettings() {
   wrap.appendChild(el("h2", { class: "text-xl font-bold" }, "⚙️ 店舗設定"));
   wrap.appendChild(el("div", { class: "text-sm text-slate-600 dark:text-slate-400" },
     "ここで設定した内容に基づいて、シフト枠（必要人数マトリクス）が生成されます。"));
+
+  // Round 32 TOP 1: 初心者向けクイック設定ウィザード (業態未設定の場合のみ表示)
+  if (!state.meta.businessType || state.meta.businessType === null) {
+    const quickCard = el("div", { class: "bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30 border-2 border-amber-300 dark:border-amber-700 rounded-xl p-4" });
+    quickCard.innerHTML = `
+      <div class="flex items-start gap-3">
+        <div class="text-3xl">🚀</div>
+        <div class="flex-1">
+          <h3 class="font-bold text-base text-amber-900 dark:text-amber-200">はじめての方は 2 分で完了します</h3>
+          <p class="text-xs text-amber-800 dark:text-amber-300 mt-1">
+            業態を選ぶだけで、営業時間・必要人数・労務ルール・AI 重み・人件費目標を一括最適化します。
+            後から個別に微調整できます。
+          </p>
+        </div>
+      </div>`;
+    quickCard.appendChild(el("button", {
+      class: "mt-3 w-full bg-amber-500 hover:bg-amber-600 text-white rounded-md px-4 py-2.5 text-sm font-bold",
+      onclick: openQuickSetupWizard,
+    }, "🎯 業態を選んで一括設定 →"));
+    wrap.appendChild(quickCard);
+  }
 
   // Round 30: 検索バー + グルーピングナビ (TOC リファクタ)
   const navCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 sticky top-2 z-10" });
