@@ -909,6 +909,243 @@ function openMonthlyReport() {
   document.body.appendChild(wrap);
 }
 
+// ===== ヘルプセンター (Round 25 TOP 1) =====
+const FAQ_DATA = [
+  // 基本操作
+  { cat: "🚀 はじめに", q: "最初に何をすればいい？", a: "ダッシュボードの「業態を選択」から、お店の業態に合うテンプレートを選んでください。セッション・必要人数・労務ルール・人件費目標が一括設定されます。次にスタッフタブで「+ 追加」または CSV 取込でスタッフを登録してください。" },
+  { cat: "🚀 はじめに", q: "サンプルデータで試したい", a: "ダッシュボードの「🎯 サンプルデータで試す」ボタン、または設定タブの危険操作の「リセット」から投入できます。10 名のサンプルスタッフ + 希望サンプルが入ります。" },
+  { cat: "🚀 はじめに", q: "シフトの作り方の流れは？", a: "1) スタッフ登録 → 2) 各スタッフへ希望入力リンクを共有 → 3) 希望が集まったら「シフト編成」タブで「🤖 AI自動生成」 → 4) 必要に応じて手動調整 → 5) 「✓ 確定」 → 6) スタッフへ通知メール送信、の流れです。" },
+
+  // 希望収集
+  { cat: "📝 希望収集", q: "スタッフに希望入力リンクをどう渡す？", a: "スタッフタブの「📱 QR」ボタンで QR コードを生成・印刷できます。または「🔗 全員のリンク」で全員分の URL を一括コピー → LINE で配信できます。" },
+  { cat: "📝 希望収集", q: "スタッフが入力するときの操作は？", a: "セッション (lunch/dinner) の 4 ボタン (必須/希望/不可/未定) を押すか、または「⏰ 自由時間で希望」で「17:00-22:00」など自由時間を直接登録できます (Round 18 TOP 1)。" },
+  { cat: "📝 希望収集", q: "提出期限はどう設定する？", a: "設定タブの「提出締切」で「週開始の何日前/何時」を設定してください。スタッフポータルにカウントダウンが表示されます。" },
+
+  // AI 自動生成
+  { cat: "🤖 AI 自動生成", q: "AI の重みづけはどう変える？", a: "「シフト編成」タブヘッダーの「AI 戦略」プルダウンで 5 戦略から選択 (バランス/希望優先/コスト/スキル/公平性)。詳細は設定タブで個別調整可能。" },
+  { cat: "🤖 AI 自動生成", q: "希望が反映されない", a: "「avoid」希望の人を強制配置することはありません。「must」希望は他制約 (固定休日・週上限) と衝突しなければ最優先。希望が反映されない理由はアサイン詳細の「AI スコア内訳」で確認できます。" },
+  { cat: "🤖 AI 自動生成", q: "シフト不足が出る", a: "対象スタッフが少ない、または労務ルールが厳しすぎる可能性があります。「設定 > 労務ルール」を緩和、またはスタッフ追加・希望提出促進をお試しください。「💡 AI 推奨人数」で適正配置を再計算もできます。" },
+
+  // 打刻
+  { cat: "⏱ 打刻", q: "スタッフの打刻はどこから？", a: "確定済シフトのスタッフポータルに「⏱ 出勤打刻」「⏱ 退勤打刻」ボタンが自動表示されます。シフト時刻の前後 4 時間以内のみ打刻可。" },
+  { cat: "⏱ 打刻", q: "打刻を忘れた場合", a: "オーナーがアサイン詳細から手動修正可能。打刻管理 UI で出勤/退勤時刻を編集できます。" },
+  { cat: "⏱ 打刻", q: "予定と実績の差はどう確認？", a: "ダッシュボードに「予定/実績の乖離が大」アラート、月次バイト代 CSV で「実労働 + 予定との差分明細」を選択できます。" },
+
+  // 給与
+  { cat: "💴 給与計算", q: "月次バイト代を出すには？", a: "エクスポートタブ「💴 給与計算 CSV」から対象月を選び、形式 (サマリ/明細/弥生/freee) と集計ベース (予定/実労働/差分明細) を選択。" },
+  { cat: "💴 給与計算", q: "深夜手当は？", a: "設定タブの給与計算オプションで「深夜手当を有効にする」をオン。22 時以降の労働時間が自動的に 1.25 倍 (法定) で計算されます。" },
+  { cat: "💴 給与計算", q: "休憩時間の控除は？", a: "スタッフ編集ダイアログで「休憩(分)」を設定。6 時間超勤務時に自動的に給与から控除されます。" },
+
+  // トラブル対応
+  { cat: "🚨 トラブル対応", q: "スタッフが当日に休みたいと言ってきた", a: "受信メッセージで赤色強調表示されます。「🆘 代打を探す」ボタンで AI が候補 3 名を提示、ワンクリックで代打が決まります。両者へ自動メール通知も。" },
+  { cat: "🚨 トラブル対応", q: "確定済みのシフトを変更したい", a: "シフト編成タブで「下書きに戻す」 → 編集 → 再確定。変更通知メールが影響スタッフに自動送信されます。" },
+  { cat: "🚨 トラブル対応", q: "間違って削除/上書きしてしまった", a: "設定タブの「🔁 操作単位スナップショット」または「🕒 過去スナップショット (サーバ)」から復元可能。確定前/AI 生成前/日次に自動取得しています。" },
+
+  // 経営管理
+  { cat: "📊 経営管理", q: "人件費率を改善したい", a: "ダッシュボードに「💰 今週の人件費率」カード。設定で日次売上を入力すれば自動計算 (目標 25-30%)。「💡 AI 推奨人数」は過去データから最適配置を学習・提案します。" },
+  { cat: "📊 経営管理", q: "週次/月次レポートは？", a: "エクスポートタブ「📊 週次レポート」「📈 月次レポート」で印刷/PDF 保存可能なレポートを生成。店舗会議資料として使えます。" },
+
+  // 通知
+  { cat: "💬 通知", q: "LINE 通知に対応？", a: "LINE Notify は 2025/3 終了。スタッフ編集の Webhook URL に IFTTT/Zapier 経由 LINE webhook を設定するか、Slack/Discord webhook を直接利用できます。" },
+  { cat: "💬 通知", q: "全員にお知らせを送りたい", a: "スタッフタブ「📢 全員に通知」ボタン。緊急度 (通常/重要/緊急) + 件名/本文 + 送信先絞込。メール + Webhook 同時送信。" },
+
+  // セキュリティ・権限
+  { cat: "🔒 セキュリティ", q: "リンクが流出したら？", a: "スタッフタブで「🔄 再発行」ボタン → 旧 URL を無効化、新 URL を発行・コピー。退職者対応・URL 流出時の対処に。" },
+  { cat: "🔒 セキュリティ", q: "退職者の処理は？", a: "「📁 アーカイブ」が推奨です。削除と異なり履歴・給与計算データは残ります。「📤 復帰」で戻せます。完全削除も可能ですが警告が出ます。" },
+];
+
+function renderHelpCenter() {
+  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  card.appendChild(el("div", { class: "font-semibold" }, "📚 ヘルプセンター / FAQ"));
+  card.appendChild(el("div", { class: "text-xs text-slate-500" },
+    `${FAQ_DATA.length} 件の Q&A から検索できます。`));
+
+  const searchInput = el("input", {
+    type: "search",
+    placeholder: "🔍 質問を検索 (例: 打刻 / 希望 / 給与)",
+    class: "w-full border rounded-md px-3 py-2 text-sm",
+  });
+  card.appendChild(searchInput);
+
+  const list = el("div", { class: "space-y-1.5 max-h-96 overflow-y-auto" });
+  card.appendChild(list);
+
+  function renderFiltered() {
+    const q = (searchInput.value || "").toLowerCase().trim();
+    list.innerHTML = "";
+    const filtered = q
+      ? FAQ_DATA.filter(f =>
+          f.q.toLowerCase().includes(q) || f.a.toLowerCase().includes(q) || f.cat.toLowerCase().includes(q))
+      : FAQ_DATA;
+
+    if (filtered.length === 0) {
+      list.appendChild(el("div", { class: "text-xs text-slate-500 text-center py-4" },
+        `「${q}」に一致する FAQ がありません`));
+      return;
+    }
+    // カテゴリ別にグループ化
+    const byCat = {};
+    for (const f of filtered) {
+      if (!byCat[f.cat]) byCat[f.cat] = [];
+      byCat[f.cat].push(f);
+    }
+    for (const [cat, items] of Object.entries(byCat)) {
+      list.appendChild(el("div", { class: "text-[10px] font-semibold text-slate-500 mt-2" }, cat));
+      for (const f of items) {
+        const det = el("details", { class: "border border-slate-100 rounded p-2 hover:bg-slate-50" });
+        det.appendChild(el("summary", { class: "text-sm cursor-pointer" }, `Q. ${f.q}`));
+        det.appendChild(el("div", { class: "text-xs text-slate-700 mt-2 whitespace-pre-wrap" }, f.a));
+        list.appendChild(det);
+      }
+    }
+  }
+  searchInput.oninput = renderFiltered;
+  renderFiltered();
+
+  card.appendChild(el("div", { class: "text-[10px] text-slate-400 pt-2 border-t border-slate-100" },
+    "💡 解決しない場合: support@in-dx.jp までご連絡ください"));
+
+  return card;
+}
+
+// ===== 全体監査ログ (Round 25 TOP 2) =====
+function appendAuditLog(action, detail, extra = {}) {
+  if (!state || !state.meta) return;
+  if (!Array.isArray(state.meta.auditLog)) state.meta.auditLog = [];
+  state.meta.auditLog.push({
+    at: new Date().toISOString(),
+    week: state.meta.currentWeekStart || null,
+    action,
+    detail,
+    ...extra,
+  });
+  // 最新 500 件のみ保持
+  if (state.meta.auditLog.length > 500) {
+    state.meta.auditLog = state.meta.auditLog.slice(-500);
+  }
+}
+
+
+function renderAuditLogViewer() {
+  const log = (state.meta && state.meta.auditLog) || [];
+  if (log.length === 0) {
+    return null;
+  }
+  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  card.appendChild(el("details", {}, [
+    el("summary", { class: "cursor-pointer font-semibold" },
+      `🔍 全体監査ログ (${log.length} 件)`),
+    (() => {
+      const wrap = el("div", { class: "mt-3 space-y-2" });
+      const search = el("input", {
+        type: "search",
+        placeholder: "🔍 アクション/詳細で検索 (例: 確定 / Bさん / 削除)",
+        class: "w-full border rounded-md px-3 py-1.5 text-sm",
+      });
+      wrap.appendChild(search);
+      const listWrap = el("div", { class: "max-h-72 overflow-y-auto space-y-1 text-xs" });
+      wrap.appendChild(listWrap);
+
+      const TYPE_LABEL = {
+        publish: "✅ 確定", unpublish: "📝 下書きに戻す", delete: "🗑 削除",
+        swap: "🔄 入替", substitute: "🆘 代打", add: "➕ 追加",
+        autogenerate: "🤖 AI生成", note: "📝 メモ更新",
+        vacation_approved: "🏖 休暇承認", vacation_rejected: "🏖 休暇却下",
+        swap_approved: "🔄 交換承認", swap_rejected: "🔄 交換却下", swap_cancelled: "🔄 交換取消",
+        clock_edit: "⏱ 打刻修正", clock_clear: "⏱ 打刻クリア",
+      };
+
+      function renderLogList() {
+        const q = (search.value || "").toLowerCase().trim();
+        listWrap.innerHTML = "";
+        const filtered = q
+          ? log.filter(l => (l.detail || "").toLowerCase().includes(q) || (l.action || "").toLowerCase().includes(q) || (TYPE_LABEL[l.action] || "").toLowerCase().includes(q))
+          : log;
+        const sorted = filtered.slice().reverse(); // 新しい順
+        if (sorted.length === 0) {
+          listWrap.appendChild(el("div", { class: "text-slate-500 text-center py-3" }, "該当なし"));
+          return;
+        }
+        for (const entry of sorted.slice(0, 200)) {
+          const at = new Date(entry.at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+          const wk = entry.week ? `[${entry.week.slice(5)}]` : "";
+          const row = el("div", { class: "border-b border-slate-100 py-1 grid grid-cols-12 gap-1" });
+          row.innerHTML = `
+            <span class="col-span-2 text-slate-400 text-[10px]">${at}</span>
+            <span class="col-span-1 text-[10px] text-blue-600">${wk}</span>
+            <span class="col-span-3 font-medium text-[11px]">${TYPE_LABEL[entry.action] || entry.action}</span>
+            <span class="col-span-6 text-slate-700 text-[11px]">${escapeHtml(entry.detail || "")}</span>`;
+          listWrap.appendChild(row);
+        }
+        if (sorted.length > 200) {
+          listWrap.appendChild(el("div", { class: "text-[10px] text-slate-400 text-center py-2" },
+            `+ ${sorted.length - 200} 件 (検索で絞り込んでください)`));
+        }
+      }
+      search.oninput = renderLogList;
+      renderLogList();
+
+      // CSV エクスポート
+      wrap.appendChild(el("div", { class: "flex justify-end pt-2 border-t border-slate-100" }, [
+        el("button", {
+          class: "text-xs bg-slate-700 hover:bg-slate-800 text-white rounded px-3 py-1",
+          onclick: () => exportAuditLogCsv(),
+        }, "📥 CSV エクスポート"),
+      ]));
+      return wrap;
+    })(),
+  ]));
+  return card;
+}
+
+function exportAuditLogCsv() {
+  const log = (state.meta && state.meta.auditLog) || [];
+  if (log.length === 0) { toast("ログがありません", "error"); return; }
+  let csv = "日時,週,アクション,詳細\n";
+  for (const e of log) {
+    const row = [
+      e.at,
+      e.week || "",
+      e.action || "",
+      e.detail || "",
+    ].map(x => `"${String(x).replace(/"/g, '""')}"`).join(",");
+    csv += row + "\n";
+  }
+  const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: `audit_log_${new Date().toISOString().slice(0, 10)}.csv` });
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast(`✓ ${log.length} 件のログを CSV ダウンロード`, "success");
+}
+
+// ===== ダークモード (Round 25 TOP 3) =====
+function applyTheme(theme) {
+  const html = document.documentElement;
+  html.classList.remove("dark");
+  if (theme === "dark") {
+    html.classList.add("dark");
+  } else if (theme === "auto") {
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if (prefersDark) html.classList.add("dark");
+  }
+}
+
+// 初回起動時にテーマ適用
+(function _initTheme() {
+  try {
+    const saved = localStorage.getItem("shifty.theme") || "auto";
+    applyTheme(saved);
+    // システム設定変更を監視
+    if (window.matchMedia) {
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+        const cur = localStorage.getItem("shifty.theme") || "auto";
+        if (cur === "auto") applyTheme("auto");
+      });
+    }
+  } catch (_) {}
+})();
+
 // ===== グループ通知 (Round 22 TOP 2) =====
 function openBroadcastDialog() {
   if (state.staff.length === 0) { toast("送信先のスタッフがいません", "error"); return; }
@@ -1712,6 +1949,10 @@ function logChange(type, detail, extra = {}) {
   });
   // 最新100件のみ保持
   if (wk.changeLog.length > 100) wk.changeLog = wk.changeLog.slice(-100);
+  // Round 25 TOP 2: 全体監査ログにも追記
+  try {
+    if (typeof appendAuditLog === "function") appendAuditLog(type, detail, extra);
+  } catch (_) {}
 }
 
 // ===== Routing =====
@@ -6653,6 +6894,42 @@ function viewSettings() {
     ]),
   ]));
   wrap.appendChild(backupCard);
+
+  // テーマ設定 (Round 25 TOP 3)
+  const themeCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-2" });
+  themeCard.appendChild(el("div", { class: "font-semibold" }, "🎨 表示テーマ"));
+  const curTheme = state.meta.theme || "auto";
+  const themeOpts = [
+    { val: "auto", label: "🖥 自動 (システム設定)", desc: "OS のダークモード設定に追従" },
+    { val: "light", label: "☀️ ライト", desc: "明るい背景・夜営業以外向け" },
+    { val: "dark", label: "🌙 ダーク", desc: "暗い背景・夜営業や夜間操作向け" },
+  ];
+  const themeGrid = el("div", { class: "grid grid-cols-1 sm:grid-cols-3 gap-2" });
+  for (const opt of themeOpts) {
+    const isSel = curTheme === opt.val;
+    const btn = el("button", {
+      class: `text-left rounded-md p-3 border-2 transition ${isSel ? "border-brand-600 bg-brand-50" : "border-slate-200 hover:border-slate-400"}`,
+      onclick: () => {
+        state.meta.theme = opt.val;
+        try { localStorage.setItem("shifty.theme", opt.val); } catch (_) {}
+        applyTheme(opt.val);
+        persist(); render();
+        toast(`テーマを「${opt.label}」に切替`, "success");
+      },
+    });
+    btn.innerHTML = `<div class="font-semibold text-sm">${opt.label}</div><div class="text-xs text-slate-600 mt-0.5">${opt.desc}</div>`;
+    themeGrid.appendChild(btn);
+  }
+  themeCard.appendChild(themeGrid);
+  wrap.appendChild(themeCard);
+
+  // ヘルプセンター (Round 25 TOP 1)
+  const helpCard = renderHelpCenter();
+  if (helpCard) wrap.appendChild(helpCard);
+
+  // 監査ログビューア (Round 25 TOP 2)
+  const auditCard = renderAuditLogViewer();
+  if (auditCard) wrap.appendChild(auditCard);
 
   // Danger
   const danger = el("div", { class: "bg-red-50 border border-red-200 rounded-xl p-4 space-y-2" });

@@ -434,6 +434,10 @@
     if (state.meta.laborCostRatioTarget === undefined) state.meta.laborCostRatioTarget = 0.28;
     // 業態 (Round 20 TOP 3) — オンボーディング時に選択
     if (state.meta.businessType === undefined) state.meta.businessType = null;
+    // 全体監査ログ (Round 25 TOP 2)
+    if (!Array.isArray(state.meta.auditLog)) state.meta.auditLog = [];
+    // テーマ (Round 25 TOP 3) — "auto" | "light" | "dark"
+    if (state.meta.theme === undefined) state.meta.theme = "auto";
     // 自動アップグレード: 旧デフォルト 8h は飲食店現実に合わずカバー率が壊滅するため 12h に引き上げ
     // (lunch 11-15 + dinner 17-22 = 9h を許可。意図的に 8h 設定済みの顧客がいないので無条件で書き換え)
     if (state.meta.laborRules.maxHoursPerDay <= 8) state.meta.laborRules.maxHoursPerDay = 12;

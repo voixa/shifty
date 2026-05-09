@@ -14,6 +14,7 @@
   <meta name="theme-color" content="#4f46e5" />
   <script>
     tailwind.config = {
+      darkMode: 'class',
       theme: {
         extend: {
           colors: { brand: { 50:'#eef2ff', 100:'#e0e7ff', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca' } },
@@ -22,8 +23,18 @@
       }
     }
   </script>
+  <script>
+    (function () {
+      try {
+        const saved = localStorage.getItem("shifty.theme") || "auto";
+        if (saved === "dark" || (saved === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (_) {}
+    })();
+  </script>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen">
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 min-h-screen">
 
   <!-- Auth Overlay (hidden in demo) -->
   <div id="authOverlay" class="hidden fixed inset-0 z-[60] bg-slate-100 flex items-center justify-center p-4">

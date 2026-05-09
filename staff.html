@@ -14,12 +14,24 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <script>
     tailwind.config = {
+      darkMode: 'class',
       theme: { extend: { colors: { brand: { 50:'#eef2ff',100:'#e0e7ff',500:'#6366f1',600:'#4f46e5',700:'#4338ca' } },
         fontFamily: { sans: ['"Hiragino Sans"','"Yu Gothic"','Meiryo','system-ui','sans-serif'] } } }
     }
   </script>
+  <script>
+    // Round 25 TOP 3: dark mode early apply
+    (function () {
+      try {
+        const saved = localStorage.getItem("shifty.theme") || "auto";
+        if (saved === "dark" || (saved === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (_) {}
+    })();
+  </script>
 </head>
-<body class="bg-slate-100 text-slate-900 min-h-screen">
+<body class="bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 min-h-screen">
   <div id="app" class="max-w-md mx-auto p-4 pb-32"></div>
   <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 space-y-2"></div>
   <script src="js/api.js"></script>
