@@ -1041,6 +1041,21 @@ function openSimulationDialog() {
   modal(body);
 }
 
+// ===== 設定検索 (Round 30) =====
+function filterSettingsBySearch(query) {
+  const q = (query || "").toLowerCase().trim();
+  // 設定の各セクション (id="set-*") をフィルタ
+  const sections = document.querySelectorAll('[id^="set-"]');
+  if (!q) {
+    sections.forEach(s => s.style.display = "");
+    return;
+  }
+  sections.forEach(s => {
+    const text = s.textContent.toLowerCase();
+    s.style.display = text.includes(q) ? "" : "none";
+  });
+}
+
 // ===== ダッシュボードカスタマイズ (Round 28 TOP 1) =====
 function openDashboardCustomizeDialog() {
   const settings = state.meta.dashboardWidgets || {};
@@ -2434,6 +2449,38 @@ function viewHome() {
     return wrap;
   }
 
+  // Round 30: 進捗バー (4 ステップ: スタッフ→希望→生成→確定)
+  if (state.staff.length > 0) {
+    const submittedN = state.staff.filter(s => !s.archived && curPrefs().some(p => p.staffId === s.id)).length;
+    const activeN = state.staff.filter(s => !s.archived).length;
+    const steps = [
+      { id: 1, label: "スタッフ", done: state.staff.length > 0, hint: `${activeN} 名` },
+      { id: 2, label: "希望収集", done: submittedN > 0, hint: `${submittedN}/${activeN} 提出` },
+      { id: 3, label: "AI 生成", done: curAssignments().length > 0, hint: `${curAssignments().length} 件` },
+      { id: 4, label: "確定", done: curStatus() === "published", hint: curStatus() === "published" ? "✓" : "未" },
+    ];
+    const progressCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
+    progressCard.appendChild(el("div", { class: "text-xs font-semibold text-slate-500 mb-2" }, "📍 今週の進捗"));
+    const stepsRow = el("div", { class: "flex items-center justify-between" });
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
+      const cls = s.done ? "bg-emerald-500 text-white"
+                : (i === 0 || steps[i - 1].done) ? "bg-brand-600 text-white"
+                : "bg-slate-200 dark:bg-slate-600 text-slate-500";
+      stepsRow.appendChild(el("div", { class: "flex flex-col items-center flex-1" }, [
+        el("div", { class: `w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${cls}` }, s.done ? "✓" : String(s.id)),
+        el("div", { class: "text-[11px] mt-1 text-slate-700 dark:text-slate-300 text-center" }, s.label),
+        el("div", { class: "text-[10px] text-slate-500" }, s.hint),
+      ]));
+      if (i < steps.length - 1) {
+        const lineColor = steps[i].done ? "bg-emerald-500" : "bg-slate-200 dark:bg-slate-600";
+        stepsRow.appendChild(el("div", { class: `flex-grow h-1 mx-1 ${lineColor}`, style: { marginTop: "-22px", flex: "0.5" } }));
+      }
+    }
+    progressCard.appendChild(stepsRow);
+    wrap.appendChild(progressCard);
+  }
+
   // 「次にやること」カード
   const next = getNextAction();
   if (next) {
@@ -3500,14 +3547,15 @@ function viewStaff() {
     ]),
   ]));
 
-  // Round 22: 検索 & フィルタ UI
-  if (state.staff.length >= 5) {
-    const searchRow = el("div", { class: "bg-slate-50 rounded-md p-2 flex items-center gap-2 flex-wrap text-sm" });
+  // Round 22+30: 検索 & フィルタ UI (希望提出ステータス追加)
+  if (state.staff.length >= 1) {
+    const searchRow = el("div", { class: "bg-slate-50 dark:bg-slate-800 rounded-md p-2 flex items-center gap-2 flex-wrap text-sm" });
     const searchInput = el("input", {
       type: "search",
       placeholder: "🔍 名前で検索",
-      class: "flex-1 min-w-32 border rounded px-2 py-1",
-      value: window._staffSearchQuery,
+      class: "flex-1 min-w-32 border rounded px-2 py-1 dark:bg-slate-700 dark:border-slate-600",
+      value: window._staffSearchQuery || "",
+      "aria-label": "スタッフ名検索",
     });
     searchInput.oninput = () => {
       window._staffSearchQuery = searchInput.value;
@@ -3515,7 +3563,7 @@ function viewStaff() {
     };
     searchRow.appendChild(searchInput);
 
-    const posSelect = el("select", { class: "border rounded px-2 py-1" });
+    const posSelect = el("select", { class: "border rounded px-2 py-1 dark:bg-slate-700 dark:border-slate-600" });
     const allOpt = el("option", { value: "all" }, "全ポジション");
     if (window._positionFilter === "all") allOpt.selected = true;
     posSelect.appendChild(allOpt);
@@ -3526,6 +3574,20 @@ function viewStaff() {
     }
     posSelect.onchange = () => { window._positionFilter = posSelect.value; render(); };
     searchRow.appendChild(posSelect);
+
+    // Round 30: 希望提出ステータスフィルタ
+    const subFilterSelect = el("select", { class: "border rounded px-2 py-1 dark:bg-slate-700 dark:border-slate-600", title: "希望提出状況でフィルタ" });
+    [
+      ["all", "全員"],
+      ["submitted", "📝 提出済"],
+      ["unsubmitted", "⏳ 未提出"],
+    ].forEach(([v, l]) => {
+      const o = el("option", { value: v }, l);
+      if ((window._submitFilter || "all") === v) o.selected = true;
+      subFilterSelect.appendChild(o);
+    });
+    subFilterSelect.onchange = () => { window._submitFilter = subFilterSelect.value; render(); };
+    searchRow.appendChild(subFilterSelect);
 
     if (state.staff.some(s => s.archived)) {
       const archToggle = el("label", { class: "inline-flex items-center gap-1 text-xs cursor-pointer" }, [
@@ -3618,7 +3680,8 @@ function viewStaff() {
       <tbody></tbody>
     </table>`;
   const tbody = table.querySelector("tbody");
-  // Round 22: 検索 & フィルタを適用
+  // Round 22+30: 検索 & フィルタを適用
+  const submittedSet = new Set((curPrefs() || []).map(p => p.staffId));
   const filteredStaff = state.staff.filter(s => {
     if (s.archived && !window._showArchived) return false;
     if (window._positionFilter && window._positionFilter !== "all" && s.position !== window._positionFilter) return false;
@@ -3626,6 +3689,10 @@ function viewStaff() {
       const q = window._staffSearchQuery.toLowerCase();
       if (!s.name.toLowerCase().includes(q) && !(s.notes || "").toLowerCase().includes(q)) return false;
     }
+    // Round 30: 提出ステータス
+    const subFilter = window._submitFilter || "all";
+    if (subFilter === "submitted" && !submittedSet.has(s.id)) return false;
+    if (subFilter === "unsubmitted" && submittedSet.has(s.id)) return false;
     return true;
   });
   filteredStaff.forEach((s, idx) => {
@@ -4285,6 +4352,34 @@ function viewPreferences() {
 function viewSchedule() {
   const wrap = el("div", { class: "space-y-4" });
 
+  // Round 30: フェーズ判定 (空 / 編成中 / 確定済)
+  const phase = curAssignments().length === 0
+    ? "empty"
+    : (curStatus() === "published" ? "published" : "drafting");
+
+  // フェーズインジケーター
+  const phases = [
+    { id: "empty", label: "1. 編成開始", icon: "📝" },
+    { id: "drafting", label: "2. 編成中", icon: "✏️" },
+    { id: "published", label: "3. 確定済", icon: "✓" },
+  ];
+  const phaseBar = el("div", { class: "bg-slate-50 dark:bg-slate-800 rounded-md p-2 flex items-center justify-between" });
+  for (let i = 0; i < phases.length; i++) {
+    const p = phases[i];
+    const curIdx = phases.findIndex(x => x.id === phase);
+    const isActive = p.id === phase;
+    const isPast = i < curIdx;
+    const cls = isActive ? "bg-brand-600 text-white"
+              : isPast ? "bg-emerald-100 text-emerald-700"
+              : "bg-white dark:bg-slate-700 text-slate-500";
+    phaseBar.appendChild(el("div", { class: `flex-1 text-center py-2 px-2 rounded-md mx-0.5 text-xs font-semibold ${cls}` },
+      `${p.icon} ${p.label}${isPast ? " ✓" : ""}`));
+    if (i < phases.length - 1) {
+      phaseBar.appendChild(el("span", { class: "text-slate-400 mx-1" }, "→"));
+    }
+  }
+  wrap.appendChild(phaseBar);
+
   // モバイル D&D ヒント (Round 17 TOP 3) — 一度だけ表示
   const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
   const TOUCH_HINT_KEY = "shifty.schedule.touchHintSeen";
@@ -4302,8 +4397,37 @@ function viewSchedule() {
     wrap.appendChild(hint);
   }
 
+  // Round 30: 空状態の場合は AI 生成 CTA を大きく表示
+  if (phase === "empty") {
+    const cta = el("div", { class: "bg-gradient-to-br from-brand-50 to-amber-50 dark:from-brand-900/30 dark:to-amber-900/30 border border-brand-200 rounded-xl p-6 text-center space-y-3" });
+    cta.innerHTML = `
+      <div class="text-5xl">🤖</div>
+      <h3 class="font-bold text-lg">AI でシフトを自動生成</h3>
+      <p class="text-sm text-slate-600 dark:text-slate-400 max-w-md mx-auto">
+        ${state.staff.length} 名のスタッフ × ${curSlots().reduce((s, x) => s + x.requiredCount, 0)} 枠を最適配置。
+        スタッフの希望・労務ルール・人件費を考慮して 5 秒で計算します。
+      </p>`;
+    const aiBtn = el("button", {
+      class: "bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-6 py-3 text-base font-bold shadow-lg",
+      onclick: autoGenerate,
+    }, "🤖 AI 自動生成を実行 (推奨)");
+    cta.appendChild(aiBtn);
+    cta.appendChild(el("div", { class: "flex justify-center gap-2 flex-wrap text-xs" }, [
+      el("button", { class: "text-slate-600 hover:text-slate-900 underline decoration-dotted",
+        onclick: copyFromPreviousWeek }, "📋 先週からコピー"),
+      el("button", { class: "text-slate-600 hover:text-slate-900 underline decoration-dotted",
+        onclick: openTemplateDialog }, "📑 テンプレを使う"),
+    ]));
+    wrap.appendChild(cta);
+    if (state.staff.length === 0) {
+      wrap.appendChild(el("div", { class: "bg-amber-50 border border-amber-200 rounded p-3 text-sm" },
+        "⚠️ スタッフが未登録です。「👥 スタッフ&希望」タブから先にスタッフを追加してください。"));
+    }
+    return wrap;
+  }
+
   const headerRow = el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
-    el("h2", { class: "text-xl font-bold" }, "シフト編成"),
+    el("h2", { class: "text-xl font-bold" }, phase === "published" ? "📅 シフト (確定済)" : "📅 シフト編成"),
     el("div", { class: "flex gap-2 flex-wrap" }, [
       el("button", { class: "text-sm border rounded-md px-3 py-1.5 hover:bg-slate-50",
         onclick: () => {
@@ -7061,24 +7185,48 @@ function downloadCsv() {
 function viewSettings() {
   const wrap = el("div", { class: "space-y-3" });
   wrap.appendChild(el("h2", { class: "text-xl font-bold" }, "⚙️ 店舗設定"));
-  wrap.appendChild(el("div", { class: "text-sm text-slate-600" },
+  wrap.appendChild(el("div", { class: "text-sm text-slate-600 dark:text-slate-400" },
     "ここで設定した内容に基づいて、シフト枠（必要人数マトリクス）が生成されます。"));
 
-  // 設定セクション目次 (Round 7) — モバイルで縦スクロール時のジャンプ
-  const toc = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3 sticky top-2 z-10" });
-  toc.innerHTML = `
-    <div class="text-xs font-semibold text-slate-700 mb-1.5">📌 設定項目に飛ぶ</div>
-    <div class="flex flex-wrap gap-1 text-xs">
-      <a href="#set-basic" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">基本情報</a>
-      <a href="#set-positions" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">ポジション</a>
-      <a href="#set-sessions" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">営業時間</a>
-      <a href="#set-staffing" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">必要人数</a>
-      <a href="#set-labor" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">労務ルール</a>
-      <a href="#set-deadline" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">提出締切</a>
-      <a href="#set-algo" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">AI 重み</a>
-      <a href="#set-backup" class="bg-slate-100 hover:bg-slate-200 rounded px-2 py-1">バックアップ</a>
-    </div>`;
-  wrap.appendChild(toc);
+  // Round 30: 検索バー + グルーピングナビ (TOC リファクタ)
+  const navCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 sticky top-2 z-10" });
+  // 検索バー
+  navCard.appendChild(el("input", {
+    type: "search",
+    id: "set-search",
+    placeholder: "🔍 設定項目を検索 (例: 深夜手当・ポジション・締切)",
+    class: "w-full border rounded-md px-3 py-2 text-sm mb-2 dark:bg-slate-700 dark:border-slate-600",
+    "aria-label": "設定検索",
+    oninput: (e) => filterSettingsBySearch(e.target.value),
+  }));
+  // グルーピング (5 カテゴリ)
+  const groups = [
+    { label: "🏪 店舗", links: [
+      ["#set-basic", "基本情報"],
+      ["#set-positions", "ポジション"],
+      ["#set-sessions", "営業時間"],
+    ]},
+    { label: "📅 シフトルール", links: [
+      ["#set-staffing", "必要人数"],
+      ["#set-labor", "労務ルール"],
+      ["#set-deadline", "提出締切"],
+    ]},
+    { label: "🤖 AI", links: [
+      ["#set-algo", "AI 重み"],
+    ]},
+    { label: "💾 バックアップ", links: [
+      ["#set-backup", "バックアップ"],
+    ]},
+  ];
+  for (const g of groups) {
+    const groupRow = el("div", { class: "flex items-center gap-2 flex-wrap text-xs mb-1" });
+    groupRow.appendChild(el("span", { class: "font-semibold text-slate-700 dark:text-slate-300 min-w-20" }, g.label));
+    for (const [href, label] of g.links) {
+      groupRow.appendChild(el("a", { href, class: "bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded px-2 py-1" }, label));
+    }
+    navCard.appendChild(groupRow);
+  }
+  wrap.appendChild(navCard);
 
   // Basic
   const basic = el("div", { id: "set-basic", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
