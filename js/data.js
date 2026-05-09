@@ -606,6 +606,19 @@
     };
   }
 
+  // Round 38 (S-2): 共通フォーマッタ・サニタイザ
+  function fmtYen(n) { return "¥" + Math.round(n).toLocaleString(); }
+  function fmtPct(r) { return Math.round(r * 100) + "%"; }
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+  }
+  function escapeAttr(s) { return escapeHtml(s).replace(/"/g, "&quot;"); }
+  // 曜日記号 (休日対応): 日=赤・土=青・他=なし
+  function dowColorClass(d) {
+    const dow = dayOfWeek(d);
+    return dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "";
+  }
+
   window.ShiftyData = {
     DAY_LABELS,
     DEFAULT_POSITIONS, DEFAULT_SESSIONS, defaultStaffingPlan, SESSION_PRESETS, BUSINESS_TYPES,
@@ -614,5 +627,7 @@
     buildSlots, newWeek, ensureWeek, listWeeks,
     loadState, saveState, resetState, seedState, seedSampleData, migrate,
     JP_HOLIDAYS, getHoliday, isHoliday, effectiveDayOfWeek,
+    // Round 38 (S): 共通ユーティリティ
+    fmtYen, fmtPct, escapeHtml, escapeAttr, dowColorClass,
   };
 })();

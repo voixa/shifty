@@ -5194,8 +5194,33 @@ function importCsvDialog() {
 
   const body = el("div", { class: "p-6 space-y-3" });
   body.appendChild(el("h3", { class: "font-bold text-lg" }, "CSV 取込"));
-  body.appendChild(el("div", { class: "bg-slate-50 border border-slate-200 rounded p-3 text-xs space-y-1" }, [
-    el("div", { class: "font-semibold" }, "📋 列の順序"),
+
+  // Round 38 (U): 他システム形式プリセット
+  body.appendChild(el("div", { class: "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded p-3 text-xs space-y-2" }, [
+    el("div", { class: "font-semibold text-blue-900 dark:text-blue-200" }, "📥 他のシフト管理サービスからの移行"),
+    el("div", { class: "text-blue-800 dark:text-blue-300" }, "下記の代表的な形式に対応しています。CSV ファイルをそのまま貼り付け or アップロード:"),
+    el("div", { class: "flex gap-2 flex-wrap" }, [
+      el("button", {
+        class: "text-xs bg-white dark:bg-slate-800 border border-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded px-2 py-1",
+        onclick: () => importFromOtherSystem("airshift"),
+      }, "📅 Airシフト / シフトボード"),
+      el("button", {
+        class: "text-xs bg-white dark:bg-slate-800 border border-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded px-2 py-1",
+        onclick: () => importFromOtherSystem("rakushifu"),
+      }, "📅 らくしふ"),
+      el("button", {
+        class: "text-xs bg-white dark:bg-slate-800 border border-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded px-2 py-1",
+        onclick: () => importFromOtherSystem("freee"),
+      }, "📅 freee 人事労務"),
+      el("button", {
+        class: "text-xs bg-white dark:bg-slate-800 border border-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded px-2 py-1",
+        onclick: () => importFromOtherSystem("auto"),
+      }, "🔍 自動検出"),
+    ]),
+  ]));
+
+  body.appendChild(el("div", { class: "bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded p-3 text-xs space-y-1" }, [
+    el("div", { class: "font-semibold" }, "📋 Shifty 標準形式の列順序"),
     el("div", { class: "font-mono text-[11px]" }, "名前,本職ID,時給,週最低,週最大,固定休,スキル"),
     el("div", {}, `本職ID は: ${positionIds}（設定タブで追加可）`),
     el("div", {}, "固定休は曜日番号 (0=日 〜 6=土) をスペース区切り。例: 「2 5」= 火・金"),
@@ -5245,6 +5270,166 @@ function importCsvDialog() {
     }, "✓ 取込実行"),
   ]));
   modal(body);
+}
+
+// Round 38 (U): 他システム CSV 形式プリセット
+const OTHER_SYSTEM_FORMATS = {
+  airshift: {
+    label: "Airシフト / シフトボード",
+    expected: ["氏名", "時給", "希望時間", "ポジション"],
+    sample: "氏名,メール,時給,希望時間,本職\n山田 太郎,yamada@example.com,1100,週20-28h,ホール\n佐藤 花子,sato@example.com,1300,週30-40h,キッチン\n",
+    parse: (txt) => {
+      // Airシフト系: 氏名・時給・本職 を持つ可能性のある形式
+      const lines = txt.split(/\r?\n/).filter(l => l.trim());
+      const out = [];
+      const errors = [];
+      let header = null;
+      for (let i = 0; i < lines.length; i++) {
+        const cols = lines[i].split(",").map(x => x.trim());
+        if (i === 0 && (cols[0] === "氏名" || cols[0] === "名前")) { header = cols; continue; }
+        if (cols.length < 2) continue;
+        const name = cols[0];
+        if (!name) continue;
+        // 時給を探す (数字のみ列)
+        let hourlyWage = 1100;
+        for (const c of cols) {
+          const n = Number(c.replace(/[¥,円]/g, ""));
+          if (!isNaN(n) && n >= 800 && n <= 5000) { hourlyWage = n; break; }
+        }
+        // ポジションを推定
+        let position = "hall";
+        for (const c of cols) {
+          if (c.includes("キッチン") || c.includes("調理")) { position = "kitchen"; break; }
+          if (c.includes("レジ") || c.includes("会計")) { position = "cashier"; break; }
+          if (c.includes("マネージャー") || c.includes("店長")) { position = "manager"; break; }
+        }
+        out.push({ name, position, hourlyWage, minHoursPerWeek: 10, maxHoursPerWeek: 28, fixedDayOff: [], skill: 3, canCover: [], breakMinutes: 0, fixedShifts: [] });
+      }
+      return { rows: out, errors };
+    },
+  },
+  rakushifu: {
+    label: "らくしふ",
+    expected: ["スタッフ名", "時給", "ポジション"],
+    sample: "スタッフ名,時給,ポジション,週最大\n田中 一郎,1200,ホール,28\n",
+    parse: (txt) => {
+      const lines = txt.split(/\r?\n/).filter(l => l.trim());
+      const out = [];
+      const errors = [];
+      for (let i = 0; i < lines.length; i++) {
+        const cols = lines[i].split(",").map(x => x.trim());
+        if (i === 0 && cols[0].includes("スタッフ")) continue; // ヘッダ
+        if (cols.length < 2) continue;
+        const name = cols[0]; if (!name) continue;
+        let hourlyWage = 1100;
+        for (const c of cols) {
+          const n = Number(c.replace(/[¥,円]/g, ""));
+          if (!isNaN(n) && n >= 800 && n <= 5000) { hourlyWage = n; break; }
+        }
+        let position = "hall";
+        for (const c of cols) {
+          if (c.includes("キッチン")) { position = "kitchen"; break; }
+          if (c.includes("レジ")) { position = "cashier"; break; }
+        }
+        let maxH = 28;
+        for (const c of cols) {
+          const n = Number(c);
+          if (!isNaN(n) && n > 0 && n <= 60) { maxH = n; break; }
+        }
+        out.push({ name, position, hourlyWage, minHoursPerWeek: 10, maxHoursPerWeek: maxH, fixedDayOff: [], skill: 3, canCover: [], breakMinutes: 0, fixedShifts: [] });
+      }
+      return { rows: out, errors };
+    },
+  },
+  freee: {
+    label: "freee 人事労務",
+    expected: ["従業員番号", "氏名", "時給"],
+    sample: "従業員番号,氏名,時給\nE001,鈴木 太郎,1100\n",
+    parse: (txt) => {
+      const lines = txt.split(/\r?\n/).filter(l => l.trim());
+      const out = [];
+      const errors = [];
+      for (let i = 0; i < lines.length; i++) {
+        const cols = lines[i].split(",").map(x => x.trim());
+        if (i === 0 && cols[1] && (cols[1].includes("氏名") || cols[1].includes("従業員氏名"))) continue;
+        if (cols.length < 2) continue;
+        const name = cols[1] || cols[0]; if (!name) continue;
+        let hourlyWage = 1100;
+        for (const c of cols) {
+          const n = Number(c.replace(/[¥,円]/g, ""));
+          if (!isNaN(n) && n >= 800 && n <= 5000) { hourlyWage = n; break; }
+        }
+        out.push({ name, position: "hall", hourlyWage, minHoursPerWeek: 10, maxHoursPerWeek: 28, fixedDayOff: [], skill: 3, canCover: [], breakMinutes: 0, fixedShifts: [] });
+      }
+      return { rows: out, errors };
+    },
+  },
+};
+
+function importFromOtherSystem(formatKey) {
+  const txtArea = document.getElementById("csvText");
+  const rawTxt = (txtArea?.value || "").trim();
+  if (!rawTxt) {
+    if (formatKey === "auto") {
+      // サンプルを示すだけ
+      toast("CSV をテキストエリアに貼り付けてからこのボタンを押してください", "info", 4000);
+      return;
+    }
+    // 形式のサンプルをテキストエリアに表示
+    const fmt = OTHER_SYSTEM_FORMATS[formatKey];
+    if (fmt && txtArea) {
+      txtArea.value = fmt.sample;
+      toast(`${fmt.label} のサンプル形式を表示しました。実データに置き換えてください`, "info", 5000);
+    }
+    return;
+  }
+
+  // 自動検出
+  let key = formatKey;
+  if (key === "auto") {
+    const firstLine = rawTxt.split(/\r?\n/)[0] || "";
+    if (firstLine.includes("氏名") && firstLine.includes("時給")) key = "airshift";
+    else if (firstLine.includes("スタッフ名")) key = "rakushifu";
+    else if (firstLine.includes("従業員")) key = "freee";
+    else key = null;
+  }
+  if (!key || !OTHER_SYSTEM_FORMATS[key]) {
+    toast("形式を自動検出できませんでした。形式ボタンを直接押すかShifty標準形式で入力してください", "error", 5000);
+    return;
+  }
+
+  const fmt = OTHER_SYSTEM_FORMATS[key];
+  const { rows, errors } = fmt.parse(rawTxt);
+  if (rows.length === 0) {
+    toast("有効な行が検出できませんでした", "error");
+    return;
+  }
+  // プレビュー表示
+  const previewArea = document.getElementById("csv-preview-area");
+  if (previewArea) {
+    previewArea.innerHTML = `
+      <div class="bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-300 rounded p-3 mt-2 text-xs">
+        <div class="font-semibold text-emerald-900 dark:text-emerald-200">✓ ${escapeHtml(fmt.label)} 形式として ${rows.length} 名検出</div>
+        <div class="text-slate-600 dark:text-slate-400 mt-2 space-y-1 max-h-32 overflow-y-auto">
+          ${rows.slice(0, 10).map(r => `<div class="font-mono">${escapeHtml(r.name)} / ¥${r.hourlyWage}/h / ${escapeHtml(posCfg(r.position).label)}</div>`).join("")}
+          ${rows.length > 10 ? `<div class="text-slate-500">… 他 ${rows.length - 10} 名</div>` : ""}
+        </div>
+      </div>`;
+    previewArea.classList.remove("hidden");
+  }
+  // 確認 → 取込
+  if (!confirm(`${fmt.label} 形式から ${rows.length} 名を取込みます。よろしいですか？\n(時給・本職などは推測で埋めます。後から個別編集できます)`)) return;
+  // 既存スタッフへの追加
+  for (const r of rows) {
+    state.staff.push({
+      id: uid("s_"), ...r,
+      notes: `${fmt.label} から取込`,
+      email: "",
+      skills: { [r.position]: r.skill },
+    });
+  }
+  persist(); closeModal(); render();
+  toast(`✓ ${rows.length} 名を取込しました`, "success", 5000);
 }
 
 // CSV 取込: parse + validate (preview 用と commit 用で共有)

@@ -225,6 +225,32 @@ button:focus-visible, a:focus-visible {
   button, .tab-btn, [role="button"], a.btn {
     min-height: 44px;
   }
+  /* Round 38 (R): モバイルでの chip タップエリア拡大 */
+  .assignment-chip {
+    min-height: 48px;
+    padding: 8px 10px !important;
+    font-size: 12px;
+  }
+  .assignment-chip .name { font-size: 13px; }
+  /* モバイルでカレンダーセルも余裕 */
+  .cal-cell { min-height: 60px; padding: 4px; }
+}
+
+/* Round 38 (R): 印刷ビューの共通 polish */
+@media print {
+  body * { visibility: hidden; }
+  .print-only, .print-only * { visibility: visible; }
+  .no-print { display: none !important; }
+  .print-only { position: absolute; left: 0; top: 0; }
+  /* 印刷時の改ページ制御 */
+  table { page-break-inside: avoid; }
+  tr, td, th { page-break-inside: avoid; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  /* 印刷時の色を明確に */
+  .print-only h1, .print-only h2 { color: #000 !important; }
+  /* 印刷時に背景色を保持 (Chrome) */
+  .print-only { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 /* ハイコントラストモード */
 @media (prefers-contrast: more) {
