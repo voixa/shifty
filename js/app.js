@@ -579,6 +579,535 @@ async function decideSwapRequest(swapId, decision) {
   }
 }
 
+// ===== 週次/月次レポート (Round 20 TOP 2) =====
+function _aggregateAttendance(assignments) {
+  let totalHours = 0, actualHours = 0, totalCost = 0;
+  let lateCount = 0, earlyOutCount = 0, overtimeCount = 0, missingClock = 0;
+  for (const a of assignments) {
+    const sched = calcHours(a.startTime, a.endTime);
+    totalHours += sched;
+    totalCost += a.cost || 0;
+    if (a.clockIn && a.clockOut) {
+      try {
+        const inDt = new Date(a.clockIn), outDt = new Date(a.clockOut);
+        actualHours += (outDt - inDt) / 3600000;
+        const sIn = new Date(`${a.date}T${a.startTime}:00`);
+        const sOut = new Date(`${a.date}T${a.endTime}:00`);
+        const dIn = (inDt - sIn) / 60000;
+        const dOut = (outDt - sOut) / 60000;
+        if (dIn > 5) lateCount++;
+        if (dOut < -10) earlyOutCount++;
+        if (dOut > 5) overtimeCount++;
+      } catch (_) {}
+    } else if (!a.clockIn || !a.clockOut) {
+      missingClock++;
+    }
+  }
+  return { totalHours, actualHours, totalCost, lateCount, earlyOutCount, overtimeCount, missingClock };
+}
+
+function openWeeklyReport() {
+  const w0 = state.meta.currentWeekStart || "";
+  if (!w0) { toast("対象週がありません", "error"); return; }
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  const wkAss = curAssignments();
+  const att = _aggregateAttendance(wkAss);
+  const sales = state.meta.dailySales || {};
+  const wkSales = days.reduce((s, d) => s + (Number(sales[d]) || 0), 0);
+  const ratio = wkSales > 0 ? att.totalCost / wkSales : null;
+  const target = state.meta.laborCostRatioTarget || 0.28;
+
+  // スタッフ別集計
+  const perStaff = state.staff.map(s => {
+    const myAss = wkAss.filter(a => a.staffId === s.id);
+    const myHours = myAss.reduce((sm, a) => sm + calcHours(a.startTime, a.endTime), 0);
+    const myCost = myAss.reduce((sm, a) => sm + (a.cost || 0), 0);
+    const att = _aggregateAttendance(myAss);
+    return { staff: s, shifts: myAss.length, hours: myHours, cost: myCost, ...att };
+  }).filter(x => x.hours > 0).sort((a, b) => b.hours - a.hours);
+
+  // 希望提出率
+  const submittedSet = new Set((curPrefs() || []).map(p => p.staffId));
+  const submitRate = state.staff.length > 0 ? submittedSet.size / state.staff.length : 0;
+
+  // 変更履歴
+  const changeLog = curWeek().changeLog || [];
+  const changeBreakdown = {};
+  for (const c of changeLog) {
+    changeBreakdown[c.type] = (changeBreakdown[c.type] || 0) + 1;
+  }
+  const changeText = Object.entries(changeBreakdown).map(([k, v]) => `${k}:${v}`).join(", ") || "なし";
+
+  // 印刷用 HTML
+  const wrap = document.createElement("div");
+  wrap.className = "print-only report-print";
+  wrap.innerHTML = `
+    <style>
+      @media print {
+        body > *:not(.print-only) { display: none !important; }
+        .print-only { display: block !important; padding: 10mm; font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; }
+        .report-print { font-size: 10pt; color: #1e293b; }
+        .report-print h1 { font-size: 16pt; margin-bottom: 4mm; }
+        .report-print h2 { font-size: 12pt; margin: 4mm 0 2mm; border-bottom: 1px solid #94a3b8; padding-bottom: 1mm; }
+        .report-print table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+        .report-print th, .report-print td { border: 1px solid #cbd5e1; padding: 1mm 2mm; text-align: left; }
+        .report-print th { background: #e2e8f0; }
+        .report-print .kpi { display: flex; gap: 4mm; flex-wrap: wrap; margin: 2mm 0; }
+        .report-print .kpi-item { border: 1px solid #cbd5e1; padding: 2mm 3mm; border-radius: 1mm; min-width: 30mm; }
+        .report-print .kpi-label { font-size: 8pt; color: #64748b; }
+        .report-print .kpi-value { font-size: 14pt; font-weight: bold; }
+        .report-print .ok { color: #047857; }
+        .report-print .warn { color: #b45309; }
+        .report-print .danger { color: #b91c1c; }
+      }
+      @media screen {
+        body > .print-only { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: white; z-index: 100; padding: 20px; overflow: auto; }
+        .report-print { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; font-size: 12px; max-width: 900px; margin: auto; }
+        .report-print h1 { font-size: 22px; margin-bottom: 12px; }
+        .report-print h2 { font-size: 16px; margin: 16px 0 8px; border-bottom: 1px solid #94a3b8; padding-bottom: 4px; }
+        .report-print table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .report-print th, .report-print td { border: 1px solid #cbd5e1; padding: 4px 8px; text-align: left; }
+        .report-print th { background: #e2e8f0; }
+        .report-print .kpi { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+        .report-print .kpi-item { border: 1px solid #cbd5e1; padding: 8px 12px; border-radius: 6px; min-width: 110px; }
+        .report-print .kpi-label { font-size: 11px; color: #64748b; }
+        .report-print .kpi-value { font-size: 18px; font-weight: bold; }
+        .report-print .ok { color: #047857; }
+        .report-print .warn { color: #b45309; }
+        .report-print .danger { color: #b91c1c; }
+        .report-controls { position: fixed; top: 12px; right: 16px; z-index: 200; }
+        .report-controls button { padding: 8px 14px; margin-left: 8px; background: #4f46e5; color: white; border: 0; border-radius: 4px; cursor: pointer; font-size: 12px; }
+      }
+    </style>
+    <div class="report-controls no-print">
+      <button onclick="window.print()">🖨 印刷 / PDF 保存</button>
+      <button onclick="document.querySelector('.print-only')?.remove()" style="background:#64748b">✕ 閉じる</button>
+    </div>
+    <h1>📊 週次レポート — ${escapeHtml(state.meta.restaurantName)}</h1>
+    <div style="color:#64748b;font-size:10pt;margin-bottom:4mm">対象期間: ${w0} 〜 ${addDays(w0, 6)} (${curStatus() === "published" ? "確定済" : "下書き"})</div>
+
+    <h2>主要 KPI</h2>
+    <div class="kpi">
+      <div class="kpi-item"><div class="kpi-label">シフト数</div><div class="kpi-value">${wkAss.length} 件</div></div>
+      <div class="kpi-item"><div class="kpi-label">合計勤務時間</div><div class="kpi-value">${att.totalHours.toFixed(1)}h</div></div>
+      <div class="kpi-item"><div class="kpi-label">人件費</div><div class="kpi-value">${fmtYen(Math.round(att.totalCost))}</div></div>
+      ${wkSales > 0 ? `
+      <div class="kpi-item"><div class="kpi-label">売上</div><div class="kpi-value">${fmtYen(wkSales)}</div></div>
+      <div class="kpi-item"><div class="kpi-label">人件費率</div><div class="kpi-value ${ratio <= target ? 'ok' : ratio <= target + 0.05 ? 'warn' : 'danger'}">${(ratio * 100).toFixed(1)}%</div><div class="kpi-label">目標 ${(target * 100).toFixed(0)}%</div></div>
+      ` : ""}
+      <div class="kpi-item"><div class="kpi-label">希望提出率</div><div class="kpi-value">${(submitRate * 100).toFixed(0)}%</div><div class="kpi-label">${submittedSet.size}/${state.staff.length}名</div></div>
+    </div>
+
+    <h2>勤怠サマリ</h2>
+    <div class="kpi">
+      <div class="kpi-item"><div class="kpi-label">実労働時間</div><div class="kpi-value">${att.actualHours.toFixed(1)}h</div></div>
+      <div class="kpi-item"><div class="kpi-label">遅刻 (5分以上)</div><div class="kpi-value ${att.lateCount === 0 ? 'ok' : 'warn'}">${att.lateCount} 回</div></div>
+      <div class="kpi-item"><div class="kpi-label">早退 (10分以上)</div><div class="kpi-value ${att.earlyOutCount === 0 ? 'ok' : 'warn'}">${att.earlyOutCount} 回</div></div>
+      <div class="kpi-item"><div class="kpi-label">残業 (5分以上)</div><div class="kpi-value">${att.overtimeCount} 回</div></div>
+      <div class="kpi-item"><div class="kpi-label">打刻欠落</div><div class="kpi-value ${att.missingClock === 0 ? 'ok' : 'danger'}">${att.missingClock} 件</div></div>
+    </div>
+
+    <h2>スタッフ別 (${perStaff.length} 名)</h2>
+    <table>
+      <thead><tr><th>名前</th><th>本職</th><th>シフト数</th><th>勤務時間</th><th>給与</th><th>遅刻</th><th>早退</th><th>残業</th></tr></thead>
+      <tbody>
+        ${perStaff.map(p => `
+          <tr>
+            <td><b>${escapeHtml(p.staff.name)}</b></td>
+            <td>${escapeHtml(posCfg(p.staff.position).label)}</td>
+            <td>${p.shifts}</td>
+            <td>${p.hours.toFixed(1)}h</td>
+            <td>${fmtYen(Math.round(p.cost))}</td>
+            <td class="${p.lateCount === 0 ? '' : 'warn'}">${p.lateCount}</td>
+            <td class="${p.earlyOutCount === 0 ? '' : 'warn'}">${p.earlyOutCount}</td>
+            <td>${p.overtimeCount}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+
+    <h2>変更履歴</h2>
+    <div style="font-size:10pt">${changeLog.length} 件 (${escapeHtml(changeText)})</div>
+
+    <div style="margin-top:8mm;font-size:9pt;color:#94a3b8;text-align:right">
+      生成: ${new Date().toLocaleString("ja-JP")} / Shifty
+    </div>`;
+  document.body.appendChild(wrap);
+}
+
+function openMonthlyReport() {
+  const w0 = state.meta.currentWeekStart || "";
+  const monthKey = w0.slice(0, 7);
+  if (!monthKey) { toast("対象月が判定できません", "error"); return; }
+
+  // 当月の確定済 assignments
+  const monthAss = [];
+  const allWeeks = state.weeks || {};
+  const wkKeys = Object.keys(allWeeks).filter(k => {
+    // 当月開始 or 当月内に日付がある週
+    return k.startsWith(monthKey) || (allWeeks[k].assignments || []).some(a => (a.date || "").startsWith(monthKey));
+  });
+  for (const wk of wkKeys) {
+    if ((allWeeks[wk] || {}).status !== "published") continue;
+    for (const a of (allWeeks[wk].assignments || [])) {
+      if ((a.date || "").startsWith(monthKey)) monthAss.push(a);
+    }
+  }
+  if (monthAss.length === 0) { toast(`${monthKey} の確定済シフトがありません`, "error"); return; }
+
+  const att = _aggregateAttendance(monthAss);
+  const sales = state.meta.dailySales || {};
+  const monthSales = Object.entries(sales)
+    .filter(([d, _]) => d.startsWith(monthKey))
+    .reduce((s, [_, v]) => s + Number(v || 0), 0);
+  const ratio = monthSales > 0 ? att.totalCost / monthSales : null;
+  const target = state.meta.laborCostRatioTarget || 0.28;
+
+  // スタッフ別月次集計
+  const perStaff = state.staff.map(s => {
+    const myAss = monthAss.filter(a => a.staffId === s.id);
+    const myHours = myAss.reduce((sm, a) => sm + calcHours(a.startTime, a.endTime), 0);
+    const myCost = myAss.reduce((sm, a) => sm + (a.cost || 0), 0);
+    const att2 = _aggregateAttendance(myAss);
+    const days = new Set(myAss.map(a => a.date)).size;
+    return { staff: s, shifts: myAss.length, days, hours: myHours, cost: myCost, ...att2 };
+  }).filter(x => x.hours > 0).sort((a, b) => b.cost - a.cost);
+
+  // トップ/ボトム パフォーマー
+  const top3 = perStaff.slice(0, 3);
+
+  // 週次トレンド
+  const weekTrend = wkKeys.filter(k => (allWeeks[k] || {}).status === "published").sort();
+  const trendData = weekTrend.map(wk => {
+    const wkAss = (allWeeks[wk] || {}).assignments || [];
+    const wkDays = Array.from({ length: 7 }, (_, i) => addDays(wk, i));
+    const wkSales = wkDays.reduce((s, d) => s + (Number(sales[d]) || 0), 0);
+    const wkCost = wkAss.reduce((s, a) => s + (a.cost || 0), 0);
+    return { wk, sales: wkSales, cost: wkCost, ratio: wkSales > 0 ? wkCost / wkSales : null };
+  });
+
+  const wrap = document.createElement("div");
+  wrap.className = "print-only report-print";
+  wrap.innerHTML = `
+    <style>
+      @media print {
+        body > *:not(.print-only) { display: none !important; }
+        .print-only { display: block !important; padding: 10mm; font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; }
+        .report-print { font-size: 10pt; color: #1e293b; }
+        .report-print h1 { font-size: 16pt; margin-bottom: 4mm; }
+        .report-print h2 { font-size: 12pt; margin: 4mm 0 2mm; border-bottom: 1px solid #94a3b8; padding-bottom: 1mm; }
+        .report-print table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+        .report-print th, .report-print td { border: 1px solid #cbd5e1; padding: 1mm 2mm; text-align: left; }
+        .report-print th { background: #e2e8f0; }
+        .report-print .kpi { display: flex; gap: 4mm; flex-wrap: wrap; margin: 2mm 0; }
+        .report-print .kpi-item { border: 1px solid #cbd5e1; padding: 2mm 3mm; border-radius: 1mm; min-width: 30mm; }
+        .report-print .kpi-label { font-size: 8pt; color: #64748b; }
+        .report-print .kpi-value { font-size: 14pt; font-weight: bold; }
+        .report-print .ok { color: #047857; }
+        .report-print .warn { color: #b45309; }
+        .report-print .danger { color: #b91c1c; }
+      }
+      @media screen {
+        body > .print-only { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: white; z-index: 100; padding: 20px; overflow: auto; }
+        .report-print { font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; font-size: 12px; max-width: 900px; margin: auto; }
+        .report-print h1 { font-size: 22px; margin-bottom: 12px; }
+        .report-print h2 { font-size: 16px; margin: 16px 0 8px; border-bottom: 1px solid #94a3b8; padding-bottom: 4px; }
+        .report-print table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .report-print th, .report-print td { border: 1px solid #cbd5e1; padding: 4px 8px; text-align: left; }
+        .report-print th { background: #e2e8f0; }
+        .report-print .kpi { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+        .report-print .kpi-item { border: 1px solid #cbd5e1; padding: 8px 12px; border-radius: 6px; min-width: 110px; }
+        .report-print .kpi-label { font-size: 11px; color: #64748b; }
+        .report-print .kpi-value { font-size: 18px; font-weight: bold; }
+        .report-print .ok { color: #047857; }
+        .report-print .warn { color: #b45309; }
+        .report-print .danger { color: #b91c1c; }
+        .report-controls { position: fixed; top: 12px; right: 16px; z-index: 200; }
+        .report-controls button { padding: 8px 14px; margin-left: 8px; background: #4f46e5; color: white; border: 0; border-radius: 4px; cursor: pointer; font-size: 12px; }
+      }
+    </style>
+    <div class="report-controls no-print">
+      <button onclick="window.print()">🖨 印刷 / PDF 保存</button>
+      <button onclick="document.querySelector('.print-only')?.remove()" style="background:#64748b">✕ 閉じる</button>
+    </div>
+    <h1>📈 月次レポート — ${escapeHtml(state.meta.restaurantName)}</h1>
+    <div style="color:#64748b;font-size:10pt;margin-bottom:4mm">対象月: ${monthKey} / ${trendData.length} 週分の確定済データ</div>
+
+    <h2>月次 KPI</h2>
+    <div class="kpi">
+      <div class="kpi-item"><div class="kpi-label">総シフト数</div><div class="kpi-value">${monthAss.length} 件</div></div>
+      <div class="kpi-item"><div class="kpi-label">総勤務時間</div><div class="kpi-value">${att.totalHours.toFixed(0)}h</div></div>
+      <div class="kpi-item"><div class="kpi-label">人件費</div><div class="kpi-value">${fmtYen(Math.round(att.totalCost))}</div></div>
+      ${monthSales > 0 ? `
+      <div class="kpi-item"><div class="kpi-label">売上</div><div class="kpi-value">${fmtYen(monthSales)}</div></div>
+      <div class="kpi-item"><div class="kpi-label">人件費率</div><div class="kpi-value ${ratio <= target ? 'ok' : ratio <= target + 0.05 ? 'warn' : 'danger'}">${(ratio * 100).toFixed(1)}%</div><div class="kpi-label">目標 ${(target * 100).toFixed(0)}%</div></div>
+      ` : ""}
+      <div class="kpi-item"><div class="kpi-label">活動スタッフ</div><div class="kpi-value">${perStaff.length} 名</div></div>
+    </div>
+
+    <h2>勤怠</h2>
+    <div class="kpi">
+      <div class="kpi-item"><div class="kpi-label">遅刻</div><div class="kpi-value ${att.lateCount === 0 ? 'ok' : 'warn'}">${att.lateCount} 回</div></div>
+      <div class="kpi-item"><div class="kpi-label">早退</div><div class="kpi-value ${att.earlyOutCount === 0 ? 'ok' : 'warn'}">${att.earlyOutCount} 回</div></div>
+      <div class="kpi-item"><div class="kpi-label">残業</div><div class="kpi-value">${att.overtimeCount} 回</div></div>
+      <div class="kpi-item"><div class="kpi-label">打刻欠落</div><div class="kpi-value ${att.missingClock === 0 ? 'ok' : 'danger'}">${att.missingClock} 件</div></div>
+    </div>
+
+    <h2>給与上位 ${Math.min(3, top3.length)} 名 (頼りになるスタッフ)</h2>
+    <table>
+      <thead><tr><th>順位</th><th>名前</th><th>本職</th><th>出勤日数</th><th>勤務時間</th><th>給与</th></tr></thead>
+      <tbody>
+        ${top3.map((p, i) => `
+          <tr>
+            <td>${["🥇", "🥈", "🥉"][i] || (i+1)}</td>
+            <td><b>${escapeHtml(p.staff.name)}</b></td>
+            <td>${escapeHtml(posCfg(p.staff.position).label)}</td>
+            <td>${p.days}日</td>
+            <td>${p.hours.toFixed(1)}h</td>
+            <td>${fmtYen(Math.round(p.cost))}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+
+    <h2>スタッフ別 月次合計 (${perStaff.length} 名)</h2>
+    <table>
+      <thead><tr><th>名前</th><th>本職</th><th>日数</th><th>勤務時間</th><th>給与</th><th>遅刻</th><th>早退</th><th>残業</th></tr></thead>
+      <tbody>
+        ${perStaff.map(p => `
+          <tr>
+            <td><b>${escapeHtml(p.staff.name)}</b></td>
+            <td>${escapeHtml(posCfg(p.staff.position).label)}</td>
+            <td>${p.days}</td>
+            <td>${p.hours.toFixed(1)}h</td>
+            <td>${fmtYen(Math.round(p.cost))}</td>
+            <td class="${p.lateCount === 0 ? '' : 'warn'}">${p.lateCount}</td>
+            <td class="${p.earlyOutCount === 0 ? '' : 'warn'}">${p.earlyOutCount}</td>
+            <td>${p.overtimeCount}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+
+    ${trendData.length >= 2 ? `
+    <h2>週次トレンド</h2>
+    <table>
+      <thead><tr><th>週開始</th><th>売上</th><th>人件費</th><th>人件費率</th></tr></thead>
+      <tbody>
+        ${trendData.map(t => `
+          <tr>
+            <td>${t.wk}</td>
+            <td>${t.sales > 0 ? fmtYen(t.sales) : "—"}</td>
+            <td>${fmtYen(Math.round(t.cost))}</td>
+            <td class="${t.ratio === null ? '' : t.ratio <= target ? 'ok' : t.ratio <= target + 0.05 ? 'warn' : 'danger'}">
+              ${t.ratio === null ? "—" : (t.ratio * 100).toFixed(1) + "%"}
+            </td>
+          </tr>`).join("")}
+      </tbody>
+    </table>` : ""}
+
+    <div style="margin-top:8mm;font-size:9pt;color:#94a3b8;text-align:right">
+      生成: ${new Date().toLocaleString("ja-JP")} / Shifty
+    </div>`;
+  document.body.appendChild(wrap);
+}
+
+// ===== 売上連動の人件費率 (Round 20 TOP 1) =====
+function renderLaborCostRatio() {
+  const w0 = state.meta.currentWeekStart || "";
+  if (!w0) return null;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  const sales = state.meta.dailySales || {};
+  const target = state.meta.laborCostRatioTarget || 0.28;
+
+  // 今週の売上と人件費を集計
+  const weekAssignments = curAssignments();
+  const weekCost = weekAssignments.reduce((s, a) => s + (a.cost || 0), 0);
+  const weekSales = days.reduce((s, d) => s + (Number(sales[d]) || 0), 0);
+  const ratio = weekSales > 0 ? weekCost / weekSales : null;
+
+  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  const headerRow = el("div", { class: "flex items-center justify-between mb-2" }, [
+    el("div", { class: "font-semibold text-sm" }, "💰 今週の人件費率"),
+    el("button", {
+      class: "text-xs text-slate-500 hover:text-slate-700 underline decoration-dotted",
+      onclick: () => openSalesInputDialog(),
+    }, "📝 売上を入力"),
+  ]);
+  card.appendChild(headerRow);
+
+  // メインゲージ
+  if (ratio !== null) {
+    const pctRatio = ratio * 100;
+    const targetPct = target * 100;
+    const status = ratio <= target ? "good" : ratio <= target + 0.05 ? "warn" : "danger";
+    const color = status === "good" ? "#10b981" : status === "warn" ? "#f59e0b" : "#dc2626";
+    const statusLabel = status === "good" ? `✓ 目標達成` : status === "warn" ? `⚠️ やや高め` : `🚨 大幅オーバー`;
+
+    const main = el("div", { class: "space-y-2" });
+    main.innerHTML = `
+      <div class="flex items-baseline justify-between">
+        <span class="text-2xl font-bold" style="color:${color}">${pctRatio.toFixed(1)}%</span>
+        <span class="text-xs text-slate-600">目標 ${targetPct.toFixed(0)}% / ${statusLabel}</span>
+      </div>
+      <div class="gauge-bar"><div style="width:${Math.min(100, pctRatio*1.5)}%;background:${color}"></div></div>
+      <div class="grid grid-cols-2 gap-3 text-xs mt-2">
+        <div class="bg-slate-50 rounded p-2">
+          <div class="text-slate-500 text-[10px]">今週売上</div>
+          <div class="font-semibold">${fmtYen(weekSales)}</div>
+        </div>
+        <div class="bg-slate-50 rounded p-2">
+          <div class="text-slate-500 text-[10px]">今週人件費</div>
+          <div class="font-semibold">${fmtYen(Math.round(weekCost))}</div>
+        </div>
+      </div>`;
+    card.appendChild(main);
+  } else {
+    card.appendChild(el("div", { class: "text-xs text-slate-500 text-center py-3" },
+      [
+        "📊 売上を入力すると人件費率を自動計算します",
+        el("button", {
+          class: "block mx-auto mt-2 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded px-3 py-1.5 font-semibold",
+          onclick: () => openSalesInputDialog(),
+        }, "💴 売上入力 →"),
+      ]
+    ));
+  }
+
+  // 過去 8 週のトレンドグラフ
+  const allWeeks = state.weeks || {};
+  const sortedWk = Object.keys(allWeeks).sort().slice(-8);
+  if (sortedWk.length >= 2 && typeof Chart !== "undefined") {
+    const trendData = sortedWk.map(wk => {
+      const wkDays = Array.from({ length: 7 }, (_, i) => addDays(wk, i));
+      const wkSales = wkDays.reduce((s, d) => s + (Number(sales[d]) || 0), 0);
+      const wkAss = (allWeeks[wk] || {}).assignments || [];
+      const wkCost = wkAss.reduce((s, a) => s + (a.cost || 0), 0);
+      return {
+        wk,
+        sales: wkSales,
+        cost: wkCost,
+        ratio: wkSales > 0 ? wkCost / wkSales : null,
+      };
+    }).filter(x => x.ratio !== null);
+
+    if (trendData.length >= 2) {
+      const trendCard = el("div", { class: "mt-3 pt-3 border-t border-slate-100" });
+      trendCard.appendChild(el("div", { class: "text-xs font-semibold text-slate-700 mb-1" },
+        `📈 直近 ${trendData.length} 週のトレンド`));
+      const cv = el("canvas", { id: "lcr-trend-chart", style: { maxHeight: "120px" } });
+      trendCard.appendChild(cv);
+      card.appendChild(trendCard);
+      setTimeout(() => {
+        const ctx = document.getElementById("lcr-trend-chart");
+        if (!ctx) return;
+        try {
+          if (window._lcrChart) window._lcrChart.destroy();
+          window._lcrChart = new Chart(ctx, {
+            type: "line",
+            data: {
+              labels: trendData.map(x => x.wk.slice(5)),
+              datasets: [
+                {
+                  label: "人件費率",
+                  data: trendData.map(x => x.ratio * 100),
+                  borderColor: "#4f46e5",
+                  backgroundColor: "rgba(79, 70, 229, 0.1)",
+                  fill: true,
+                  tension: 0.3,
+                },
+                {
+                  label: `目標 ${(target * 100).toFixed(0)}%`,
+                  data: trendData.map(() => target * 100),
+                  borderColor: "#10b981",
+                  borderDash: [4, 4],
+                  borderWidth: 1.5,
+                  pointRadius: 0,
+                  fill: false,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: true, position: "bottom", labels: { font: { size: 9 } } } },
+              scales: {
+                y: { beginAtZero: false, ticks: { callback: v => v + "%", font: { size: 9 } } },
+                x: { ticks: { font: { size: 9 } } },
+              },
+            },
+          });
+        } catch (e) { console.warn("lcr chart failed:", e); }
+      }, 100);
+    }
+  }
+  return card;
+}
+
+function openSalesInputDialog() {
+  const w0 = state.meta.currentWeekStart || "";
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  const sales = state.meta.dailySales || {};
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "💴 日次売上入力"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    "今週 7 日分の売上 (税込/税抜どちらでも、運用統一を推奨) を入力してください。空欄は 0 として扱います。"));
+
+  const grid = el("div", { class: "space-y-1.5" });
+  for (const d of days) {
+    const dow = ["日","月","火","水","木","金","土"][dayOfWeek(d)];
+    const dowColor = dayOfWeek(d) === 0 ? "text-red-600" : dayOfWeek(d) === 6 ? "text-blue-600" : "text-slate-700";
+    const row = el("label", { class: "flex items-center gap-2" });
+    row.innerHTML = `
+      <span class="${dowColor} font-mono text-xs w-24">${d.slice(5)} (${dow})</span>
+      <input type="number" data-date="${d}" min="0" step="1000"
+        class="sales-input flex-1 border rounded-md px-3 py-1.5 text-sm" placeholder="例: 180000"
+        value="${sales[d] || ""}">
+      <span class="text-[10px] text-slate-500 w-12">円</span>`;
+    grid.appendChild(row);
+  }
+  body.appendChild(grid);
+
+  // 目標人件費率
+  body.appendChild(el("div", { class: "border-t pt-3 mt-2" }, [
+    el("label", { class: "block text-sm" }, [
+      el("span", { class: "text-slate-700" }, "目標人件費率"),
+      el("select", { id: "lcr-target", class: "ml-2 border rounded px-2 py-1 text-sm" }, [
+        el("option", { value: "0.20" }, "20% (理想・チェーン)"),
+        el("option", { value: "0.25" }, "25% (優良)"),
+        el("option", { value: "0.28" }, "28% (標準)"),
+        el("option", { value: "0.30" }, "30% (目安上限)"),
+        el("option", { value: "0.33" }, "33% (要改善)"),
+      ]),
+    ]),
+    el("div", { class: "text-[10px] text-slate-500 mt-1" },
+      "💡 飲食業界平均は 28-32%。25% 以下なら優良。"),
+  ]));
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-3 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-md font-semibold",
+      onclick: () => {
+        state.meta.dailySales = state.meta.dailySales || {};
+        body.querySelectorAll(".sales-input").forEach(inp => {
+          const d = inp.getAttribute("data-date");
+          const v = Number(inp.value) || 0;
+          if (v > 0) state.meta.dailySales[d] = v;
+          else delete state.meta.dailySales[d];
+        });
+        const tgt = Number(document.getElementById("lcr-target").value) || 0.28;
+        state.meta.laborCostRatioTarget = tgt;
+        persist(); closeModal(); render();
+        toast("✓ 売上データと目標を保存しました", "success");
+      },
+    }, "💾 保存"),
+  ]));
+  modal(body);
+  // 目標値を select で初期選択
+  setTimeout(() => {
+    const sel = document.getElementById("lcr-target");
+    if (sel) sel.value = String(state.meta.laborCostRatioTarget || 0.28);
+  }, 0);
+}
+
 // ===== 月次労務リスク (Round 15 TOP 1) =====
 function renderMonthlyLaborRisk() {
   // 当月キー (現在週の月を採用)
@@ -1115,6 +1644,12 @@ function viewDashboard() {
         action: () => { setTab("export"); }, actionLabel: "給与CSV確認",
       });
     }
+  }
+
+  // 売上連動の人件費率管理 (Round 20 TOP 1)
+  if (state.staff.length > 0) {
+    const lcrCard = renderLaborCostRatio();
+    if (lcrCard) wrap.appendChild(lcrCard);
   }
 
   // 月次労務リスク (Round 15 TOP 1) — 当月の累積時間と労務上限への接近度
@@ -4323,6 +4858,10 @@ function viewExport() {
       onclick: () => openPayrollCsvDialog(), title: "月次の給与計算用 CSV" }, "💴 給与計算 CSV"),
     el("button", { class: "text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-md px-3 py-1.5",
       onclick: openPrintView }, "🖨 印刷ビュー"),
+    el("button", { class: "text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-md px-3 py-1.5",
+      onclick: () => openWeeklyReport(), title: "店舗管理用の今週サマリレポート" }, "📊 週次レポート"),
+    el("button", { class: "text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-md px-3 py-1.5",
+      onclick: () => openMonthlyReport(), title: "月次会議用の月次レポート" }, "📈 月次レポート"),
     el("button", { class: "text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-1.5",
       onclick: openLineNotificationDialog }, "💬 LINE通知文を作成"),
   ]));
@@ -5534,10 +6073,12 @@ async function loadAndRender() {
 // ===== Onboarding wizard =====
 function showOnboarding() {
   let step = 0;
+  const BUSINESS_TYPES = (window.ShiftyData || {}).BUSINESS_TYPES || {};
+  const SESSION_PRESETS = (window.ShiftyData || {}).SESSION_PRESETS || {};
   const STEPS = [
     {
       title: "👋 Shifty へようこそ",
-      desc: "30 分で初期セットアップが完了します。<br>順番にご案内しますので、わからなければ「スキップ」もOKです。",
+      desc: "3 分で初期セットアップが完了します。",
       content() {
         return el("div", { class: "text-sm text-slate-600 space-y-2" }, [
           el("p", {}, "Shifty は飲食店向けの AI シフト自動作成サービスです。"),
@@ -5545,11 +6086,81 @@ function showOnboarding() {
             el("li", {}, "店舗・スタッフ・営業時間を設定"),
             el("li", {}, "スタッフから希望をスマホで収集"),
             el("li", {}, "AI が最適なシフトを 5 秒で生成"),
-            el("li", {}, "確定 → スタッフへ通知"),
+            el("li", {}, "確定 → 打刻 → 月次給与計算"),
           ]),
           el("p", { class: "bg-blue-50 border border-blue-200 rounded p-3 text-blue-900" },
-            "次のステップで「実データで始める」か「サンプルデータで試す」か選べます。"),
+            "次のステップでお店の業態を選ぶと、セッション・必要人数・労務ルール・人件費率目標を一括で最適化します。"),
         ]);
+      },
+    },
+    {
+      title: "🏪 業態を選択 (Round 20)",
+      desc: "お店の業態に合わせて、シフト枠・必要人数・労務ルール・AI 重みなどを一括設定します。後から設定タブで個別変更可能。",
+      content() {
+        const wrap = el("div", { class: "space-y-2 max-h-72 overflow-y-auto" });
+        const current = state.meta.businessType || null;
+        for (const [key, bt] of Object.entries(BUSINESS_TYPES)) {
+          const isSelected = key === current;
+          const card = el("button", {
+            class: `block w-full text-left border-2 rounded-md p-3 transition ${isSelected ? "border-brand-600 bg-brand-50" : "border-slate-200 hover:border-slate-400"}`,
+            "data-bt-key": key,
+            onclick: () => {
+              wrap.querySelectorAll("[data-bt-key]").forEach(b => {
+                b.className = "block w-full text-left border-2 rounded-md p-3 transition border-slate-200 hover:border-slate-400";
+              });
+              card.className = "block w-full text-left border-2 rounded-md p-3 transition border-brand-600 bg-brand-50";
+              card.setAttribute("data-selected", "1");
+              wrap.querySelectorAll("[data-bt-key]").forEach(b => {
+                if (b !== card) b.removeAttribute("data-selected");
+              });
+            },
+          });
+          if (isSelected) card.setAttribute("data-selected", "1");
+          card.innerHTML = `
+            <div class="font-semibold text-sm">${escapeHtml(bt.label)}</div>
+            <div class="text-xs text-slate-600 mt-0.5">${escapeHtml(bt.description)}</div>
+            <div class="text-[10px] text-slate-500 mt-1">
+              人件費率目標 ${(bt.laborCostRatioTarget * 100).toFixed(0)}% / 週上限 ${bt.laborRules.maxHoursPerWeek}h / ${bt.payrollSettings.nightAllowanceEnabled ? "深夜手当 ON" : "深夜手当 OFF"}
+            </div>`;
+          wrap.appendChild(card);
+        }
+        return wrap;
+      },
+      onNext() {
+        const selected = document.querySelector("[data-bt-key][data-selected]");
+        const key = selected?.getAttribute("data-bt-key");
+        if (!key || !BUSINESS_TYPES[key]) return;
+        const bt = BUSINESS_TYPES[key];
+        // 業態テンプレ適用 (スナップショット保存後)
+        try { createSnapshot("manual", `業態テンプレ適用前 (${bt.label})`); } catch (_) {}
+        state.meta.businessType = key;
+        // セッション
+        if (bt.sessionPreset && SESSION_PRESETS[bt.sessionPreset]) {
+          state.meta.sessions = JSON.parse(JSON.stringify(SESSION_PRESETS[bt.sessionPreset].sessions));
+          // 必要人数マトリクスをデフォルト構築
+          const newPlan = {};
+          for (const sess of state.meta.sessions) {
+            newPlan[sess.id] = {};
+            for (let dow = 0; dow < 7; dow++) {
+              newPlan[sess.id][dow] = {};
+              for (const pos of state.meta.positions) {
+                newPlan[sess.id][dow][pos.id] = bt.defaultStaffCount[pos.id] != null ? bt.defaultStaffCount[pos.id] : 1;
+              }
+            }
+          }
+          state.meta.staffingPlan = newPlan;
+        }
+        // 労務ルール
+        state.meta.laborRules = { ...bt.laborRules };
+        // AI 重み
+        state.meta.algorithmWeights = { ...bt.weights };
+        // 給与設定
+        state.meta.payrollSettings = { ...bt.payrollSettings };
+        // 人件費率目標
+        state.meta.laborCostRatioTarget = bt.laborCostRatioTarget;
+        // 既存週のスロットを再生成
+        regenerateCurSlots();
+        toast(`✓ 業態「${bt.label}」を適用しました`, "success", 4000);
       },
     },
     {

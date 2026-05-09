@@ -24,6 +24,70 @@
     { id: "dinner", label: "ディナー", startTime: "17:00", endTime: "22:00", icon: "🌙" },
   ];
 
+  // 業態テンプレ (Round 20 TOP 3) — 業種選択でセッション/必要人数/労務/重み を一括設定
+  const BUSINESS_TYPES = {
+    cafe: {
+      label: "☕ カフェ",
+      description: "朝〜夕方の通し営業。ピーク 12-14 / 15-17。少人数運用",
+      sessionPreset: "cafe_allday",
+      defaultStaffCount: { manager: 1, hall: 1, kitchen: 1, cashier: 0 },
+      laborRules: { maxHoursPerWeek: 28, maxHoursPerDay: 8, maxConsecutiveDays: 5, minRestDaysPerWeek: 1, minRestHoursBetweenShifts: 11 },
+      weights: { preference: 0.45, positionMatch: 0.10, fairness: 0.20, cost: 0.15, skill: 0.10 },
+      laborCostRatioTarget: 0.30,
+      payrollSettings: { nightAllowanceEnabled: false, nightStartHour: 22, nightRate: 1.25 },
+    },
+    izakaya: {
+      label: "🍶 居酒屋・バー",
+      description: "夜営業中心。18:00 オープン〜深夜。深夜手当ありで高単価勤務",
+      sessionPreset: "izakaya",
+      defaultStaffCount: { manager: 1, hall: 2, kitchen: 1, cashier: 0 },
+      laborRules: { maxHoursPerWeek: 40, maxHoursPerDay: 10, maxConsecutiveDays: 5, minRestDaysPerWeek: 1, minRestHoursBetweenShifts: 11 },
+      weights: { preference: 0.40, positionMatch: 0.20, fairness: 0.15, cost: 0.15, skill: 0.10 },
+      laborCostRatioTarget: 0.28,
+      payrollSettings: { nightAllowanceEnabled: true, nightStartHour: 22, nightRate: 1.25 },
+    },
+    ramen: {
+      label: "🍜 ラーメン・定食店",
+      description: "ランチ + ディナー (早めクローズ)。回転率高、ピーク 12-14 と 19-21",
+      sessionPreset: "detailed_peak",
+      defaultStaffCount: { manager: 1, hall: 2, kitchen: 2, cashier: 0 },
+      laborRules: { maxHoursPerWeek: 35, maxHoursPerDay: 9, maxConsecutiveDays: 5, minRestDaysPerWeek: 1, minRestHoursBetweenShifts: 11 },
+      weights: { preference: 0.35, positionMatch: 0.25, fairness: 0.15, cost: 0.15, skill: 0.10 },
+      laborCostRatioTarget: 0.27,
+      payrollSettings: { nightAllowanceEnabled: false, nightStartHour: 22, nightRate: 1.25 },
+    },
+    family_restaurant: {
+      label: "🍽 ファミリーレストラン",
+      description: "朝〜深夜の通し営業。早番/中番/遅番の 3 交代",
+      sessionPreset: "early_mid_late",
+      defaultStaffCount: { manager: 1, hall: 3, kitchen: 2, cashier: 1 },
+      laborRules: { maxHoursPerWeek: 40, maxHoursPerDay: 10, maxConsecutiveDays: 5, minRestDaysPerWeek: 1, minRestHoursBetweenShifts: 11 },
+      weights: { preference: 0.35, positionMatch: 0.20, fairness: 0.20, cost: 0.15, skill: 0.10 },
+      laborCostRatioTarget: 0.30,
+      payrollSettings: { nightAllowanceEnabled: true, nightStartHour: 22, nightRate: 1.25 },
+    },
+    fast_food: {
+      label: "🍔 ファストフード",
+      description: "通し営業・短時間多人数。ピーク制が強い",
+      sessionPreset: "hourly",
+      defaultStaffCount: { manager: 1, hall: 2, kitchen: 2, cashier: 1 },
+      laborRules: { maxHoursPerWeek: 28, maxHoursPerDay: 8, maxConsecutiveDays: 4, minRestDaysPerWeek: 2, minRestHoursBetweenShifts: 11 },
+      weights: { preference: 0.30, positionMatch: 0.15, fairness: 0.25, cost: 0.20, skill: 0.10 },
+      laborCostRatioTarget: 0.32,
+      payrollSettings: { nightAllowanceEnabled: false, nightStartHour: 22, nightRate: 1.25 },
+    },
+    custom: {
+      label: "⚙️ カスタム (詳細設定)",
+      description: "あとで自分で詳細設定する。デフォルト設定 (シンプル ランチ+ディナー)",
+      sessionPreset: "simple_lunch_dinner",
+      defaultStaffCount: { manager: 1, hall: 1, kitchen: 1, cashier: 1 },
+      laborRules: { maxHoursPerWeek: 40, maxHoursPerDay: 12, maxConsecutiveDays: 5, minRestDaysPerWeek: 1, minRestHoursBetweenShifts: 8 },
+      weights: { preference: 0.40, positionMatch: 0.15, fairness: 0.20, cost: 0.15, skill: 0.10 },
+      laborCostRatioTarget: 0.28,
+      payrollSettings: { nightAllowanceEnabled: false, nightStartHour: 22, nightRate: 1.25 },
+    },
+  };
+
   // セッションプリセット (Round 18 TOP 2) — 飲食店の典型パターン
   const SESSION_PRESETS = {
     simple_lunch_dinner: {
@@ -363,6 +427,13 @@
     if (!Array.isArray(state.meta.snapshots)) state.meta.snapshots = [];
     // LINE Notify (Round 17 TOP 2) — 店舗デフォルトの token
     if (state.meta.lineNotifyEnabled === undefined) state.meta.lineNotifyEnabled = false;
+    // 売上データ (Round 20 TOP 1) — 日次売上を保存
+    // dailySales[YYYY-MM-DD] = number (円)
+    if (!state.meta.dailySales || typeof state.meta.dailySales !== "object") state.meta.dailySales = {};
+    // 目標人件費率 (Round 20 TOP 1) — 業界標準は 25-30%
+    if (state.meta.laborCostRatioTarget === undefined) state.meta.laborCostRatioTarget = 0.28;
+    // 業態 (Round 20 TOP 3) — オンボーディング時に選択
+    if (state.meta.businessType === undefined) state.meta.businessType = null;
     // 自動アップグレード: 旧デフォルト 8h は飲食店現実に合わずカバー率が壊滅するため 12h に引き上げ
     // (lunch 11-15 + dinner 17-22 = 9h を許可。意図的に 8h 設定済みの顧客がいないので無条件で書き換え)
     if (state.meta.laborRules.maxHoursPerDay <= 8) state.meta.laborRules.maxHoursPerDay = 12;
@@ -514,7 +585,7 @@
 
   window.ShiftyData = {
     DAY_LABELS,
-    DEFAULT_POSITIONS, DEFAULT_SESSIONS, defaultStaffingPlan, SESSION_PRESETS,
+    DEFAULT_POSITIONS, DEFAULT_SESSIONS, defaultStaffingPlan, SESSION_PRESETS, BUSINESS_TYPES,
     uid, todayMonday, fmtDate, addDays, dayOfWeek,
     timeToMin, calcHours, timeOverlap, timeContains,
     buildSlots, newWeek, ensureWeek, listWeeks,
