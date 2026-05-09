@@ -1041,6 +1041,103 @@ function openSimulationDialog() {
   modal(body);
 }
 
+// ===== スタッフ詳細展開行 (Round 31 TOP 3) =====
+function toggleStaffDetailRow(tr, staff) {
+  const next = tr.nextSibling;
+  if (next && next.classList && next.classList.contains("staff-detail-row")) {
+    next.remove();
+    return;
+  }
+  // 過去シフト集計 (4 週分)
+  const allWeeks = state.weeks || {};
+  const sortedWk = Object.keys(allWeeks).sort().slice(-8);
+  const monthKey = (state.meta.currentWeekStart || "").slice(0, 7);
+  let monthHours = 0, monthCost = 0, monthShifts = 0;
+  let lateCount = 0, clockInCount = 0, clockableShifts = 0;
+  const recent = [];
+  for (const wk of sortedWk) {
+    const wd = allWeeks[wk];
+    if (!wd.assignments) continue;
+    for (const a of wd.assignments) {
+      if (a.staffId !== staff.id) continue;
+      // 月次集計
+      if ((a.date || "").startsWith(monthKey)) {
+        const h = calcHours(a.startTime, a.endTime);
+        monthHours += h;
+        monthCost += a.cost || 0;
+        monthShifts++;
+      }
+      // 打刻率
+      if (wd.status === "published") {
+        clockableShifts++;
+        if (a.clockIn) {
+          clockInCount++;
+          // 遅刻判定
+          try {
+            const inDt = new Date(a.clockIn);
+            const sched = new Date(`${a.date}T${a.startTime}:00`);
+            if ((inDt - sched) / 60000 > 5) lateCount++;
+          } catch (_) {}
+        }
+        recent.push(a);
+      }
+    }
+  }
+  recent.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const recentDisplay = recent.slice(0, 5);
+
+  // 希望提出率
+  let prefSubmittedWeeks = 0;
+  let prefWeeksTotal = 0;
+  for (const wk of sortedWk) {
+    const wd = allWeeks[wk];
+    if (wd.status !== "published") continue;
+    prefWeeksTotal++;
+    const has = (wd.preferences || []).some(p => p.staffId === staff.id);
+    if (has) prefSubmittedWeeks++;
+  }
+  const submitRate = prefWeeksTotal > 0 ? prefSubmittedWeeks / prefWeeksTotal : 0;
+  const clockRate = clockableShifts > 0 ? clockInCount / clockableShifts : 0;
+
+  const detailTr = document.createElement("tr");
+  detailTr.className = "staff-detail-row bg-slate-50 dark:bg-slate-800/50";
+  const td = document.createElement("td");
+  td.colSpan = 9;
+  td.className = "px-4 py-3";
+  td.innerHTML = `
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+      <div class="bg-white dark:bg-slate-700 rounded p-2">
+        <div class="text-[10px] text-slate-500">${escapeHtml(monthKey)} 出勤</div>
+        <div class="text-base font-bold">${monthShifts} 件 / ${monthHours.toFixed(1)}h</div>
+      </div>
+      <div class="bg-white dark:bg-slate-700 rounded p-2">
+        <div class="text-[10px] text-slate-500">${escapeHtml(monthKey)} 給与</div>
+        <div class="text-base font-bold">${fmtYen(Math.round(monthCost))}</div>
+      </div>
+      <div class="bg-white dark:bg-slate-700 rounded p-2">
+        <div class="text-[10px] text-slate-500">希望提出率 (過去 ${prefWeeksTotal} 週)</div>
+        <div class="text-base font-bold ${submitRate >= 0.8 ? "text-emerald-600" : submitRate >= 0.5 ? "text-amber-600" : "text-red-600"}">${Math.round(submitRate * 100)}%</div>
+      </div>
+      <div class="bg-white dark:bg-slate-700 rounded p-2">
+        <div class="text-[10px] text-slate-500">打刻率 / 遅刻</div>
+        <div class="text-base font-bold">${Math.round(clockRate * 100)}% <span class="text-xs text-slate-500">/ ${lateCount} 回遅刻</span></div>
+      </div>
+    </div>
+    ${recentDisplay.length > 0 ? `
+    <div class="mt-3">
+      <div class="text-[10px] text-slate-500 mb-1">最近の確定済シフト</div>
+      <div class="flex flex-wrap gap-1">
+        ${recentDisplay.map(a => {
+          const dow = ["日","月","火","水","木","金","土"][dayOfWeek(a.date)];
+          return `<span class="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded px-2 py-0.5 text-[10px]">${escapeHtml(a.date.slice(5))}(${dow}) ${escapeHtml(a.startTime)}〜${escapeHtml(a.endTime)} ${escapeHtml(posCfg(a.position).label)}</span>`;
+        }).join("")}
+      </div>
+    </div>` : ""}
+  `;
+  detailTr.appendChild(td);
+  tr.parentNode.insertBefore(detailTr, tr.nextSibling);
+}
+
 // ===== 設定検索 (Round 30) =====
 function filterSettingsBySearch(query) {
   const q = (query || "").toLowerCase().trim();
@@ -2565,6 +2662,12 @@ function viewHome() {
   }
   if (detailsBody.children.length > 0) wrap.appendChild(details);
 
+  // Round 31 TOP 2: 今週のシフト要約 (確定済みシフトがあれば表示)
+  if (curAssignments().length > 0) {
+    const summaryCard = renderWeeklyShiftSummary();
+    if (summaryCard) wrap.appendChild(summaryCard);
+  }
+
   // 本日の出勤者 (重要なので折りたたみではなく表示)
   if (dashboardWidgetOn("todayAttendance")) {
     renderTodayAttendance(wrap);
@@ -2579,6 +2682,63 @@ function viewHome() {
 }
 
 // 既存の viewDashboard を viewHome に名前変更したので、本来の処理を抽出
+// Round 31 TOP 2: 今週のシフト要約
+function renderWeeklyShiftSummary() {
+  const w0 = state.meta.currentWeekStart;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  const ass = curAssignments();
+  if (ass.length === 0) return null;
+
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 cursor-pointer hover:border-brand-400 transition" });
+  card.onclick = () => setTab("schedule");
+  card.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
+    el("div", { class: "font-semibold text-sm" }, `📅 今週のシフト概要 (${curStatus() === "published" ? "✓ 確定済" : "📝 下書き"})`),
+    el("div", { class: "text-xs text-brand-600 hover:underline" }, "詳細 →"),
+  ]));
+
+  // 日別の出勤者数バー
+  const grid = el("div", { class: "grid grid-cols-7 gap-1" });
+  for (const d of days) {
+    const dayAss = ass.filter(a => a.date === d);
+    const dow = ["日","月","火","水","木","金","土"][dayOfWeek(d)];
+    const dowColor = dayOfWeek(d) === 0 ? "text-red-600" : dayOfWeek(d) === 6 ? "text-blue-600" : "text-slate-600";
+    const intensity = dayAss.length;
+    const barHeight = Math.min(40, intensity * 4 + 8);
+    const cell = el("div", { class: "flex flex-col items-center text-[10px]" }, [
+      el("div", { class: "w-full bg-slate-100 dark:bg-slate-700 rounded h-12 flex items-end overflow-hidden" }, [
+        el("div", {
+          class: "w-full bg-gradient-to-t from-brand-500 to-brand-300",
+          style: { height: `${barHeight}px` },
+        }),
+      ]),
+      el("div", { class: `mt-1 ${dowColor}` }, `${d.slice(8)} (${dow})`),
+      el("div", { class: "font-bold" }, `${intensity}名`),
+    ]);
+    grid.appendChild(cell);
+  }
+  card.appendChild(grid);
+
+  // 主要メトリクス
+  const totalH = ass.reduce((s, a) => s + calcHours(a.startTime, a.endTime), 0);
+  const totalCost = ass.reduce((s, a) => s + (a.cost || 0), 0);
+  card.appendChild(el("div", { class: "grid grid-cols-3 gap-2 mt-3 text-xs" }, [
+    el("div", { class: "bg-slate-50 dark:bg-slate-700 rounded p-1.5 text-center" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "シフト数"),
+      el("div", { class: "font-bold" }, `${ass.length} 件`),
+    ]),
+    el("div", { class: "bg-slate-50 dark:bg-slate-700 rounded p-1.5 text-center" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "合計時間"),
+      el("div", { class: "font-bold" }, `${totalH.toFixed(0)}h`),
+    ]),
+    el("div", { class: "bg-slate-50 dark:bg-slate-700 rounded p-1.5 text-center" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "人件費"),
+      el("div", { class: "font-bold" }, fmtYen(Math.round(totalCost))),
+    ]),
+  ]));
+
+  return card;
+}
+
 function renderTodayAttendance(wrap) {
   const todayStr = new Date().toISOString().slice(0,10);
   let todayAssignments = curAssignments().filter(a => a.date === todayStr);
@@ -3719,9 +3879,15 @@ function viewStaff() {
       },
     });
     const archMark = s.archived ? `<span class="text-[9px] bg-slate-200 text-slate-600 rounded px-1 ml-1">📁 アーカイブ</span>` : "";
+    // Round 31 TOP 3: 名前部分をクリック可能に (詳細展開)
     tr.innerHTML = `
       <td class="px-2 py-2.5 text-center text-slate-400 cursor-move" title="ドラッグで並び替え">⋮⋮</td>
-      <td class="px-3 py-2.5 font-medium ${s.archived ? "text-slate-400" : ""}">${escapeHtml(s.name)}${archMark}</td>
+      <td class="px-3 py-2.5 font-medium ${s.archived ? "text-slate-400" : ""}">
+        <button class="staff-row-expand text-left hover:underline" data-staff-id="${escapeAttr(s.id)}" title="クリックで月次実績を表示">
+          ${escapeHtml(s.name)}${archMark}
+          <span class="text-[10px] text-slate-400 ml-1">▼</span>
+        </button>
+      </td>
       <td class="px-3 py-2.5">${posBadge(s.position)}</td>
       <td class="px-3 py-2.5">${s.canCover.length ? s.canCover.map(p => escapeHtml(posCfg(p).label)).join("・") : "<span class=\"text-slate-400\">—</span>"}</td>
       <td class="px-3 py-2.5 text-right">${fmtYen(s.hourlyWage)}</td>
@@ -3766,6 +3932,11 @@ function viewStaff() {
     ]);
     tr.appendChild(td);
     tbody.appendChild(tr);
+    // Round 31 TOP 3: 名前ボタンの click → 詳細行展開
+    const expandBtn = tr.querySelector(".staff-row-expand");
+    if (expandBtn) {
+      expandBtn.onclick = () => toggleStaffDetailRow(tr, s);
+    }
   });
   wrap.appendChild(table);
   return wrap;
@@ -6705,6 +6876,76 @@ function autoGenerate() {
   }
   if (curStatus() === "published") { toast("確定済の週は再生成できません。先に「下書きに戻す」してください。", "error"); return; }
   if (curSlots().length === 0) { toast("シフト枠がありません。設定タブの「必要人数」で定義してください。", "error"); return; }
+  // Round 31 TOP 1: 既存アサインがある場合はプレビュー → 確認モーダル
+  if (curAssignments().length > 0) {
+    openAutoGeneratePreviewDialog();
+    return;
+  }
+  // 初回生成は即実行
+  runAutoGenerate();
+}
+
+// Round 31 TOP 1: AI 生成プレビュー
+function openAutoGeneratePreviewDialog() {
+  const slotN = curSlots().reduce((s, x) => s + x.requiredCount, 0);
+  const staffN = state.staff.filter(s => !s.archived).length;
+  const submittedN = state.staff.filter(s => !s.archived && curPrefs().some(p => p.staffId === s.id)).length;
+  // 簡易予測 (ヒューリスティック)
+  const expCoverage = Math.min(100, Math.round((Math.min(staffN, slotN) / slotN) * 100));
+  const prefRate = staffN > 0 ? submittedN / staffN : 0;
+  const expPrefSat = Math.min(95, Math.round(60 + prefRate * 30));
+  // 平均時給 × 平均時間 × slotN
+  const avgWage = state.staff.length > 0 ? state.staff.reduce((s, x) => s + x.hourlyWage, 0) / state.staff.length : 1100;
+  const avgHours = curSlots().length > 0 ? curSlots().reduce((s, x) => s + calcHours(x.startTime, x.endTime), 0) / curSlots().length : 5;
+  const expCost = Math.round(avgWage * avgHours * slotN);
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🤖 AI シフト生成プレビュー"));
+  body.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
+    "既存のアサインを上書きして再生成します。実行前に予測値を確認してください。"));
+
+  body.appendChild(el("div", { class: "grid grid-cols-2 gap-2" }, [
+    el("div", { class: "bg-slate-50 dark:bg-slate-800 rounded p-2.5" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "シフト枠"),
+      el("div", { class: "font-bold text-base" }, `${slotN} 枠 / ${staffN} 名`),
+    ]),
+    el("div", { class: "bg-slate-50 dark:bg-slate-800 rounded p-2.5" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "希望提出"),
+      el("div", { class: "font-bold text-base" }, `${submittedN}/${staffN} 名`),
+    ]),
+    el("div", { class: "bg-emerald-50 dark:bg-emerald-900/30 rounded p-2.5" }, [
+      el("div", { class: "text-[10px] text-emerald-700 dark:text-emerald-400" }, "予測カバー率"),
+      el("div", { class: "font-bold text-base text-emerald-700 dark:text-emerald-400" }, `${expCoverage}%`),
+    ]),
+    el("div", { class: "bg-blue-50 dark:bg-blue-900/30 rounded p-2.5" }, [
+      el("div", { class: "text-[10px] text-blue-700 dark:text-blue-400" }, "予測希望充足"),
+      el("div", { class: "font-bold text-base text-blue-700 dark:text-blue-400" }, `~${expPrefSat}%`),
+    ]),
+    el("div", { class: "bg-amber-50 dark:bg-amber-900/30 rounded p-2.5 col-span-2" }, [
+      el("div", { class: "text-[10px] text-amber-700 dark:text-amber-400" }, "予測人件費"),
+      el("div", { class: "font-bold text-base text-amber-700 dark:text-amber-400" }, fmtYen(expCost) + " (週)"),
+      el("div", { class: "text-[10px] text-slate-500" }, `予算 ${fmtYen(state.meta.weeklyBudget || 0)} ${expCost > (state.meta.weeklyBudget || 0) ? "・⚠️ 超過の可能性" : "内"}`),
+    ]),
+  ]));
+
+  // AI 戦略の確認
+  const aw = state.meta.algorithmWeights || {};
+  const top = Object.entries(aw).sort((a, b) => b[1] - a[1]).slice(0, 2);
+  const topLabels = { preference: "希望充足", positionMatch: "ポジション", fairness: "公平性", cost: "コスト", skill: "スキル", skillMix: "スキル構成" };
+  body.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400 bg-purple-50 dark:bg-purple-900/30 rounded p-2 mt-2" },
+    `🎯 重視している指標: ${top.map(([k, v]) => `${topLabels[k] || k} ${(v * 100).toFixed(0)}%`).join(" / ")} (シフトタブのプルダウンで切替)`));
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-semibold",
+      onclick: () => { closeModal(); runAutoGenerate(); },
+    }, "🤖 実行"),
+  ]));
+  modal(body);
+}
+
+function runAutoGenerate() {
 
   // Round 9: AI 生成中のプログレスモーダル表示
   const slotN = curSlots().reduce((s, x) => s + x.requiredCount, 0);
