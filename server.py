@@ -2901,6 +2901,9 @@ def api_owner_aggregate():
     email = session.get("owner_email")
     if not email or not session.get("authenticated"):
         return jsonify({"error": "not_authenticated"}), 401
+    # Round 33 (Sec-4): 重い処理なのでレート制限 (60s 内に 30 回)
+    if _rate_check("owner_aggregate", (30, 60)):
+        return jsonify({"error": "rate_limited", "retry_after": 60}), 429
     tm = get_tenant_manager()
     tenants = tm.list_by_email(email)
     out = []

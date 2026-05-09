@@ -30,7 +30,26 @@ function el(tag, attrs = {}, children = []) {
 }
 function fmtYen(n) { return "¥" + Math.round(n).toLocaleString(); }
 function fmtPct(r) { return Math.round(r * 100) + "%"; }
-function persist() { saveState(state).catch(() => {}); }
+// Round 33 (Perf-3): persist debounce — 連続編集の API 往復を集約
+let _persistTimer = null;
+let _persistPending = false;
+function persist(opts) {
+  _persistPending = true;
+  if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
+  if (opts && opts.immediate) { _flushPersist(); return; }
+  _persistTimer = setTimeout(_flushPersist, 400);
+}
+function _flushPersist() {
+  if (!_persistPending) return;
+  _persistPending = false;
+  if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
+  saveState(state).catch(() => {});
+}
+// 画面離脱時 / タブ非表示時は flush して取りこぼし防止
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", () => _flushPersist());
+  window.addEventListener("visibilitychange", () => { if (document.hidden) _flushPersist(); });
+}
 function toast(msg, type = "", duration = 3500) {
   const t = el("div", { class: `toast-item ${type}`, role: "alert", "aria-live": "polite" }, msg);
   $("#toast").appendChild(t);
@@ -4069,9 +4088,14 @@ function viewStaff() {
       value: window._staffSearchQuery || "",
       "aria-label": "スタッフ名検索",
     });
+    // Round 33 (Perf-1): debounce で render() 連発を抑制
+    let _searchTimer = null;
     searchInput.oninput = () => {
-      window._staffSearchQuery = searchInput.value;
-      render();
+      if (_searchTimer) clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(() => {
+        window._staffSearchQuery = searchInput.value;
+        render();
+      }, 150);
     };
     searchRow.appendChild(searchInput);
 
@@ -5641,6 +5665,26 @@ function renderCalendar() {
   const isMobile = window.innerWidth < 640;
   // モバイル時は縦スタック表示
   if (isMobile) return renderCalendarMobile(days);
+
+  // Round 33 (Perf-2): セル単位のインデックスを事前構築
+  // O(sessions × days × positions × N) → O(N) lookup に
+  const ass = curAssignments();
+  const slots = curSlots();
+  const assByCellPos = new Map(); // key: `${date}|${startTime}|${pos}` → [a]
+  for (const a of ass) {
+    const key = `${a.date}|${a.startTime}|${a.position}`;
+    let arr = assByCellPos.get(key); if (!arr) { arr = []; assByCellPos.set(key, arr); }
+    arr.push(a);
+  }
+  const slotsByCell = new Map(); // key: `${date}|${startTime}` → [slot]
+  for (const s of slots) {
+    const key = `${s.date}|${s.startTime}`;
+    let arr = slotsByCell.get(key); if (!arr) { arr = []; slotsByCell.set(key, arr); }
+    arr.push(s);
+  }
+  const staffById = new Map(state.staff.map(s => [s.id, s]));
+  const hasAssignments = ass.length > 0;
+
   const grid = el("div", { class: "cal-grid" });
   grid.appendChild(el("div", { class: "cal-cell head" }, ""));
   for (const d of days) {
@@ -5662,11 +5706,11 @@ function renderCalendar() {
     ]));
     for (const d of days) {
       const cell = el("div", { class: "cal-cell" });
-      const dayAssignments = curAssignments().filter(a => a.date === d && a.startTime === sess.startTime);
+      const cellKey = `${d}|${sess.startTime}`;
       for (const pos of state.meta.positions) {
-        const list = dayAssignments.filter(a => a.position === pos.id);
+        const list = assByCellPos.get(`${cellKey}|${pos.id}`) || [];
         list.forEach(a => {
-          const s = state.staff.find(x => x.id === a.staffId);
+          const s = staffById.get(a.staffId);
           const cfg = posCfg(pos.id);
           const editable = curStatus() === "draft";
           const isSwapSource = swapModeActive && swapModeSourceId === a.id;
@@ -5694,11 +5738,11 @@ function renderCalendar() {
           cell.appendChild(chip);
         });
       }
-      const slotsInCell = curSlots().filter(s => s.date === d && s.startTime === sess.startTime);
+      const slotsInCell = slotsByCell.get(cellKey) || [];
       slotsInCell.forEach(slot => {
-        const filledN = dayAssignments.filter(a => a.position === slot.position).length;
+        const filledN = (assByCellPos.get(`${cellKey}|${slot.position}`) || []).length;
         const missing = slot.requiredCount - filledN;
-        if (missing > 0 && curAssignments().length > 0) {
+        if (missing > 0 && hasAssignments) {
           // Round 21 TOP 2: 不足表示 + クイック追加ボタン
           const shortRow = el("div", { class: "text-[10px] mt-0.5 flex items-center justify-between gap-1 bg-red-50 rounded px-1 py-0.5" });
           shortRow.appendChild(el("span", { class: "text-red-600" },
@@ -5989,7 +6033,7 @@ function openPrintViewShop() {
   }
   html += `</tr></thead><tbody>`;
   for (const sess of state.meta.sessions) {
-    html += `<tr><td><b>${escapeHtml(sess.label)}</b><br><span class="pos">${sess.startTime}〜${sess.endTime}</span></td>`;
+    html += `<tr><td><b>${escapeHtml(sess.label)}</b><br><span class="pos">${escapeHtml(sess.startTime)}〜${escapeHtml(sess.endTime)}</span></td>`;
     for (const d of days) {
       const list = curAssignments().filter(a =>
         a.date === d && a.startTime === sess.startTime && a.endTime === sess.endTime
@@ -6107,7 +6151,7 @@ function openPrintViewDetail() {
       const pos = positions[pi];
       html += `<tr>`;
       if (pi === 0) {
-        html += `<td rowspan="${positions.length}" style="vertical-align:middle">${escapeHtml(sess.label)}<br><span style="font-size:8pt;color:#555">${sess.startTime}〜${sess.endTime}</span></td>`;
+        html += `<td rowspan="${positions.length}" style="vertical-align:middle">${escapeHtml(sess.label)}<br><span style="font-size:8pt;color:#555">${escapeHtml(sess.startTime)}〜${escapeHtml(sess.endTime)}</span></td>`;
       }
       html += `<td class="print-pos-cell">${escapeHtml(pos.label)}</td>`;
       for (const d of days) {
@@ -6408,7 +6452,8 @@ function renderCalendarMobile(days) {
         continue;
       }
       const sessHead = el("div", { class: "text-xs font-semibold text-slate-600 mt-2 flex items-center gap-1" });
-      sessHead.innerHTML = `<span>${sess.icon || ""}</span><span>${escapeHtml(sess.label)}</span><span class="text-slate-400">${sess.startTime}〜${sess.endTime}</span>`;
+      // Round 33 (Sec-2): sess.icon/startTime/endTime もエスケープ
+      sessHead.innerHTML = `<span>${escapeHtml(sess.icon || "")}</span><span>${escapeHtml(sess.label)}</span><span class="text-slate-400">${escapeHtml(sess.startTime)}〜${escapeHtml(sess.endTime)}</span>`;
       dayCard.appendChild(sessHead);
       // 未充足チェック
       const slotsInCell = curSlots().filter(s => s.date === d && s.startTime === sess.startTime);
@@ -8961,12 +9006,19 @@ async function initShopSwitcher() {
         if (isOpen) dd.classList.add("hidden");
         else { dd.classList.remove("hidden"); btn.setAttribute("aria-expanded", "true"); }
       };
-      document.addEventListener("click", (e) => {
-        if (!wrapEl.contains(e.target)) {
-          dd.classList.add("hidden");
-          btn.setAttribute("aria-expanded", "false");
-        }
-      });
+      // Round 33 (Perf-6): リスナー蓄積を防ぐため module-level 1 個のみ登録
+      if (!window._shopSwitcherClickHandlerAttached) {
+        document.addEventListener("click", (e) => {
+          const w = document.getElementById("shopSwitcher");
+          if (w && !w.contains(e.target)) {
+            const ddx = document.getElementById("shopSwitcherDropdown");
+            const btnx = document.getElementById("shopSwitcherBtn");
+            if (ddx) ddx.classList.add("hidden");
+            if (btnx) btnx.setAttribute("aria-expanded", "false");
+          }
+        });
+        window._shopSwitcherClickHandlerAttached = true;
+      }
     }
   } catch (e) {
     // 認証されていない or 多店舗対応未対応 → 何もしない
