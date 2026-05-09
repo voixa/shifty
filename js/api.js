@@ -145,6 +145,18 @@
         })
       : Promise.reject(new Error("legacy_mode_not_supported")),
 
+    // 多店舗対応 (Round 26 = A)
+    listOwnerTenants: () => jsonReq("/api/owner/tenants"),
+    addOwnerTenant: (restaurantName) =>
+      jsonReq("/api/owner/add-tenant", {
+        method: "POST", body: JSON.stringify({ restaurantName }),
+      }),
+    switchOwnerTenant: (slug) =>
+      jsonReq("/api/owner/switch-tenant", {
+        method: "POST", body: JSON.stringify({ slug }),
+      }),
+    ownerAggregate: () => jsonReq("/api/owner/aggregate"),
+
     // Snapshots (admin)
     listSnapshots: () => jsonReq("/api/admin/snapshots"),
     restoreSnapshot: (date) => jsonReq(`/api/admin/snapshots/${encodeURIComponent(date)}/restore`, { method: "POST" }),

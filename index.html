@@ -78,6 +78,15 @@
           <h1 class="font-bold text-lg leading-tight">Shifty</h1>
           <p class="text-xs text-slate-500" id="restaurantName">—</p>
         </div>
+        <!-- 店舗スイッチャー (Round 26 = A) — 動的に表示 -->
+        <div id="shopSwitcher" class="hidden ml-2 relative">
+          <button id="shopSwitcherBtn" class="text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded px-2 py-1 flex items-center gap-1" aria-haspopup="true" aria-expanded="false">
+            <span>🏪</span>
+            <span id="shopSwitcherLabel">店舗</span>
+            <span>▾</span>
+          </button>
+          <div id="shopSwitcherDropdown" class="hidden absolute top-full left-0 mt-1 w-72 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-50"></div>
+        </div>
       </div>
 
       <!-- Week navigator -->

@@ -7448,8 +7448,188 @@ function showDemoBanner() {
   document.body.insertBefore(banner, document.body.firstChild);
 }
 
+// ===== 多店舗対応 (Round 26 = A) =====
+let _ownerTenants = null;
+
+async function initShopSwitcher() {
+  if (!window.ShiftyAPI || !window.ShiftyAPI.tenantSlug) return;
+  const wrapEl = document.getElementById("shopSwitcher");
+  if (!wrapEl) return;
+  try {
+    const r = await window.ShiftyAPI.listOwnerTenants();
+    _ownerTenants = r.tenants || [];
+    const cur = r.currentSlug;
+    const curTenant = _ownerTenants.find(t => t.slug === cur);
+    const label = document.getElementById("shopSwitcherLabel");
+    if (label && curTenant) label.textContent = (curTenant.restaurantName || cur).slice(0, 20);
+    // 1 店舗のみなら表示しない (UI ノイズ抑制)
+    if (_ownerTenants.length <= 1) {
+      // 「+ 店舗追加」だけは見せたい → 1 店舗でも表示する
+    }
+    wrapEl.classList.remove("hidden");
+    // ドロップダウン構築
+    renderShopSwitcherDropdown();
+    // クリック開閉
+    const btn = document.getElementById("shopSwitcherBtn");
+    const dd = document.getElementById("shopSwitcherDropdown");
+    if (btn && dd) {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = !dd.classList.contains("hidden");
+        if (isOpen) dd.classList.add("hidden");
+        else { dd.classList.remove("hidden"); btn.setAttribute("aria-expanded", "true"); }
+      };
+      document.addEventListener("click", (e) => {
+        if (!wrapEl.contains(e.target)) {
+          dd.classList.add("hidden");
+          btn.setAttribute("aria-expanded", "false");
+        }
+      });
+    }
+  } catch (e) {
+    // 認証されていない or 多店舗対応未対応 → 何もしない
+    console.warn("Shop switcher init failed:", e);
+  }
+}
+
+function renderShopSwitcherDropdown() {
+  const dd = document.getElementById("shopSwitcherDropdown");
+  if (!dd) return;
+  dd.innerHTML = "";
+  const cur = window.ShiftyAPI && window.ShiftyAPI.tenantSlug;
+
+  if (_ownerTenants && _ownerTenants.length > 1) {
+    const header = el("div", { class: "px-3 py-2 text-[10px] uppercase font-semibold text-slate-500 border-b border-slate-100 dark:border-slate-700" }, `🏪 全 ${_ownerTenants.length} 店舗`);
+    dd.appendChild(header);
+    for (const t of _ownerTenants) {
+      const isCur = t.slug === cur;
+      const row = el("button", {
+        class: `w-full text-left px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-700 ${isCur ? "bg-brand-50 dark:bg-brand-700/30 font-bold" : ""}`,
+        onclick: async () => {
+          if (isCur) { dd.classList.add("hidden"); return; }
+          try {
+            await window.ShiftyAPI.switchOwnerTenant(t.slug);
+            // 切替後に新しいテナント URL へリダイレクト
+            location.href = `/t/${encodeURIComponent(t.slug)}/app`;
+          } catch (e) {
+            toast("切替失敗: " + (e?.message || ""), "error");
+          }
+        },
+      });
+      row.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div>
+            <span>${isCur ? "✓ " : ""}${escapeHtml(t.restaurantName || t.slug)}</span>
+            ${t.plan && t.plan !== "free" ? `<span class="text-[9px] bg-emerald-100 text-emerald-800 rounded px-1 ml-1">${escapeHtml(t.plan)}</span>` : ""}
+          </div>
+          <span class="text-[10px] text-slate-400">${escapeHtml((t.slug || "").slice(0, 12))}</span>
+        </div>`;
+      dd.appendChild(row);
+    }
+  }
+
+  // 全店舗集計ビュー
+  if (_ownerTenants && _ownerTenants.length >= 2) {
+    dd.appendChild(el("button", {
+      class: "w-full text-left px-3 py-2 text-sm border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-blue-600 dark:text-blue-400 font-semibold",
+      onclick: () => {
+        const ddx = document.getElementById("shopSwitcherDropdown");
+        if (ddx) ddx.classList.add("hidden");
+        openCrossStoreDashboard();
+      },
+    }, "📊 全店舗 集計ダッシュボード"));
+  }
+
+  // + 店舗追加
+  dd.appendChild(el("button", {
+    class: "w-full text-left px-3 py-2 text-sm border-t border-slate-100 dark:border-slate-700 hover:bg-emerald-50 dark:hover:bg-emerald-700/30 text-emerald-700 dark:text-emerald-400 font-semibold",
+    onclick: async () => {
+      const ddx = document.getElementById("shopSwitcherDropdown");
+      if (ddx) ddx.classList.add("hidden");
+      const name = prompt("新しい店舗の名前を入力してください:\n(後で設定タブから変更可能)");
+      if (!name || !name.trim()) return;
+      try {
+        const r = await window.ShiftyAPI.addOwnerTenant(name.trim());
+        if (r.ok) {
+          toast(`✓ 「${name}」を追加。切替中...`, "success", 4000);
+          setTimeout(() => { location.href = `/t/${encodeURIComponent(r.slug)}/app`; }, 1000);
+        }
+      } catch (e) {
+        const msg = String(e?.message || e);
+        if (msg.includes("tenant_limit_reached")) {
+          toast("店舗数上限 (5) に達しています", "error");
+        } else {
+          toast("店舗追加失敗: " + msg, "error");
+        }
+      }
+    },
+  }, "＋ 新店舗を追加"));
+}
+
+function openCrossStoreDashboard() {
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "📊 全店舗 集計ダッシュボード"));
+  body.appendChild(el("div", { class: "text-xs text-slate-500" }, "オーナーが管理する全店舗の今週サマリ"));
+  const list = el("div", { class: "space-y-2 max-h-96 overflow-y-auto" });
+  body.appendChild(list);
+  list.appendChild(el("div", { class: "text-sm text-center py-4 text-slate-500" }, "読み込み中..."));
+  body.appendChild(el("div", { class: "flex justify-end pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "閉じる"),
+  ]));
+  modal(body);
+
+  window.ShiftyAPI.ownerAggregate().then(r => {
+    list.innerHTML = "";
+    let totalCost = 0, totalHours = 0, totalShifts = 0, publishedN = 0;
+    for (const shop of (r.shops || [])) {
+      totalCost += shop.weekCost || 0;
+      totalHours += shop.weekHours || 0;
+      totalShifts += shop.shiftCount || 0;
+      if (shop.publishedThisWeek) publishedN++;
+
+      const row = el("button", {
+        class: "w-full text-left bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 hover:border-brand-400 transition",
+        onclick: async () => {
+          try {
+            await window.ShiftyAPI.switchOwnerTenant(shop.slug);
+            location.href = `/t/${encodeURIComponent(shop.slug)}/app`;
+          } catch (e) { toast("切替失敗", "error"); }
+        },
+      });
+      const isCur = shop.slug === (window.ShiftyAPI && window.ShiftyAPI.tenantSlug);
+      const overBudget = shop.weeklyBudget > 0 && shop.weekCost > shop.weeklyBudget;
+      row.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="font-semibold">${isCur ? "✓ " : ""}${escapeHtml(shop.restaurantName || shop.slug)}
+              ${shop.plan && shop.plan !== "free" ? `<span class="text-[10px] bg-emerald-100 text-emerald-800 rounded px-1.5 ml-1">${escapeHtml(shop.plan)}</span>` : ""}
+            </div>
+            <div class="text-[10px] text-slate-500 mt-0.5">スタッフ ${shop.staffCount || 0} 名 / 週開始 ${shop.currentWeekStart || "—"}</div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold ${overBudget ? "text-red-600" : ""}">${fmtYen(shop.weekCost || 0)}</div>
+            <div class="text-[10px] text-slate-500">${(shop.weekHours || 0).toFixed(1)}h / ${shop.shiftCount || 0} 件</div>
+            <div class="text-[10px] ${shop.publishedThisWeek ? "text-emerald-600" : "text-amber-600"}">${shop.publishedThisWeek ? "✓ 確定済" : "📝 下書き"}</div>
+          </div>
+        </div>`;
+      list.appendChild(row);
+    }
+    // サマリカード
+    list.insertBefore(el("div", { class: "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded p-3 text-xs grid grid-cols-2 gap-2" }, [
+      el("div", {}, [el("div", { class: "text-slate-500" }, "全店舗合計人件費"), el("div", { class: "font-bold text-base" }, fmtYen(totalCost))]),
+      el("div", {}, [el("div", { class: "text-slate-500" }, "合計勤務時間"), el("div", { class: "font-bold text-base" }, totalHours.toFixed(1) + "h")]),
+      el("div", {}, [el("div", { class: "text-slate-500" }, "合計シフト"), el("div", { class: "font-bold text-base" }, totalShifts + " 件")]),
+      el("div", {}, [el("div", { class: "text-slate-500" }, "確定済店舗"), el("div", { class: "font-bold text-base" }, `${publishedN} / ${(r.shops || []).length}`)]),
+    ]), list.firstChild);
+  }).catch(e => {
+    list.innerHTML = `<div class="text-sm text-red-600 text-center py-4">取得失敗: ${escapeHtml(e?.message || "")}</div>`;
+  });
+}
+
 async function loadAndRender() {
   try {
+    // Round 26: 多店舗スイッチャー初期化 (失敗しても続行)
+    initShopSwitcher().catch(() => {});
     state = await loadState();
     // 日次スナップショット (Round 17 TOP 1)
     try {

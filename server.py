@@ -414,6 +414,18 @@ class TenantManager:
             rows = c.execute("SELECT * FROM tenants ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
             return [dict(r) for r in rows]
 
+    def list_by_email(self, email):
+        """同一オーナー（メールアドレス）が管理する全テナントを返す (Round 26: 多店舗対応)"""
+        if not email:
+            return []
+        if self._fs is not None:
+            docs = self._col.where("email", "==", email).limit(50).stream()
+            return [doc.to_dict() for doc in docs]
+        with sqlite3.connect(DB_PATH) as c:
+            c.row_factory = sqlite3.Row
+            rows = c.execute("SELECT * FROM tenants WHERE email=? ORDER BY created_at DESC LIMIT 50", (email,)).fetchall()
+            return [dict(r) for r in rows]
+
     def issue_magic_link(self, slug, ttl_seconds=1800):
         """マジックリンクトークンを発行（30 分有効）。返値はトークン文字列。"""
         import datetime as _dt
@@ -981,6 +993,13 @@ def auth_verify_get():
     session.clear()
     session["authenticated"] = True
     session["tenant_slug"] = slug
+    # Round 26: オーナーメールをセッションに記録 (多店舗対応の基盤)
+    try:
+        tenant = tm.get(slug)
+        if tenant and tenant.get("email"):
+            session["owner_email"] = tenant.get("email")
+    except Exception:
+        pass
     session.permanent = True
     return _redirect(f"/t/{slug}/app")
 
@@ -2593,6 +2612,152 @@ def api_t_broadcast(slug):
         return current
     s.transactional_update(_mutate)
     return jsonify({"ok": True, "sentEmail": sent_email, "sentWebhook": sent_webhook, "skipped": skipped})
+
+
+# ============================================================
+# 多店舗オーナー API (Round 26 = A)
+# ============================================================
+def _slugify(s):
+    """日本語含む文字列から URL safe な slug を生成"""
+    import re as _re_s
+    base = (s or "").strip().lower()
+    base = _re_s.sub(r"[^a-z0-9-]+", "-", base)
+    base = _re_s.sub(r"-+", "-", base).strip("-")
+    return base[:40] or ("shop-" + secrets.token_urlsafe(4).lower())
+
+
+@app.get("/api/owner/tenants")
+def api_owner_tenants():
+    """ログイン中オーナーが管理する全テナント一覧を返す"""
+    email = session.get("owner_email")
+    if not email or not session.get("authenticated"):
+        return jsonify({"error": "not_authenticated"}), 401
+    tm = get_tenant_manager()
+    tenants = tm.list_by_email(email)
+    # 状態を返す (slug, restaurantName, plan)
+    out = [{
+        "slug": t.get("slug"),
+        "restaurantName": t.get("restaurantName") or t.get("contact_name") or t.get("slug"),
+        "plan": t.get("plan", "free"),
+        "status": t.get("status", "active"),
+        "createdAt": t.get("createdAt") or t.get("created_at"),
+    } for t in tenants]
+    return jsonify({
+        "ok": True,
+        "tenants": out,
+        "currentSlug": session.get("tenant_slug"),
+        "ownerEmail": email,
+    })
+
+
+@app.post("/api/owner/add-tenant")
+def api_owner_add_tenant():
+    """同一オーナーが新店舗を即時追加 (再認証なし)"""
+    email = session.get("owner_email")
+    if not email or not session.get("authenticated"):
+        return jsonify({"error": "not_authenticated"}), 401
+    if _rate_check("owner_add_tenant"):
+        return jsonify({"error": "rate_limited"}), 429
+    payload = _get_json()
+    restaurant_name = (payload.get("restaurantName") or "").strip()[:100]
+    if not restaurant_name:
+        return jsonify({"error": "missing_name"}), 400
+    # 上限: 1 オーナー = 5 店舗
+    tm = get_tenant_manager()
+    existing = tm.list_by_email(email)
+    if len(existing) >= 5:
+        return jsonify({"error": "tenant_limit_reached", "max": 5}), 403
+
+    # slug 生成 (重複時は suffix)
+    base_slug = _slugify(restaurant_name)
+    final_slug = base_slug
+    suffix = 1
+    while tm.get(final_slug) is not None:
+        suffix += 1
+        final_slug = f"{base_slug}-{suffix}"
+        if suffix > 99:
+            return jsonify({"error": "slug_collision"}), 500
+
+    tm.create(slug=final_slug, email=email, contact_name="", restaurant_name=restaurant_name, plan="free")
+    return jsonify({"ok": True, "slug": final_slug, "restaurantName": restaurant_name})
+
+
+@app.post("/api/owner/switch-tenant")
+def api_owner_switch_tenant():
+    """セッションを別テナントへ切替"""
+    email = session.get("owner_email")
+    if not email or not session.get("authenticated"):
+        return jsonify({"error": "not_authenticated"}), 401
+    payload = _get_json()
+    new_slug = (payload.get("slug") or "").strip()
+    if not _valid_slug(new_slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    tm = get_tenant_manager()
+    tenant = tm.get(new_slug)
+    if not tenant:
+        return jsonify({"error": "tenant_not_found"}), 404
+    if tenant.get("email") != email:
+        return jsonify({"error": "not_authorized"}), 403
+    session["tenant_slug"] = new_slug
+    session.permanent = True
+    return jsonify({"ok": True, "slug": new_slug})
+
+
+@app.get("/api/owner/aggregate")
+def api_owner_aggregate():
+    """全店舗横断の集計サマリ (Round 26 多店舗ダッシュボード)"""
+    email = session.get("owner_email")
+    if not email or not session.get("authenticated"):
+        return jsonify({"error": "not_authenticated"}), 401
+    tm = get_tenant_manager()
+    tenants = tm.list_by_email(email)
+    out = []
+    for t in tenants:
+        slug = t.get("slug")
+        s = get_tenant_storage(slug)
+        st = s.get_state() if s else None
+        if not st:
+            out.append({
+                "slug": slug,
+                "restaurantName": t.get("restaurantName"),
+                "staffCount": 0,
+                "currentWeekStart": None,
+                "weekCost": 0,
+                "weekHours": 0,
+                "publishedThisWeek": False,
+            })
+            continue
+        meta = st.get("meta", {})
+        cur_wk = meta.get("currentWeekStart")
+        weeks = st.get("weeks", {}) or {}
+        wk = weeks.get(cur_wk, {}) if cur_wk else {}
+        ass = wk.get("assignments", []) or []
+        # 時間集計 (簡易)
+        total_h = 0.0
+        total_cost = 0.0
+        for a in ass:
+            try:
+                sh, sm = map(int, a.get("startTime", "0:0").split(":"))
+                eh, em = map(int, a.get("endTime", "0:0").split(":"))
+                h = ((eh * 60 + em) - (sh * 60 + sm)) / 60
+                total_h += h
+                total_cost += a.get("cost", 0) or 0
+            except Exception:
+                pass
+        active_staff = [s2 for s2 in (st.get("staff", []) or []) if not s2.get("archived")]
+        out.append({
+            "slug": slug,
+            "restaurantName": meta.get("restaurantName") or t.get("restaurantName"),
+            "staffCount": len(active_staff),
+            "currentWeekStart": cur_wk,
+            "weekCost": int(total_cost),
+            "weekHours": round(total_h, 1),
+            "shiftCount": len(ass),
+            "publishedThisWeek": wk.get("status") == "published",
+            "weeklyBudget": meta.get("weeklyBudget", 0),
+            "plan": t.get("plan", "free"),
+        })
+    return jsonify({"ok": True, "shops": out, "totalShops": len(out)})
 
 
 # ============================================================
