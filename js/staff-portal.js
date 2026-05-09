@@ -114,6 +114,91 @@
       <div class="font-semibold mb-1">⚠️ ${escapeHtml(msg)}</div></div>`;
   }
 
+  // ===== PWA インストール促進 (Round 21 TOP 3) =====
+  function isStandalone() {
+    return window.matchMedia("(display-mode: standalone)").matches
+      || window.navigator.standalone === true;
+  }
+  function isiOS() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent);
+  }
+  function isInstallDismissed() {
+    try { return localStorage.getItem("shifty.installDismissed") === "1"; }
+    catch (_) { return false; }
+  }
+  function markInstallDismissed() {
+    try { localStorage.setItem("shifty.installDismissed", "1"); } catch (_) {}
+  }
+  function renderInstallBanner() {
+    if (isStandalone() || isInstallDismissed()) return "";
+    const hasNativePrompt = !!window.__SHIFTY_INSTALL_PROMPT__;
+    if (!hasNativePrompt && !isiOS()) return ""; // 他環境は表示しない
+    const ios = isiOS();
+    return `
+      <div id="install-banner" class="bg-gradient-to-br from-indigo-500 to-brand-700 rounded-xl p-3 mb-3 text-white shadow-lg">
+        <div class="flex items-start gap-2">
+          <div class="text-2xl">📱</div>
+          <div class="flex-1">
+            <div class="font-bold text-sm">ホーム画面に追加すると便利です</div>
+            <div class="text-xs opacity-90 mt-0.5">アプリのように 1 タップで開けます。打刻もすぐ。${ios ? "(iPhone は手順説明)" : ""}</div>
+            <div class="mt-2 flex gap-2 flex-wrap">
+              ${hasNativePrompt ? `<button id="install-btn" class="bg-white text-indigo-700 rounded px-3 py-1.5 text-xs font-bold">📲 ホーム画面に追加</button>` : ""}
+              ${ios ? `<button id="install-ios-btn" class="bg-white text-indigo-700 rounded px-3 py-1.5 text-xs font-bold">📲 iPhone での追加方法</button>` : ""}
+              <button id="install-dismiss-btn" class="text-xs opacity-80 hover:opacity-100 px-2 py-1.5">後で</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+  function attachInstallBannerHandlers() {
+    const installBtn = document.getElementById("install-btn");
+    if (installBtn) installBtn.onclick = async () => {
+      const p = window.__SHIFTY_INSTALL_PROMPT__;
+      if (!p) return;
+      try {
+        p.prompt();
+        const { outcome } = await p.userChoice;
+        window.__SHIFTY_INSTALL_PROMPT__ = null;
+        if (outcome === "accepted") {
+          toast("✓ ホーム画面に追加されました", "success", 4000);
+          const b = document.getElementById("install-banner"); if (b) b.remove();
+        }
+      } catch (e) { console.warn("install prompt failed", e); }
+    };
+    const iosBtn = document.getElementById("install-ios-btn");
+    if (iosBtn) iosBtn.onclick = () => {
+      const overlay = document.createElement("div");
+      overlay.className = "fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4";
+      overlay.innerHTML = `
+        <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full p-5 space-y-3">
+          <h3 class="font-bold text-base">📱 iPhone でホーム画面に追加</h3>
+          <ol class="text-sm space-y-2 list-decimal list-inside">
+            <li>下部の <span class="inline-block bg-blue-50 border border-blue-200 rounded px-1.5">⬆️ 共有ボタン</span> をタップ</li>
+            <li>「ホーム画面に追加」を選択</li>
+            <li>右上の「追加」をタップ</li>
+          </ol>
+          <p class="text-xs text-slate-500">※ Safari でアクセスしている必要があります</p>
+          <button id="ios-close" class="w-full bg-slate-200 rounded py-2 text-sm">閉じる</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector("#ios-close").onclick = () => overlay.remove();
+    };
+    const dismissBtn = document.getElementById("install-dismiss-btn");
+    if (dismissBtn) dismissBtn.onclick = () => {
+      markInstallDismissed();
+      const b = document.getElementById("install-banner"); if (b) b.remove();
+    };
+  }
+  // beforeinstallprompt イベント受信時に再描画
+  window.addEventListener("shifty-install-available", () => {
+    // 描画済みの場合のみ再描画
+    if (data && $("#app").innerHTML.length > 0) {
+      try {
+        if (data.weekStatus === "published") renderPublished(); else renderDraft();
+      } catch (_) {}
+    }
+  });
+
   async function init() {
     if (!token) return showError("リンクが無効です。店長から正しい URL を受け取ってください。");
     try {
@@ -387,8 +472,11 @@
     // 長期休暇申請カード (Round 16 TOP 1)
     const vacCard = renderVacationCard();
 
+    const installBannerHtmlD = renderInstallBanner();
+
     $("#app").innerHTML = `
       ${weekTabsHtml}
+      ${installBannerHtmlD}
       ${draftNoticeCard}
       ${deadlineCard}
       ${tplCard}
@@ -582,6 +670,9 @@
         if (wk) switchWeek(wk);
       };
     });
+
+    // PWA インストールバナー (Round 21 TOP 3)
+    attachInstallBannerHandlers();
 
     // 長期休暇申請ボタン (Round 16 TOP 1)
     const vacBtn = document.getElementById("vac-new-btn");
@@ -1037,8 +1128,11 @@
     // シフト交換掲示板カード (Round 16 TOP 2)
     const swapCard2 = renderSwapBoardCard();
 
+    const installBannerHtml = renderInstallBanner();
+
     $("#app").innerHTML = `
       ${weekTabsHtml2}
+      ${installBannerHtml}
       ${clockCard}
       ${nextShiftCard}
       ${noticeCard}
@@ -1187,6 +1281,9 @@
         if (wk) switchWeek(wk);
       };
     });
+
+    // PWA インストールバナー (Round 21 TOP 3)
+    attachInstallBannerHandlers();
 
     // 打刻ボタン (Round 19)
     document.querySelectorAll(".clock-in-btn").forEach(btn => {

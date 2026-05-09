@@ -24,5 +24,24 @@
   <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 space-y-2"></div>
   <script src="js/api.js"></script>
   <script src="js/staff-portal.js"></script>
+  <script>
+    // PWA Service Worker 登録 (Round 21 TOP 3)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(err => console.warn('SW reg failed', err));
+      });
+    }
+    // beforeinstallprompt キャプチャ (Android Chrome) — staff-portal.js で利用
+    window.__SHIFTY_INSTALL_PROMPT__ = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      window.__SHIFTY_INSTALL_PROMPT__ = e;
+      window.dispatchEvent(new CustomEvent('shifty-install-available'));
+    });
+    window.addEventListener('appinstalled', () => {
+      window.__SHIFTY_INSTALL_PROMPT__ = null;
+      try { localStorage.setItem('shifty.installed', '1'); } catch (_) {}
+    });
+  </script>
 </body>
 </html>

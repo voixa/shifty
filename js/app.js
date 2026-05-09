@@ -909,6 +909,198 @@ function openMonthlyReport() {
   document.body.appendChild(wrap);
 }
 
+// ===== モデルシフト (Round 21 TOP 1) =====
+// 過去の確定済シフトと売上から「曜日×セッション×ポジション」の最適人数を学習
+function computeModelShift() {
+  const sessions = state.meta.sessions || [];
+  const positions = state.meta.positions || [];
+  const sales = state.meta.dailySales || {};
+  const target = state.meta.laborCostRatioTarget || 0.28;
+  const allWeeks = state.weeks || {};
+
+  // 過去 8 週の確定済シフトを集計
+  const wkKeys = Object.keys(allWeeks).filter(k => allWeeks[k].status === "published").sort().slice(-8);
+  if (wkKeys.length < 2) {
+    return { error: "履歴不足", weeksAnalyzed: wkKeys.length };
+  }
+
+  // 各 (dow, sessId, posId) のサンプルを集める
+  // サンプル: { count, salesShare, laborCost, ratio }
+  const samples = {}; // key: "dow|sess|pos" -> [{ count, ratio, salesPerHour }]
+  for (const wkKey of wkKeys) {
+    const wk = allWeeks[wkKey];
+    if (!wk.assignments) continue;
+    // 週内日別の売上
+    const days = Array.from({ length: 7 }, (_, i) => addDays(wkKey, i));
+    const wkSales = days.map(d => Number(sales[d]) || 0);
+    const totalWkSales = wkSales.reduce((a, b) => a + b, 0);
+    if (totalWkSales === 0) continue; // 売上不明はスキップ (人件費率比較できない)
+
+    // 日別人件費 (assignments cost)
+    const dayCost = days.map(d =>
+      wk.assignments.filter(a => a.date === d).reduce((s, a) => s + (a.cost || 0), 0)
+    );
+
+    for (let i = 0; i < 7; i++) {
+      const d = days[i];
+      const dow = dayOfWeek(d);
+      if (wkSales[i] === 0) continue;
+      const dayRatio = dayCost[i] / wkSales[i];
+      // 各セッション・ポジションの実際配置人数
+      for (const sess of sessions) {
+        for (const pos of positions) {
+          const count = wk.assignments.filter(a =>
+            a.date === d && a.position === pos.id &&
+            a.startTime === sess.startTime && a.endTime === sess.endTime
+          ).length;
+          const key = `${dow}|${sess.id}|${pos.id}`;
+          if (!samples[key]) samples[key] = [];
+          samples[key].push({ count, ratio: dayRatio, sales: wkSales[i] });
+        }
+      }
+    }
+  }
+
+  // 各 key について、人件費率が target 以下のサンプルがあれば、そのサンプル群の平均 count を採用
+  // 無ければ全サンプルの平均 (より少なめに)
+  const recommendation = {}; // sess -> dow -> pos -> count
+  for (const sess of sessions) {
+    recommendation[sess.id] = {};
+    for (let dow = 0; dow < 7; dow++) {
+      recommendation[sess.id][dow] = {};
+      for (const pos of positions) {
+        const key = `${dow}|${sess.id}|${pos.id}`;
+        const list = samples[key] || [];
+        if (list.length === 0) {
+          // データなし → 現状を維持
+          recommendation[sess.id][dow][pos.id] = state.meta.staffingPlan[sess.id]?.[dow]?.[pos.id] || 0;
+          continue;
+        }
+        // 目標達成サンプルのみ
+        const goodSamples = list.filter(x => x.ratio <= target);
+        const targetSamples = goodSamples.length > 0 ? goodSamples : list;
+        const avgCount = targetSamples.reduce((s, x) => s + x.count, 0) / targetSamples.length;
+        // 中央値の方が外れ値に強いので両方計算して max を採用 (人手不足を避ける)
+        const sorted = targetSamples.map(x => x.count).slice().sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+        const recommended = Math.max(Math.round(avgCount), median);
+        recommendation[sess.id][dow][pos.id] = Math.max(0, recommended);
+      }
+    }
+  }
+
+  return {
+    recommendation,
+    weeksAnalyzed: wkKeys.length,
+    weeks: wkKeys,
+    samples,
+  };
+}
+
+function openModelShiftDialog() {
+  const result = computeModelShift();
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "💡 AI 推奨人数 (モデルシフト)"));
+
+  if (result.error) {
+    body.appendChild(el("div", { class: "bg-amber-50 border border-amber-200 rounded p-3 text-sm" },
+      `データ不足: ${result.error}。過去 ${result.weeksAnalyzed} 週分の確定済シフトしかありません。`));
+    body.appendChild(el("p", { class: "text-xs text-slate-600" },
+      "推奨機能を使うには 2 週以上の確定済シフト + 日次売上データが必要です。"));
+    body.appendChild(el("div", { class: "flex justify-end gap-2 pt-3" }, [
+      el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    ]));
+    modal(body);
+    return;
+  }
+
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    `過去 ${result.weeksAnalyzed} 週の確定済シフト + 売上から、目標人件費率 ${((state.meta.laborCostRatioTarget || 0.28) * 100).toFixed(0)}% を達成した曜日×時間帯の配置パターンを学習しました。`));
+
+  // 差分テーブル
+  const sessions = state.meta.sessions || [];
+  const positions = state.meta.positions || [];
+  let totalCurr = 0, totalRec = 0, changesByCell = 0;
+  const diffsHtml = [];
+  for (const sess of sessions) {
+    let sessHtml = `<table class="w-full text-xs border border-slate-200 rounded mt-2"><thead class="bg-slate-50"><tr>`;
+    sessHtml += `<th class="text-left p-1">${escapeHtml(sess.icon || "")} ${escapeHtml(sess.label)}</th>`;
+    for (let d = 1; d <= 7; d++) {
+      const dow = d === 7 ? 0 : d;
+      sessHtml += `<th class="p-1">${DAY_LABELS[dow]}</th>`;
+    }
+    sessHtml += `</tr></thead><tbody>`;
+    for (const pos of positions) {
+      sessHtml += `<tr class="border-t border-slate-100"><td class="p-1">${posBadge(pos.id)}</td>`;
+      for (let d = 1; d <= 7; d++) {
+        const dow = d === 7 ? 0 : d;
+        const curr = state.meta.staffingPlan[sess.id]?.[dow]?.[pos.id] || 0;
+        const rec = result.recommendation[sess.id]?.[dow]?.[pos.id] || 0;
+        totalCurr += curr; totalRec += rec;
+        const diff = rec - curr;
+        if (diff !== 0) changesByCell++;
+        const cls = diff > 0 ? "text-red-600" : diff < 0 ? "text-emerald-600" : "text-slate-400";
+        const arrow = diff > 0 ? `+${diff}↑` : diff < 0 ? `${diff}↓` : "=";
+        sessHtml += `<td class="p-1 text-center text-[10px]">
+          <span class="text-slate-700">${curr}</span> → <span class="font-semibold">${rec}</span>
+          <br><span class="${cls}">${arrow}</span>
+        </td>`;
+      }
+      sessHtml += `</tr>`;
+    }
+    sessHtml += `</tbody></table>`;
+    diffsHtml.push(sessHtml);
+  }
+  const diffsContainer = el("div", { class: "max-h-72 overflow-y-auto" });
+  diffsContainer.innerHTML = diffsHtml.join("");
+  body.appendChild(diffsContainer);
+
+  // サマリ
+  body.appendChild(el("div", { class: "grid grid-cols-3 gap-2 text-xs" }, [
+    el("div", { class: "bg-slate-50 rounded p-2" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "現状の合計枠数 (週)"),
+      el("div", { class: "font-bold" }, String(totalCurr)),
+    ]),
+    el("div", { class: "bg-slate-50 rounded p-2" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "推奨の合計枠数 (週)"),
+      el("div", { class: "font-bold" }, String(totalRec)),
+    ]),
+    el("div", { class: "bg-slate-50 rounded p-2" }, [
+      el("div", { class: "text-[10px] text-slate-500" }, "差分セル数"),
+      el("div", { class: "font-bold" }, `${changesByCell}/${sessions.length * positions.length * 7}`),
+    ]),
+  ]));
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-3 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-md font-semibold",
+      onclick: () => {
+        if (!confirm(`AI 推奨を適用すると、必要人数マトリクスが ${changesByCell} セル変更されます。\n適用前にスナップショットを自動取得します。続行しますか？`)) return;
+        try { createSnapshot("manual", "AI 推奨人数 適用前"); } catch (_) {}
+        // 全セル上書き
+        const newPlan = {};
+        for (const sess of sessions) {
+          newPlan[sess.id] = {};
+          for (let dow = 0; dow < 7; dow++) {
+            newPlan[sess.id][dow] = {};
+            for (const pos of positions) {
+              newPlan[sess.id][dow][pos.id] = result.recommendation[sess.id]?.[dow]?.[pos.id] || 0;
+            }
+          }
+        }
+        state.meta.staffingPlan = newPlan;
+        regenerateCurSlots();
+        persist();
+        closeModal();
+        render();
+        toast(`✓ AI 推奨を適用 (${changesByCell} セル更新 / 過去 ${result.weeksAnalyzed} 週分析)`, "success", 5000);
+      },
+    }, "💡 推奨を適用"),
+  ]));
+  modal(body);
+}
+
 // ===== 売上連動の人件費率 (Round 20 TOP 1) =====
 function renderLaborCostRatio() {
   const w0 = state.meta.currentWeekStart || "";
@@ -3519,23 +3711,213 @@ function renderCalendar() {
         const filledN = dayAssignments.filter(a => a.position === slot.position).length;
         const missing = slot.requiredCount - filledN;
         if (missing > 0 && curAssignments().length > 0) {
-          cell.appendChild(el("div", { class: "text-[10px] text-red-600 bg-red-50 rounded px-1 mt-0.5" },
+          // Round 21 TOP 2: 不足表示 + クイック追加ボタン
+          const shortRow = el("div", { class: "text-[10px] mt-0.5 flex items-center justify-between gap-1 bg-red-50 rounded px-1 py-0.5" });
+          shortRow.appendChild(el("span", { class: "text-red-600" },
             `不足: ${posCfg(slot.position).label} ×${missing}`));
+          if (curStatus() === "draft") {
+            shortRow.appendChild(el("button", {
+              class: "text-[9px] bg-emerald-500 hover:bg-emerald-600 text-white rounded px-1.5 py-0.5 font-semibold whitespace-nowrap",
+              onclick: () => openQuickAddDialog(d, sess, slot.position),
+              title: "このコマにスタッフを追加",
+            }, "+ 追加"));
+          }
+          cell.appendChild(shortRow);
         }
       });
-      // 必要人数オーバーライドボタン (Round 2 改善)
+      // クイック追加ボタン (Round 21 TOP 2) — どのセルでも常に表示 (draft時)
       if (curStatus() === "draft") {
-        const adjustBtn = el("button", {
-          class: "text-[10px] text-slate-400 hover:text-slate-700 mt-1 underline decoration-dotted",
+        const tools = el("div", { class: "flex items-center gap-1 mt-1" });
+        tools.appendChild(el("button", {
+          class: "text-[10px] text-emerald-700 hover:bg-emerald-50 border border-emerald-300 rounded px-1.5 py-0.5",
+          title: "このセッションにスタッフを直接追加",
+          onclick: () => openQuickAddDialog(d, sess, null),
+        }, "＋ アサイン追加"));
+        tools.appendChild(el("button", {
+          class: "text-[10px] text-slate-400 hover:text-slate-700 underline decoration-dotted",
           title: "この日のセッションの必要人数を編集",
           onclick: () => openSlotAdjustDialog(d, sess),
-        }, "⚙️ 必要人数を調整");
-        cell.appendChild(adjustBtn);
+        }, "⚙️ 人数"));
+        cell.appendChild(tools);
       }
       grid.appendChild(cell);
     }
   }
   return grid;
+}
+
+// クイックアサイン追加ダイアログ (Round 21 TOP 2)
+function openQuickAddDialog(date, sess, suggestedPosition) {
+  if (curStatus() !== "draft") {
+    toast("確定済では追加できません。先に下書きに戻してください", "error"); return;
+  }
+  const positions = state.meta.positions || [];
+  // 候補スタッフを評価
+  const dow = dayOfWeek(date);
+  function _t(s) { const [h, m] = s.split(":").map(Number); return h * 60 + m; }
+  function isOverlapWithExisting(staffId, startT, endT) {
+    return curAssignments().some(a =>
+      a.staffId === staffId && a.date === date &&
+      _t(a.startTime) < _t(endT) && _t(startT) < _t(a.endTime)
+    );
+  }
+  function evaluateStaff(s, posId, startT, endT) {
+    const reasons = [];
+    let score = 100;
+    // ポジション適合
+    if (s.position !== posId && !(s.canCover || []).includes(posId)) {
+      return { score: -1, reasons: ["❌ ポジション不適合"], blocked: true };
+    }
+    if (s.position === posId) { score += 50; reasons.push("✓ 本職"); }
+    else { score += 10; reasons.push("○ 兼任可"); }
+    // 固定休日
+    if ((s.fixedDayOff || []).includes(dow)) {
+      return { score: -1, reasons: ["❌ 固定休日"], blocked: true };
+    }
+    // 重複チェック
+    if (isOverlapWithExisting(s.id, startT, endT)) {
+      return { score: -1, reasons: ["❌ 既存シフトと時間重複"], blocked: true };
+    }
+    // 希望
+    const myPrefs = curPrefs().filter(p => p.staffId === s.id && p.date === date);
+    const want = myPrefs.find(p => p.priority === "want" && _t(p.startTime) <= _t(startT) && _t(endT) <= _t(p.endTime));
+    const must = myPrefs.find(p => p.priority === "must" && _t(p.startTime) <= _t(startT) && _t(endT) <= _t(p.endTime));
+    const avoid = myPrefs.find(p => p.priority === "avoid" && _t(p.startTime) < _t(endT) && _t(startT) < _t(p.endTime));
+    if (must) { score += 80; reasons.push("🔥 必須希望"); }
+    else if (want) { score += 50; reasons.push("✅ 希望あり"); }
+    else if (avoid) { score -= 100; reasons.push("🚫 不可希望"); }
+    // 週時間上限
+    const wkHours = curAssignments().filter(a => a.staffId === s.id).reduce((sm, a) => sm + calcHours(a.startTime, a.endTime), 0);
+    const newHours = wkHours + (_t(endT) - _t(startT)) / 60;
+    if (newHours > (s.maxHoursPerWeek || 40)) { score -= 50; reasons.push(`⚠️ 週上限超過 (${newHours.toFixed(1)}h/${s.maxHoursPerWeek}h)`); }
+    else if (newHours < (s.minHoursPerWeek || 0)) { score += 30; reasons.push(`✓ 最低時間まだ未達`); }
+    // 時給 (低いほど良い)
+    score -= s.hourlyWage / 100;
+    return { score, reasons, blocked: false };
+  }
+
+  let selPos = suggestedPosition || (positions[0]?.id);
+  let selStart = sess.startTime;
+  let selEnd = sess.endTime;
+  let selStaffId = null;
+
+  function refreshCandidates() {
+    const list = state.staff
+      .map(s => ({ s, ...evaluateStaff(s, selPos, selStart, selEnd) }))
+      .sort((a, b) => b.score - a.score);
+    return list;
+  }
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "⚡ クイックアサイン追加"));
+  body.appendChild(el("div", { class: "text-xs text-slate-600" },
+    `${date} (${["日","月","火","水","木","金","土"][dow]}) の ${sess.label} (${sess.startTime}〜${sess.endTime}) にスタッフを追加`));
+
+  // ポジション選択
+  const posSelect = el("select", { id: "qa-pos", class: "w-full border rounded px-2 py-1 text-sm mt-1" });
+  for (const p of positions) {
+    const opt = el("option", { value: p.id }, p.label);
+    if (p.id === selPos) opt.selected = true;
+    posSelect.appendChild(opt);
+  }
+  posSelect.onchange = () => { selPos = posSelect.value; selStaffId = null; renderList(); };
+
+  // 時間範囲
+  function timeOptionsBetween(min, max) {
+    const out = [];
+    for (let m = _t(min); m <= _t(max); m += 30) {
+      const h = String(Math.floor(m / 60)).padStart(2, "0");
+      const mm = String(m % 60).padStart(2, "0");
+      out.push(`${h}:${mm}`);
+    }
+    return out;
+  }
+  const opts = timeOptionsBetween(sess.startTime, sess.endTime);
+  const startSelect = el("select", { id: "qa-start", class: "w-full border rounded px-2 py-1 text-sm mt-1" });
+  const endSelect = el("select", { id: "qa-end", class: "w-full border rounded px-2 py-1 text-sm mt-1" });
+  for (const o of opts) {
+    const optS = el("option", { value: o }, o);
+    if (o === selStart) optS.selected = true;
+    startSelect.appendChild(optS);
+    const optE = el("option", { value: o }, o);
+    if (o === selEnd) optE.selected = true;
+    endSelect.appendChild(optE);
+  }
+  startSelect.onchange = () => { selStart = startSelect.value; renderList(); };
+  endSelect.onchange = () => { selEnd = endSelect.value; renderList(); };
+
+  body.appendChild(el("div", { class: "grid grid-cols-3 gap-2 text-sm" }, [
+    el("label", { class: "block" }, [el("span", { class: "text-slate-600 text-xs" }, "ポジション"), posSelect]),
+    el("label", { class: "block" }, [el("span", { class: "text-slate-600 text-xs" }, "開始"), startSelect]),
+    el("label", { class: "block" }, [el("span", { class: "text-slate-600 text-xs" }, "終了"), endSelect]),
+  ]));
+
+  // 候補リスト
+  body.appendChild(el("div", { class: "text-xs font-semibold text-slate-700 mt-2" }, "候補スタッフ (スコア順)"));
+  const listWrap = el("div", { id: "qa-list", class: "space-y-1 max-h-64 overflow-y-auto" });
+  body.appendChild(listWrap);
+
+  function renderList() {
+    listWrap.innerHTML = "";
+    const list = refreshCandidates();
+    for (const item of list) {
+      const isBlocked = item.blocked;
+      const isSelected = item.s.id === selStaffId;
+      const row = el("button", {
+        class: `w-full text-left border-2 rounded p-2 text-xs transition ${
+          isSelected ? "border-emerald-600 bg-emerald-50" :
+          isBlocked ? "border-slate-200 opacity-50" :
+          "border-slate-200 hover:border-slate-400"
+        }`,
+        onclick: () => {
+          if (isBlocked) return;
+          selStaffId = item.s.id;
+          renderList();
+        },
+        disabled: isBlocked,
+      });
+      const cfg = posCfg(item.s.position);
+      row.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="font-semibold">${escapeHtml(item.s.name)}</span>
+            <span class="text-[10px] text-slate-500 ml-1">${escapeHtml(cfg.label)} ¥${item.s.hourlyWage}/h</span>
+          </div>
+          <div class="text-[10px] text-slate-600">スコア ${item.score.toFixed(0)}</div>
+        </div>
+        <div class="text-[10px] text-slate-600 mt-0.5">${item.reasons.join(" / ")}</div>`;
+      listWrap.appendChild(row);
+    }
+  }
+  renderList();
+
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+    el("button", {
+      class: "px-4 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-semibold",
+      onclick: () => {
+        if (!selStaffId) { toast("スタッフを選択してください", "error"); return; }
+        if (_t(selEnd) <= _t(selStart)) { toast("終了は開始より後にしてください", "error"); return; }
+        const s = state.staff.find(x => x.id === selStaffId);
+        const cost = s.hourlyWage * calcHours(selStart, selEnd);
+        const newAssignment = {
+          id: uid("a_"),
+          date,
+          staffId: selStaffId,
+          position: selPos,
+          startTime: selStart,
+          endTime: selEnd,
+          cost,
+          score: 0,
+        };
+        curWeek().assignments.push(newAssignment);
+        logChange("add", `${date} ${selStart}〜${selEnd} ${posCfg(selPos).label} に ${s.name} を追加`);
+        persist(); closeModal(); render();
+        toast(`✓ ${s.name} を追加 (¥${Math.round(cost).toLocaleString()})`, "success");
+      },
+    }, "💾 追加"),
+  ]));
+  modal(body);
 }
 
 // 印刷ビュー (Round 4)
@@ -5350,8 +5732,13 @@ function viewSettings() {
 
   // Staffing matrix
   const matrixCard = el("div", { id: "set-staffing", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
-  const matrixHeader = el("div", { class: "font-semibold" });
-  matrixHeader.innerHTML = `5. 必要人数マトリクス${helpIcon("staffing-matrix")}`;
+  const matrixHeader = el("div", { class: "flex items-center justify-between flex-wrap gap-2" });
+  matrixHeader.innerHTML = `<div class="font-semibold">5. 必要人数マトリクス${helpIcon("staffing-matrix")}</div>`;
+  matrixHeader.appendChild(el("button", {
+    class: "text-xs bg-purple-600 hover:bg-purple-700 text-white rounded-md px-3 py-1.5 font-semibold",
+    onclick: openModelShiftDialog,
+    title: "過去の確定済シフト + 売上から AI が推奨人数を提案",
+  }, "💡 AI 推奨人数 (Round 21)"));
   matrixCard.appendChild(matrixHeader);
   matrixCard.appendChild(el("div", { class: "text-xs text-slate-500" },
     "セルに必要人数を入力。0で枠なし。新規作成週には自動適用。既存週には『今の週に再適用』で反映。"));
