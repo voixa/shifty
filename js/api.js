@@ -157,6 +157,19 @@
         })
       : Promise.reject(new Error("legacy_mode_not_supported")),
 
+    // Web Push (Round 34 TOP 3)
+    pushPublicKey: () => jsonReq("/api/push/public-key"),
+    portalPushSubscribe: (token, subscription) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/push-subscribe`, {
+          method: "POST", body: JSON.stringify({ subscription }),
+        })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
+    portalPushUnsubscribe: (token) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/portal/${encodeURIComponent(token)}/push-unsubscribe`, {
+          method: "POST",
+        })
+      : Promise.reject(new Error("legacy_mode_not_supported")),
+
     // 多店舗対応 (Round 26 = A)
     listOwnerTenants: () => jsonReq("/api/owner/tenants"),
     addOwnerTenant: (restaurantName) =>

@@ -1,6 +1,8 @@
 Flask>=3.0.0
-Werkzeug>=3.0.0
+Werkzeug>=3.0.3
 gunicorn>=21.0.0
 google-cloud-firestore>=2.16.0
 stripe>=8.0.0
 sentry-sdk[flask]>=2.0.0
+# Round 34: Web Push 通知 (VAPID キー設定時のみ機能。pywebpush>=2.0.0)
+pywebpush>=2.0.0

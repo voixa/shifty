@@ -1,6 +1,7 @@
-// Shifty Service Worker v3 — HTML はキャッシュせず常に network、静的アセットのみキャッシュ
+// Shifty Service Worker v6 — HTML はキャッシュせず常に network、静的アセットのみキャッシュ
+// + Round 34: Web Push 通知サポート
 // CACHE 名を bump すると activate 時に旧キャッシュを削除する
-const CACHE = "shifty-v5";
+const CACHE = "shifty-v6";
 const STATIC_ASSETS = [
   "/styles.css",
   "/manifest.json",
@@ -55,4 +56,39 @@ self.addEventListener("fetch", (e) => {
       )
     );
   }
+});
+
+// Round 34: Web Push 通知 — push イベント受信
+self.addEventListener("push", (e) => {
+  let data = {};
+  try {
+    data = e.data ? e.data.json() : {};
+  } catch (_) {
+    try { data = { title: "Shifty", body: e.data ? e.data.text() : "" }; } catch (_) {}
+  }
+  const title = data.title || "Shifty";
+  const opts = {
+    body: data.body || "",
+    icon: data.icon || "/manifest.json",
+    badge: data.badge || "/manifest.json",
+    data: { url: data.url || "/" },
+    tag: data.tag || "shifty",
+    renotify: !!data.renotify,
+    requireInteraction: !!data.urgent,
+  };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+
+// 通知クリックで該当 URL を開く
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const targetUrl = (e.notification.data && e.notification.data.url) || "/";
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const c of clients) {
+        if (c.url.includes(targetUrl) && "focus" in c) return c.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })
+  );
 });

@@ -1698,6 +1698,15 @@ def api_notify_shifts():
                 "\n".join(body_lines),
                 title=f"{subject_prefix}【{restaurant}】{week_start} 週のシフトが確定しました",
             )
+        # Round 34 TOP 3: Web Push 通知
+        push_sub = s.get("pushSubscription")
+        if push_sub:
+            send_web_push(
+                push_sub,
+                f"{subject_prefix}{restaurant}",
+                f"{week_start} 週のシフトが確定しました ({len(my)} 件)",
+                url="/staff",
+            )
 
     return jsonify({"ok": True, "sent": sent, "skipped_no_email": skipped, "errors": errors})
 
@@ -2630,6 +2639,88 @@ def api_t_broadcast(slug):
         return current
     s.transactional_update(_mutate)
     return jsonify({"ok": True, "sentEmail": sent_email, "sentWebhook": sent_webhook, "skipped": skipped})
+
+
+# ============================================================
+# Web Push 通知 (Round 34 TOP 3)
+# ============================================================
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:support@in-dx.jp")
+
+
+@app.get("/api/push/public-key")
+def api_push_public_key():
+    """VAPID 公開鍵を返す。設定されていなければ空文字 (機能 disabled)"""
+    return jsonify({"publicKey": VAPID_PUBLIC_KEY or ""})
+
+
+@app.post("/api/t/<slug>/portal/<token>/push-subscribe")
+def api_t_portal_push_subscribe(slug, token):
+    """スタッフ Web Push 購読登録"""
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    payload = _get_json()
+    sub = payload.get("subscription")
+    if not sub or not isinstance(sub, dict):
+        return jsonify({"error": "missing_subscription"}), 400
+
+    # subscription を staff レコードに保存
+    def _mutate(current):
+        if current is None: return current
+        for st in (current.get("staff") or []):
+            if st.get("id") == staff_id:
+                st["pushSubscription"] = sub
+                break
+        return current
+    s.transactional_update(_mutate)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/t/<slug>/portal/<token>/push-unsubscribe")
+def api_t_portal_push_unsubscribe(slug, token):
+    if not _valid_slug(slug):
+        return jsonify({"error": "invalid_slug"}), 400
+    s = get_tenant_storage(slug)
+    staff_id = s.lookup_staff_by_token(token)
+    if not staff_id:
+        return jsonify({"error": "invalid_token"}), 404
+    def _mutate(current):
+        if current is None: return current
+        for st in (current.get("staff") or []):
+            if st.get("id") == staff_id:
+                st.pop("pushSubscription", None)
+                break
+        return current
+    s.transactional_update(_mutate)
+    return jsonify({"ok": True})
+
+
+def send_web_push(subscription, title, body, url=None, urgent=False):
+    """指定 subscription に Web Push を送信。pywebpush が無ければ no-op."""
+    if not VAPID_PRIVATE_KEY or not subscription:
+        return False
+    try:
+        from pywebpush import webpush, WebPushException
+        payload = {"title": title, "body": body, "url": url or "/", "urgent": urgent}
+        webpush(
+            subscription_info=subscription,
+            data=json.dumps(payload),
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": VAPID_SUBJECT},
+        )
+        return True
+    except ImportError:
+        print("[push] pywebpush not installed; skip")
+        return False
+    except Exception as e:
+        # Subscription 失効 (410 Gone) などは握りつぶして OK
+        print(f"[push] send failed: {e}")
+        return False
 
 
 # ============================================================

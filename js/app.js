@@ -2774,6 +2774,193 @@ function renderHeader() {
 }
 
 // ===== View: Dashboard =====
+// ===== タスクチェックリスト (Round 34 TOP 1) =====
+const TASK_CHECKLIST = {
+  daily: [
+    { id: "d_check_today", label: "本日の出勤者を確認", tip: "ホームの「☀ 本日の出勤者」カードで打刻状況を確認。未打刻者がいたら声がけ" },
+    { id: "d_check_msg", label: "スタッフからのメッセージ確認", tip: "スタッフ&希望タブの下部にメッセージ一覧。緊急休みは赤色強調表示" },
+  ],
+  weekly: [
+    { id: "w_collect_pref", label: "翌週分の希望を集める", tip: "「📨 募集メッセージ生成」で LINE 用テキストをワンクリック作成" },
+    { id: "w_generate_ai", label: "AI でシフトを生成", tip: "「🤖 AI 自動生成」を実行。改善ポイントが自動表示されるので確認" },
+    { id: "w_publish", label: "シフトを確定 & 通知", tip: "確定モーダルにヘルスチェック表示。問題なければ確定 + 通知メール送信" },
+    { id: "w_review_late", label: "遅刻・早退・残業を確認", tip: "ホームの注意事項アラートで月次の異常を検知" },
+  ],
+  monthly: [
+    { id: "m_export_payroll", label: "給与計算 CSV をエクスポート", tip: "シフトタブ末尾「💴 給与計算 CSV」。実労働時間ベースを推奨" },
+    { id: "m_review_report", label: "月次レポートを店舗会議で共有", tip: "「📈 月次レポート」を PDF 保存して経営判断資料に活用" },
+    { id: "m_input_sales", label: "日次売上を入力 (任意)", tip: "ダッシュボード「💰 人件費率」カード→「📝 売上を入力」。AI 推奨人数の精度が上がる" },
+    { id: "m_check_lcr", label: "人件費率の達成度を確認", tip: "目標値 (業界平均 28-32%) に対する乖離を確認。AI 戦略を「コスト」に変えて再生成も" },
+  ],
+  setup: [
+    { id: "s_business_type", label: "業態テンプレを適用", tip: "設定タブ冒頭の「🚀 はじめての方は 2 分で完了」ウィザードを実行" },
+    { id: "s_add_staff", label: "スタッフを登録", tip: "1人ずつ追加 / CSV 一括取込 / サンプルで体験 の 3 通り" },
+    { id: "s_share_links", label: "スタッフに希望入力リンク共有", tip: "「🔗 全員のリンクをコピー」で LINE グループに一括送信" },
+    { id: "s_first_shift", label: "初回シフトを生成", tip: "希望が集まったら「🤖 AI 自動生成」 → 確認 → 確定" },
+  ],
+};
+
+function renderTaskChecklist() {
+  const completed = state.meta.taskChecklist || {};
+  const isSetupComplete = (TASK_CHECKLIST.setup || []).every(t => completed[t.id]);
+
+  // セットアップ未完なら最優先表示、完了したら毎週/毎月を表示
+  const sections = isSetupComplete
+    ? [
+        { key: "weekly", label: "📅 毎週のルーチン", items: TASK_CHECKLIST.weekly },
+        { key: "monthly", label: "📊 毎月のルーチン", items: TASK_CHECKLIST.monthly },
+      ]
+    : [
+        { key: "setup", label: "🚀 初日のセットアップ", items: TASK_CHECKLIST.setup },
+      ];
+
+  // 進捗計算
+  let totalTasks = 0, completedTasks = 0;
+  for (const sec of sections) {
+    for (const t of sec.items) {
+      totalTasks++;
+      if (completed[t.id]) completedTasks++;
+    }
+  }
+  const pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
+  card.appendChild(el("details", { open: pct < 100 ? "" : null }, [
+    el("summary", { class: "cursor-pointer flex items-center justify-between gap-2" }, [
+      el("div", { class: "flex items-center gap-2" }, [
+        el("span", { class: "font-semibold text-sm" }, "📋 やることリスト"),
+        el("span", { class: "text-xs text-slate-500" }, `${completedTasks}/${totalTasks} 完了`),
+      ]),
+      el("div", { class: "flex items-center gap-2 flex-1 max-w-32" }, [
+        el("div", { class: "flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded" }, [
+          el("div", { class: "h-full rounded bg-emerald-500", style: { width: pct + "%" } }),
+        ]),
+        el("span", { class: "text-xs font-bold text-emerald-700 w-8 text-right" }, pct + "%"),
+      ]),
+    ]),
+    (() => {
+      const wrap = el("div", { class: "mt-3 space-y-3" });
+      for (const sec of sections) {
+        const secEl = el("div", {});
+        secEl.appendChild(el("div", { class: "text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1" }, sec.label));
+        for (const t of sec.items) {
+          const isDone = !!completed[t.id];
+          const row = el("label", { class: `flex items-start gap-2 p-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer ${isDone ? "opacity-60" : ""}` });
+          const cb = el("input", { type: "checkbox" });
+          if (isDone) cb.checked = true;
+          cb.onchange = () => {
+            if (cb.checked) {
+              state.meta.taskChecklist[t.id] = { completedAt: new Date().toISOString() };
+            } else {
+              delete state.meta.taskChecklist[t.id];
+            }
+            persist();
+            // 即座に再描画 (進捗バー更新)
+            render();
+          };
+          row.appendChild(cb);
+          row.appendChild(el("div", { class: "flex-1" }, [
+            el("div", { class: `text-sm ${isDone ? "line-through text-slate-500" : ""}` }, t.label),
+            el("div", { class: "text-[10px] text-slate-500 dark:text-slate-400" }, "💡 " + t.tip),
+          ]));
+          secEl.appendChild(row);
+        }
+        wrap.appendChild(secEl);
+      }
+      // セットアップ完了時の祝福
+      if (isSetupComplete && completedTasks === totalTasks) {
+        wrap.appendChild(el("div", { class: "bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-300 dark:border-emerald-700 rounded p-3 text-sm text-emerald-800 dark:text-emerald-300" },
+          "🎉 今週のルーチン完了です！来週もこのペースを維持しましょう。"));
+      }
+      return wrap;
+    })(),
+  ]));
+  return card;
+}
+
+// ===== プラン表示 + アップグレード動線 (Round 34 TOP 2) =====
+async function fetchAndRenderPlanInfo() {
+  // tenant API から plan 情報取得 (簡易: localStorage キャッシュ)
+  if (!window.ShiftyAPI || !window.ShiftyAPI.tenantSlug) return;
+  // 既存の owner tenants から自分の plan を判定
+  if (_ownerTenants && _ownerTenants.length > 0) {
+    const cur = _ownerTenants.find(t => t.slug === window.ShiftyAPI.tenantSlug);
+    if (cur) {
+      window._currentPlan = cur.plan || "free";
+    }
+  }
+}
+
+function renderPlanCard() {
+  const plan = window._currentPlan || "free";
+  const activeStaff = state.staff.filter(s => !s.archived).length;
+  const FREE_LIMIT = 8;
+  const isAtLimit = plan === "free" && activeStaff >= FREE_LIMIT;
+  const isNearLimit = plan === "free" && activeStaff >= FREE_LIMIT - 1 && activeStaff < FREE_LIMIT;
+
+  const card = el("div", {
+    class: `${plan === "free" ? "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700" : "bg-gradient-to-br from-emerald-50 to-blue-50 dark:from-emerald-900/30 dark:to-blue-900/30 border border-emerald-300 dark:border-emerald-700"} rounded-xl p-4`,
+  });
+  card.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
+    el("div", { class: "flex items-center gap-2" }, [
+      el("span", { class: "text-xl" }, plan === "free" ? "🆓" : "💎"),
+      el("div", {}, [
+        el("div", { class: "font-semibold text-sm" }, plan === "free" ? "Free プラン" : "Pro プラン"),
+        el("div", { class: "text-xs text-slate-500" }, plan === "free" ? "8 名まで永久無料" : "無制限・全機能利用可"),
+      ]),
+    ]),
+    plan === "free" ? el("button", {
+      class: "text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1.5 font-bold",
+      onclick: () => openUpgradeDialog(),
+    }, "💎 Pro へアップグレード") : el("span", { class: "text-xs text-emerald-700 dark:text-emerald-400 font-semibold" }, "✓ 全機能利用可"),
+  ]));
+
+  // スタッフ数バー
+  card.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400 mb-1" },
+    `スタッフ数: ${activeStaff}${plan === "free" ? ` / ${FREE_LIMIT}` : " (無制限)"}`));
+  if (plan === "free") {
+    const ratio = Math.min(1, activeStaff / FREE_LIMIT);
+    const color = isAtLimit ? "#dc2626" : isNearLimit ? "#f59e0b" : "#10b981";
+    card.appendChild(el("div", { class: "gauge-bar" }, [
+      el("div", { style: { width: (ratio * 100) + "%", background: color } }),
+    ]));
+    if (isAtLimit) {
+      card.appendChild(el("div", { class: "mt-2 text-xs text-red-700 bg-red-50 dark:bg-red-900/30 rounded p-2" },
+        "⚠️ Free プランの上限です。アクティブスタッフを 8 名以下に減らすか、Pro へアップグレードしてください。"));
+    } else if (isNearLimit) {
+      card.appendChild(el("div", { class: "mt-2 text-xs text-amber-700 bg-amber-50 dark:bg-amber-900/30 rounded p-2" },
+        `⚠️ あと ${FREE_LIMIT - activeStaff} 名で Free プラン上限。Pro なら無制限です。`));
+    }
+  }
+  return card;
+}
+
+function openUpgradeDialog() {
+  const body = el("div", { class: "p-6 space-y-4" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "💎 Pro プランへアップグレード"));
+  body.appendChild(el("p", { class: "text-sm text-slate-600 dark:text-slate-400" },
+    "Pro プランでは以下の制限が解除されます:"));
+  body.appendChild(el("ul", { class: "space-y-1.5 text-sm" }, [
+    el("li", {}, "✅ スタッフ数 無制限 (Free は 8 名まで)"),
+    el("li", {}, "✅ 多店舗対応 (1 オーナー × 5 店舗まで)"),
+    el("li", {}, "✅ サーバ側自動バックアップ (30 日分)"),
+    el("li", {}, "✅ 優先サポート (平日 9-18 時)"),
+    el("li", {}, "✅ 全 AI 機能 (モデルシフト・自動代打 等)"),
+  ]));
+  body.appendChild(el("div", { class: "bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-300 rounded-lg p-3 text-center" }, [
+    el("div", { class: "text-2xl font-bold" }, "¥1,980 / 月"),
+    el("div", { class: "text-xs text-slate-600 dark:text-slate-400" }, "1 店舗あたり / 14 日無料トライアル"),
+  ]));
+  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "あとで"),
+    el("a", {
+      href: "https://shifty.in-dx.jp/#contact", target: "_blank",
+      class: "px-4 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-bold",
+    }, "📞 アップグレード相談"),
+  ]));
+  modal(body);
+}
+
 // Round 28 TOP 1: ダッシュボード ウィジェット ON/OFF 判定
 function dashboardWidgetOn(widgetId) {
   if (!state || !state.meta || !state.meta.dashboardWidgets) return true;
@@ -2947,6 +3134,18 @@ function viewHome() {
     }
     progressCard.appendChild(stepsRow);
     wrap.appendChild(progressCard);
+  }
+
+  // Round 34 TOP 1: タスクチェックリスト
+  if (state.staff.length > 0) {
+    const checklistCard = renderTaskChecklist();
+    if (checklistCard) wrap.appendChild(checklistCard);
+  }
+
+  // Round 34 TOP 2: プラン情報カード (Pro 表示や上限警告)
+  if (window.ShiftyAPI && window.ShiftyAPI.tenantSlug) {
+    const planCard = renderPlanCard();
+    if (planCard) wrap.appendChild(planCard);
   }
 
   // 「次にやること」カード
@@ -9163,7 +9362,10 @@ function openCrossStoreDashboard() {
 async function loadAndRender() {
   try {
     // Round 26: 多店舗スイッチャー初期化 (失敗しても続行)
-    initShopSwitcher().catch(() => {});
+    initShopSwitcher().then(() => {
+      // Round 34 TOP 2: プラン情報を取得 (tenant 情報から)
+      try { fetchAndRenderPlanInfo(); } catch (_) {}
+    }).catch(() => {});
     state = await loadState();
     // 日次スナップショット (Round 17 TOP 1)
     try {

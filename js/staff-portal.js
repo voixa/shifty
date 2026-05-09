@@ -1198,6 +1198,9 @@
         <button id="statementBtn" class="bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg px-5 py-3 text-sm font-semibold sm:col-span-2">
           🧾 今月の給与明細を見る
         </button>
+        <button id="pushBtn" class="bg-purple-500 hover:bg-purple-600 text-white rounded-lg px-5 py-3 text-sm font-semibold sm:col-span-2 hidden">
+          🔔 シフト変更通知を有効にする
+        </button>
       </div>
       <div class="text-xs text-slate-400 mt-2 text-center">変更希望・質問・報告などお気軽に</div>`;
 
@@ -1337,6 +1340,9 @@
     // 給与明細ボタン (Round 24 TOP 2)
     const stmtBtn = document.getElementById("statementBtn");
     if (stmtBtn) stmtBtn.onclick = () => openMonthlyStatement();
+
+    // Web Push 通知ボタン (Round 34 TOP 3)
+    setupPushNotificationButton();
 
     // 緊急休み申請ボタン (Round 7)
     document.querySelectorAll(".emergency-absence-btn").forEach(btn => {
@@ -1714,6 +1720,80 @@
         toast("送信失敗: " + (e?.message || ""), "error");
       }
     };
+  }
+
+  // ===== Web Push 通知 (Round 34 TOP 3) =====
+  async function setupPushNotificationButton() {
+    const btn = document.getElementById("pushBtn");
+    if (!btn) return;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return; // 非対応ブラウザ
+
+    let publicKey;
+    try {
+      const r = await window.ShiftyAPI.pushPublicKey();
+      publicKey = r.publicKey;
+    } catch (_) { return; }
+    if (!publicKey) return; // VAPID 未設定なら表示しない
+
+    // 現在の状態を確認
+    const reg = await navigator.serviceWorker.ready.catch(() => null);
+    if (!reg) return;
+    const sub = await reg.pushManager.getSubscription().catch(() => null);
+    const permission = Notification.permission;
+
+    if (sub && permission === "granted") {
+      btn.classList.remove("hidden");
+      btn.textContent = "🔔 通知有効中 (タップで停止)";
+      btn.classList.remove("bg-purple-500", "hover:bg-purple-600");
+      btn.classList.add("bg-slate-500", "hover:bg-slate-600");
+      btn.onclick = async () => {
+        if (!confirm("シフト変更通知を停止しますか？")) return;
+        try {
+          await sub.unsubscribe();
+          await window.ShiftyAPI.portalPushUnsubscribe(token);
+          toast("通知を停止しました", "info");
+          setupPushNotificationButton();
+        } catch (e) {
+          toast("停止失敗: " + (e?.message || ""), "error");
+        }
+      };
+    } else if (permission === "denied") {
+      btn.classList.remove("hidden");
+      btn.textContent = "🔕 通知ブロック中 (ブラウザ設定で許可してください)";
+      btn.disabled = true;
+      btn.classList.add("opacity-50", "pointer-events-none");
+    } else {
+      btn.classList.remove("hidden");
+      btn.textContent = "🔔 シフト変更通知を有効にする";
+      btn.onclick = async () => {
+        try {
+          const perm = await Notification.requestPermission();
+          if (perm !== "granted") {
+            toast("通知の許可が必要です", "info");
+            return;
+          }
+          const subscription = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey),
+          });
+          await window.ShiftyAPI.portalPushSubscribe(token, subscription.toJSON());
+          toast("✓ 通知を有効にしました。シフト変更時にお知らせします", "success", 5000);
+          setupPushNotificationButton();
+        } catch (e) {
+          toast("通知設定失敗: " + (e?.message || ""), "error");
+        }
+      };
+    }
+  }
+
+  // VAPID キーを Uint8Array に変換 (Web Push 仕様)
+  function urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/\-/g, "+").replace(/_/g, "/");
+    const rawData = atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
   }
 
   // ===== 月次給与明細 (Round 24 TOP 2) =====

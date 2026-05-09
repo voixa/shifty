@@ -438,6 +438,10 @@
     if (!Array.isArray(state.meta.auditLog)) state.meta.auditLog = [];
     // テーマ (Round 25 TOP 3) — "auto" | "light" | "dark"
     if (state.meta.theme === undefined) state.meta.theme = "auto";
+    // タスクチェックリスト完了状態 (Round 34 TOP 1)
+    if (!state.meta.taskChecklist || typeof state.meta.taskChecklist !== "object") {
+      state.meta.taskChecklist = {}; // taskId -> { completedAt: ISO }
+    }
     // ダッシュボードウィジェットの ON/OFF (Round 28 TOP 1)
     if (!state.meta.dashboardWidgets || typeof state.meta.dashboardWidgets !== "object") {
       state.meta.dashboardWidgets = {
