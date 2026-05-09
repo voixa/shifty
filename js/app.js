@@ -3447,6 +3447,51 @@ function viewSchedule() {
         onclick: toggleMultiWeekView,
         title: "今週 + 翌3週 を一覧表示",
       }, multiWeekView ? "📆 4週表示 ON" : "📆 4週表示"),
+      // Round 24 TOP 3: AI 戦略ピッカー
+      (() => {
+        const PRESETS_QUICK = {
+          "balanced":   { emoji: "⚖️", label: "バランス" },
+          "preference": { emoji: "😊", label: "希望優先" },
+          "cost":       { emoji: "💴", label: "コスト" },
+          "skill":      { emoji: "🌟", label: "スキル" },
+          "fairness":   { emoji: "🤝", label: "公平性" },
+        };
+        const PRESET_WEIGHTS = {
+          "balanced":   { preference: 0.38, positionMatch: 0.14, fairness: 0.18, cost: 0.12, skill: 0.10, skillMix: 0.08 },
+          "preference": { preference: 0.55, positionMatch: 0.10, fairness: 0.13, cost: 0.05, skill: 0.10, skillMix: 0.07 },
+          "cost":       { preference: 0.22, positionMatch: 0.13, fairness: 0.13, cost: 0.35, skill: 0.10, skillMix: 0.07 },
+          "skill":      { preference: 0.27, positionMatch: 0.18, fairness: 0.13, cost: 0.10, skill: 0.20, skillMix: 0.12 },
+          "fairness":   { preference: 0.27, positionMatch: 0.10, fairness: 0.38, cost: 0.10, skill: 0.08, skillMix: 0.07 },
+        };
+        // 現在の重みからプリセットを判定 (近似一致)
+        const aw = state.meta.algorithmWeights || {};
+        let curKey = "balanced";
+        for (const [k, w] of Object.entries(PRESET_WEIGHTS)) {
+          if (Math.abs((aw.preference || 0) - w.preference) < 0.05
+              && Math.abs((aw.fairness || 0) - w.fairness) < 0.05
+              && Math.abs((aw.cost || 0) - w.cost) < 0.05) {
+            curKey = k; break;
+          }
+        }
+        const sel = el("select", {
+          class: "text-sm border rounded-md px-2 py-1.5 bg-white",
+          title: "AI 戦略を切替 (詳細は設定タブ)",
+          onchange: () => {
+            const newKey = sel.value;
+            const w = PRESET_WEIGHTS[newKey];
+            if (!w) return;
+            state.meta.algorithmWeights = { ...w };
+            persist();
+            toast(`✓ AI 戦略「${PRESETS_QUICK[newKey].emoji} ${PRESETS_QUICK[newKey].label}」に切替`, "success");
+          },
+        });
+        for (const [k, p] of Object.entries(PRESETS_QUICK)) {
+          const opt = el("option", { value: k }, `${p.emoji} ${p.label}`);
+          if (k === curKey) opt.selected = true;
+          sel.appendChild(opt);
+        }
+        return sel;
+      })(),
       el("button", { class: "text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md px-3 py-1.5",
         onclick: autoGenerate }, "🤖 AI自動生成"),
     ]),
@@ -6462,13 +6507,13 @@ function viewSettings() {
   algoCard.appendChild(el("div", { class: "text-xs text-slate-500" },
     "プリセットを選ぶか、各スコア要素の重みを直接調整できます。"));
 
-  // Round 6: プリセット選択
+  // Round 6 + Round 24: プリセット選択 — skillMix 含む全6因子で正規化
   const PRESETS = {
-    "balanced": { label: "⚖️ バランス", desc: "標準的な配分", weights: { preference: 0.40, positionMatch: 0.15, fairness: 0.20, cost: 0.15, skill: 0.10 } },
-    "preference": { label: "❤️ 希望最優先", desc: "スタッフ希望を最大限尊重", weights: { preference: 0.60, positionMatch: 0.10, fairness: 0.15, cost: 0.05, skill: 0.10 } },
-    "cost": { label: "💴 コスト重視", desc: "人件費を最小化（時給低い人優先）", weights: { preference: 0.25, positionMatch: 0.15, fairness: 0.15, cost: 0.35, skill: 0.10 } },
-    "skill": { label: "⭐ スキル重視", desc: "ピーク時に熟練者を配置", weights: { preference: 0.30, positionMatch: 0.20, fairness: 0.15, cost: 0.10, skill: 0.25 } },
-    "fairness": { label: "🤝 公平性重視", desc: "全員に均等にシフトを配分", weights: { preference: 0.30, positionMatch: 0.10, fairness: 0.40, cost: 0.10, skill: 0.10 } },
+    "balanced":   { label: "⚖️ バランス",     desc: "標準的な配分",                       weights: { preference: 0.38, positionMatch: 0.14, fairness: 0.18, cost: 0.12, skill: 0.10, skillMix: 0.08 } },
+    "preference": { label: "😊 希望最優先",     desc: "スタッフ希望を最大限尊重",         weights: { preference: 0.55, positionMatch: 0.10, fairness: 0.13, cost: 0.05, skill: 0.10, skillMix: 0.07 } },
+    "cost":       { label: "💴 コスト重視",     desc: "人件費を最小化（時給低い人優先）", weights: { preference: 0.22, positionMatch: 0.13, fairness: 0.13, cost: 0.35, skill: 0.10, skillMix: 0.07 } },
+    "skill":      { label: "🌟 スキル重視",     desc: "ピーク時に熟練者を配置・育成ペア",weights: { preference: 0.27, positionMatch: 0.18, fairness: 0.13, cost: 0.10, skill: 0.20, skillMix: 0.12 } },
+    "fairness":   { label: "🤝 公平性重視",     desc: "全員に均等にシフトを配分",         weights: { preference: 0.27, positionMatch: 0.10, fairness: 0.38, cost: 0.10, skill: 0.08, skillMix: 0.07 } },
   };
   const presetGrid = el("div", { class: "grid grid-cols-2 md:grid-cols-5 gap-2 mb-3" });
   for (const [k, p] of Object.entries(PRESETS)) {
@@ -6493,6 +6538,7 @@ function viewSettings() {
     { id: "fairness",      label: "公平性",         desc: "未充足時間が多い人を優先" },
     { id: "cost",          label: "コスト",         desc: "時給が低い人を優先（人件費抑制）" },
     { id: "skill",         label: "スキル",         desc: "高スキル人を優先" },
+    { id: "skillMix",      label: "スキル構成",     desc: "ベテラン×新人ペアリング (Round 23)" },
   ];
   const grid = el("div", { class: "space-y-2" });
   FACTORS.forEach(f => {
@@ -6539,7 +6585,7 @@ function viewSettings() {
       persist(); render(); toast("重みを保存（次回 AI 生成から適用）", "success");
     } }, "💾 保存"),
     el("button", { class: "text-sm border border-slate-300 rounded-md px-4 py-1.5", onclick: () => {
-      state.meta.algorithmWeights = { preference: 0.40, positionMatch: 0.15, fairness: 0.20, cost: 0.15, skill: 0.10 };
+      state.meta.algorithmWeights = { preference: 0.38, positionMatch: 0.14, fairness: 0.18, cost: 0.12, skill: 0.10, skillMix: 0.08 };
       state.meta.randomStarts = 5;
       persist(); render(); toast("既定値に戻しました", "success");
     } }, "↻ 既定値に戻す"),
@@ -6646,27 +6692,176 @@ async function loadStaffMessages() {
     }
     const KIND_LABEL = { general: "💬 連絡", change_request: "📅 変更希望", question: "❓ 質問", report: "📢 報告" };
     msgs.forEach(m => {
-      const row = el("div", { class: "bg-slate-50 rounded-md p-3 text-sm" });
+      // Round 24 TOP 1: 緊急当日休み連絡を検出
+      const isEmergency = (m.message || "").includes("【緊急】当日休み連絡");
+      const cls = isEmergency
+        ? "bg-red-50 border-2 border-red-300 rounded-md p-3 text-sm"
+        : "bg-slate-50 rounded-md p-3 text-sm";
+      const row = el("div", { class: cls });
       const at = m.createdAt ? new Date(m.createdAt).toLocaleString("ja-JP") : "?";
       row.innerHTML = `
         <div class="flex items-center justify-between mb-1">
-          <span class="font-semibold">${escapeHtml(m.staffName || m.staffId)}</span>
+          <span class="font-semibold ${isEmergency ? "text-red-800" : ""}">${isEmergency ? "🚨 " : ""}${escapeHtml(m.staffName || m.staffId)}</span>
           <span class="text-xs text-slate-500">${at}</span>
         </div>
-        <div class="text-xs text-amber-700 mb-1">${KIND_LABEL[m.kind] || m.kind}</div>
+        <div class="text-xs ${isEmergency ? "text-red-700 font-bold" : "text-amber-700"} mb-1">${isEmergency ? "🚨 緊急当日休み連絡" : (KIND_LABEL[m.kind] || m.kind)}</div>
         <div class="text-sm text-slate-700 whitespace-pre-wrap mb-2">${escapeHtml(m.message || "")}</div>
       `;
+      const btnRow = el("div", { class: "flex gap-2 flex-wrap" });
+      // Round 24 TOP 1: 緊急の場合は代打候補ボタン
+      if (isEmergency) {
+        btnRow.appendChild(el("button", {
+          class: "text-xs bg-red-600 hover:bg-red-700 text-white rounded px-3 py-1 font-bold",
+          onclick: () => openEmergencySubstituteFlow(m),
+        }, "🆘 代打を探す"));
+      }
       // 返信ボタン (Round 12)
-      const replyBtn = el("button", {
+      btnRow.appendChild(el("button", {
         class: "text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded px-2 py-1 font-semibold",
         onclick: () => openReplyDialog(m),
-      }, "✉️ 返信文を生成");
-      row.appendChild(replyBtn);
+      }, "✉️ 返信文を生成"));
+      row.appendChild(btnRow);
       listEl.appendChild(row);
     });
   } catch (e) {
     listEl.innerHTML = `<div class="text-xs text-red-600">取得失敗: ${escapeHtml(e.message)}</div>`;
   }
+}
+
+// Round 24 TOP 1: 緊急代打フロー
+function openEmergencySubstituteFlow(message) {
+  const staffId = message.staffId;
+  const staff = state.staff.find(s => s.id === staffId);
+  if (!staff) { toast("該当スタッフが見つかりません", "error"); return; }
+
+  // 今日の該当スタッフのシフトを探す
+  const todayStr = new Date().toISOString().slice(0, 10);
+  let todayShift = null;
+  let parentWeek = null;
+  for (const [wkKey, wk] of Object.entries(state.weeks || {})) {
+    if (wk.status !== "published") continue;
+    for (const a of (wk.assignments || [])) {
+      if (a.staffId === staffId && a.date === todayStr) {
+        const start = new Date(`${a.date}T${a.startTime}:00`);
+        if (start > new Date()) { // 未来のシフトのみ
+          todayShift = a;
+          parentWeek = wkKey;
+          break;
+        }
+      }
+    }
+    if (todayShift) break;
+  }
+
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg text-red-800" },
+    `🆘 ${staff.name} さんの緊急代打`));
+  if (!todayShift) {
+    body.appendChild(el("p", { class: "text-sm text-slate-600" },
+      "本日の未来シフトが見つかりません。既に開始済みの場合や、別日のシフトの場合は、シフト編成画面から手動で対応してください。"));
+    body.appendChild(el("div", { class: "flex justify-end pt-2 border-t" }, [
+      el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    ]));
+    modal(body);
+    return;
+  }
+
+  body.appendChild(el("div", { class: "bg-red-50 border border-red-200 rounded p-3 text-sm" }, [
+    el("div", { class: "font-semibold" }, `対象シフト: ${todayShift.date} ${todayShift.startTime}〜${todayShift.endTime}`),
+    el("div", { class: "text-xs text-slate-600" }, `${posCfg(todayShift.position).label} / 元担当: ${staff.name}`),
+  ]));
+
+  // 該当週を一時的に下書きにして代打を計算
+  const wk = state.weeks[parentWeek];
+  const wasPublished = wk.status === "published";
+
+  // 代打候補を計算 (公開状態でも候補は計算可能)
+  const subs = recommendSubstitute(todayShift, {
+    staff: state.staff.filter(s => !s.archived),
+    slots: wk.slots || [],
+    preferences: wk.preferences || [],
+    assignments: wk.assignments || [],
+    laborRules: state.meta.laborRules,
+    weights: state.meta.algorithmWeights,
+  });
+
+  if (!subs.length) {
+    body.appendChild(el("div", { class: "text-sm text-amber-700 bg-amber-50 rounded p-3" },
+      "⚠️ 代替可能なスタッフが見つかりません。スタッフタブから連絡先を確認して、個別に依頼してください。"));
+  } else {
+    body.appendChild(el("div", { class: "text-xs font-semibold text-slate-700" }, "推奨代打 (上位 3 名):"));
+    const list = el("div", { class: "space-y-1.5" });
+    subs.slice(0, 3).forEach((cand, i) => {
+      const s = cand.staff;
+      const row = el("div", { class: "flex items-center justify-between bg-slate-50 rounded p-2.5" });
+      row.innerHTML = `
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold">${i + 1}位: ${escapeHtml(s.name)}
+            <span class="text-xs text-slate-500 font-normal">${escapeHtml(posCfg(s.position).label)} / ¥${s.hourlyWage}/h</span>
+          </div>
+          <div class="text-xs text-slate-600">スコア ${Math.round(cand.score * 100)} ${(cand.reasons || []).slice(0, 2).map(r => `· ${typeof r === 'string' ? r : r[0] || ''}`).join(" ")}</div>
+          ${(s.email || s.webhookUrl) ? '<div class="text-[10px] text-emerald-600">✉️ 連絡可能</div>' : '<div class="text-[10px] text-amber-600">⚠️ 連絡先未登録</div>'}
+        </div>`;
+      const swapBtn = el("button", {
+        class: "text-xs bg-red-600 hover:bg-red-700 text-white rounded px-3 py-2 font-bold whitespace-nowrap ml-2",
+        onclick: async () => {
+          if (!confirm(
+            `${todayShift.date} ${todayShift.startTime}〜${todayShift.endTime} ${posCfg(todayShift.position).label} を\n\n` +
+            `${staff.name} さん → ${s.name} さんへ交代しますか？\n\n` +
+            `両者にシフト変更通知メールが自動送信されます。`
+          )) return;
+          // 該当 assignment を更新
+          const wkk = state.weeks[parentWeek];
+          const idx = (wkk.assignments || []).findIndex(x => x.id === todayShift.id);
+          if (idx < 0) { toast("該当アサインが既に変更されています", "error"); return; }
+          // 確定済の場合はスナップショット
+          if (wasPublished) {
+            try { createSnapshot("manual", `緊急代打 ${staff.name} → ${s.name}`); } catch (_) {}
+          }
+          wkk.assignments[idx] = {
+            ...todayShift,
+            staffId: s.id,
+            cost: s.hourlyWage * calcHours(todayShift.startTime, todayShift.endTime),
+            substituteFor: staffId,
+            substitutedAt: new Date().toISOString(),
+          };
+          logChange("substitute", `緊急代打: ${staff.name} → ${s.name} (${todayShift.date} ${todayShift.startTime}〜)`);
+          await persist();
+          closeModal();
+          render();
+          toast(`✓ ${s.name} さんへ代打しました。両者へ通知メールを送信します`, "success", 5000);
+          // 通知 (両者に変更通知)
+          if (wasPublished) {
+            try {
+              await window.ShiftyAPI.notifyShifts(parentWeek, {
+                staffIds: [staffId, s.id],
+                subjectPrefix: "【緊急代打】",
+              });
+            } catch (e) { toast("通知送信失敗: " + (e?.message || ""), "error"); }
+          }
+        },
+      }, "代打 →");
+      row.appendChild(swapBtn);
+      list.appendChild(row);
+    });
+    body.appendChild(list);
+  }
+
+  body.appendChild(el("div", { class: "flex justify-between gap-2 pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    el("button", {
+      class: "px-3 py-1.5 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-md font-semibold",
+      onclick: () => {
+        if (!confirm(`代打が見つからない場合に、シフトを「不在」にできます (該当アサインを削除)。続行しますか？`)) return;
+        const wkk = state.weeks[parentWeek];
+        wkk.assignments = (wkk.assignments || []).filter(x => x.id !== todayShift.id);
+        logChange("delete", `緊急休み: ${staff.name} 削除 (${todayShift.date} ${todayShift.startTime}〜)`);
+        persist(); closeModal(); render();
+        toast(`シフトから ${staff.name} を削除しました (要・追加対応)`, "info", 5000);
+      },
+    }, "代打なしで削除"),
+  ]));
+  modal(body);
 }
 
 async function openSnapshotsDialog() {

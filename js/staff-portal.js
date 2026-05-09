@@ -1185,6 +1185,9 @@
         <button id="icalBtn" class="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-5 py-3 text-sm font-semibold">
           📅 カレンダーに追加 (.ics)
         </button>
+        <button id="statementBtn" class="bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg px-5 py-3 text-sm font-semibold sm:col-span-2">
+          🧾 今月の給与明細を見る
+        </button>
       </div>
       <div class="text-xs text-slate-400 mt-2 text-center">変更希望・質問・報告などお気軽に</div>`;
 
@@ -1312,6 +1315,10 @@
     // iCal ダウンロードボタン (Round 6)
     const icalBtn = document.getElementById("icalBtn");
     if (icalBtn) icalBtn.onclick = () => downloadIcs();
+
+    // 給与明細ボタン (Round 24 TOP 2)
+    const stmtBtn = document.getElementById("statementBtn");
+    if (stmtBtn) stmtBtn.onclick = () => openMonthlyStatement();
 
     // 緊急休み申請ボタン (Round 7)
     document.querySelectorAll(".emergency-absence-btn").forEach(btn => {
@@ -1632,6 +1639,179 @@
         submitBtn.disabled = false; submitBtn.textContent = "申請を送信";
         toast("送信失敗: " + (e?.message || ""), "error");
       }
+    };
+  }
+
+  // ===== 月次給与明細 (Round 24 TOP 2) =====
+  function openMonthlyStatement() {
+    // 当月のシフト + 履歴シフトを集める
+    const m = data.monthlyStats || {};
+    const monthKey = m.monthKey || (data.weekStart || "").slice(0, 7);
+    if (!monthKey) { toast("対象月が判定できません", "error"); return; }
+
+    // history (確定済) + assignments (今週) を結合 — 重複は除去
+    const allAss = [];
+    const seen = new Set();
+    for (const h of (data.history || [])) {
+      const key = `${h.date}|${h.startTime}|${h.endTime}`;
+      if (seen.has(key)) continue;
+      if (!(h.date || "").startsWith(monthKey)) continue;
+      allAss.push(h);
+      seen.add(key);
+    }
+    for (const a of (data.assignments || [])) {
+      const key = `${a.date}|${a.startTime}|${a.endTime}`;
+      if (seen.has(key)) continue;
+      if (!(a.date || "").startsWith(monthKey)) continue;
+      allAss.push({
+        date: a.date,
+        startTime: a.startTime,
+        endTime: a.endTime,
+        position: a.position,
+        hours: calcHours(a.startTime, a.endTime),
+        pay: a.cost || 0,
+        clockIn: a.clockIn,
+        clockOut: a.clockOut,
+        note: a.note,
+      });
+      seen.add(key);
+    }
+    allAss.sort((a, b) => a.date.localeCompare(b.date) || (a.startTime || "").localeCompare(b.startTime || ""));
+
+    if (allAss.length === 0) {
+      toast(`${monthKey} のシフトデータがありません`, "info"); return;
+    }
+
+    const positions = data.positions || [];
+    const totalH = allAss.reduce((s, a) => s + (a.hours || 0), 0);
+    const totalP = allAss.reduce((s, a) => s + (a.pay || 0), 0);
+
+    // 実労働時間とのギャップ
+    let actualH = 0, actualCount = 0;
+    for (const a of allAss) {
+      if (a.clockIn && a.clockOut) {
+        try {
+          const inDt = new Date(a.clockIn), outDt = new Date(a.clockOut);
+          actualH += (outDt - inDt) / 3600000;
+          actualCount++;
+        } catch (_) {}
+      }
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 bg-black/40 z-50 overflow-y-auto p-3";
+    overlay.innerHTML = `
+      <div class="bg-white rounded-xl max-w-md mx-auto p-5 my-4 shadow-2xl">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-bold text-lg">🧾 ${escapeHtml(monthKey)} の給与明細</h3>
+          <button id="stmt-close" class="text-2xl text-slate-400 hover:text-slate-700">&times;</button>
+        </div>
+        <div class="text-xs text-slate-600 mb-3">
+          ${escapeHtml(data.restaurantName || "")} / ${escapeHtml(data.staff?.name || "")} さん
+        </div>
+        <div class="grid grid-cols-3 gap-2 mb-3">
+          <div class="bg-slate-50 rounded p-2 text-center">
+            <div class="text-[10px] text-slate-500">出勤日数</div>
+            <div class="text-lg font-bold">${new Set(allAss.map(a => a.date)).size}</div>
+          </div>
+          <div class="bg-slate-50 rounded p-2 text-center">
+            <div class="text-[10px] text-slate-500">合計時間</div>
+            <div class="text-lg font-bold text-emerald-700">${totalH.toFixed(1)}h</div>
+          </div>
+          <div class="bg-slate-50 rounded p-2 text-center">
+            <div class="text-[10px] text-slate-500">予定給与</div>
+            <div class="text-lg font-bold text-brand-700">${fmtYen(totalP)}</div>
+          </div>
+        </div>
+        ${actualCount > 0 ? `
+        <div class="bg-emerald-50 rounded p-2 mb-3 text-xs">
+          ⏱ 実労働時間: <b>${actualH.toFixed(1)}h</b> (打刻 ${actualCount}/${allAss.length} 回)
+          ${Math.abs(actualH - totalH) > 0.1 ? `<span class="${actualH > totalH ? 'text-amber-700' : 'text-blue-700'} ml-1">予定との差 ${(actualH - totalH > 0 ? "+" : "")}${(actualH - totalH).toFixed(1)}h</span>` : ""}
+        </div>` : '<div class="bg-amber-50 rounded p-2 mb-3 text-xs text-amber-800">💡 打刻データなし — 予定時間で計算</div>'}
+        <details class="mb-3" open>
+          <summary class="text-sm font-semibold cursor-pointer">📋 日別明細 (${allAss.length} 件)</summary>
+          <div class="mt-2 space-y-1 text-xs max-h-60 overflow-y-auto">
+            ${allAss.map(a => {
+              const pos = positions.find(p => p.id === a.position) || { label: a.position };
+              const dow = ["日","月","火","水","木","金","土"][new Date(a.date).getDay()];
+              const inT = a.clockIn ? new Date(a.clockIn).toLocaleTimeString("ja-JP", {hour:"2-digit", minute:"2-digit"}) : "";
+              const outT = a.clockOut ? new Date(a.clockOut).toLocaleTimeString("ja-JP", {hour:"2-digit", minute:"2-digit"}) : "";
+              return `<div class="bg-slate-50 rounded p-2">
+                <div class="flex justify-between items-center">
+                  <span class="font-mono">${escapeHtml(a.date.slice(5))} (${dow})</span>
+                  <span class="font-semibold">${fmtYen(Math.round(a.pay))}</span>
+                </div>
+                <div class="text-slate-600 text-[10px] mt-0.5">
+                  予定 ${escapeHtml(a.startTime || "")}〜${escapeHtml(a.endTime || "")} (${escapeHtml(pos.label)})
+                  ${(inT || outT) ? `<br>実打刻 ${inT || "—"}〜${outT || "—"}` : ""}
+                  ${a.note ? `<br>📝 ${escapeHtml(a.note)}` : ""}
+                </div>
+              </div>`;
+            }).join("")}
+          </div>
+        </details>
+        <div class="flex gap-2 pt-2 border-t">
+          <button id="stmt-print" class="flex-1 bg-blue-600 text-white rounded py-2 text-sm font-semibold">🖨 印刷 / PDF 保存</button>
+          <button id="stmt-close2" class="px-4 bg-slate-200 rounded py-2 text-sm">閉じる</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#stmt-close").onclick = () => overlay.remove();
+    overlay.querySelector("#stmt-close2").onclick = () => overlay.remove();
+    overlay.querySelector("#stmt-print").onclick = () => {
+      // 印刷用ウィンドウを別途開く
+      const w = window.open("", "_blank");
+      if (!w) { toast("ポップアップがブロックされています", "error"); return; }
+      const printHtml = `
+        <!doctype html><html lang="ja"><head><meta charset="utf-8">
+        <title>${monthKey} 給与明細 - ${data.staff?.name || ""}</title>
+        <style>
+          body { font-family: 'Hiragino Sans','Yu Gothic',sans-serif; padding: 15mm; font-size: 11pt; color: #1e293b; }
+          h1 { font-size: 18pt; margin-bottom: 4mm; }
+          h2 { font-size: 11pt; color: #555; margin: 0 0 8mm; font-weight: normal; }
+          table { width: 100%; border-collapse: collapse; font-size: 11pt; }
+          th, td { border: 1px solid #888; padding: 2mm 3mm; text-align: left; }
+          th { background: #e2e8f0; }
+          .summary { margin: 4mm 0; padding: 3mm; background: #f1f5f9; border-radius: 2mm; }
+          .right { text-align: right; }
+          @media print { @page { size: A4; margin: 12mm; } }
+        </style></head><body>
+        <h1>${escapeHtml(monthKey)} 給与明細</h1>
+        <h2>${escapeHtml(data.restaurantName || "")} / ${escapeHtml(data.staff?.name || "")} さん</h2>
+        <div class="summary">
+          出勤日数: <b>${new Set(allAss.map(a => a.date)).size} 日</b> /
+          合計時間: <b>${totalH.toFixed(1)}h</b> /
+          予定給与: <b>${fmtYen(totalP)}</b>
+          ${actualCount > 0 ? `<br>実労働: <b>${actualH.toFixed(1)}h</b> (打刻 ${actualCount}/${allAss.length} 回)` : ""}
+        </div>
+        <table>
+          <thead><tr><th>日付</th><th>予定</th><th>打刻</th><th class="right">時間</th><th class="right">給与</th></tr></thead>
+          <tbody>${allAss.map(a => {
+            const pos = positions.find(p => p.id === a.position) || { label: a.position };
+            const dow = ["日","月","火","水","木","金","土"][new Date(a.date).getDay()];
+            const inT = a.clockIn ? new Date(a.clockIn).toLocaleTimeString("ja-JP", {hour:"2-digit", minute:"2-digit"}) : "";
+            const outT = a.clockOut ? new Date(a.clockOut).toLocaleTimeString("ja-JP", {hour:"2-digit", minute:"2-digit"}) : "";
+            return `<tr>
+              <td>${a.date.slice(5)} (${dow})<br><span style="font-size:9pt;color:#666">${escapeHtml(pos.label)}</span></td>
+              <td>${escapeHtml(a.startTime || "")}〜${escapeHtml(a.endTime || "")}</td>
+              <td>${inT || "—"}〜${outT || "—"}</td>
+              <td class="right">${(a.hours || 0).toFixed(1)}h</td>
+              <td class="right">${fmtYen(Math.round(a.pay))}</td>
+            </tr>`;
+          }).join("")}</tbody>
+          <tfoot><tr style="font-weight:bold">
+            <td colspan="3">合計</td>
+            <td class="right">${totalH.toFixed(1)}h</td>
+            <td class="right">${fmtYen(Math.round(totalP))}</td>
+          </tr></tfoot>
+        </table>
+        <div style="margin-top:8mm;font-size:9pt;color:#888">
+          ※ 上記は予定額です。実打刻ベースの確定額は店長より別途ご連絡があります。<br>
+          発行: ${new Date().toLocaleString("ja-JP")}
+        </div>
+        <script>setTimeout(() => window.print(), 200);<\/script>
+        </body></html>`;
+      w.document.write(printHtml);
     };
   }
 
