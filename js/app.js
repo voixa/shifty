@@ -681,6 +681,66 @@ function renderMonthlyLaborRisk() {
   return card;
 }
 
+// ===== データ復旧スナップショット (Round 17 TOP 1) =====
+const SNAPSHOT_LIMIT = 20;
+function createSnapshot(kind = "manual", label = "") {
+  if (!state || !state.meta) return null;
+  state.meta.snapshots = state.meta.snapshots || [];
+  // 浅いコピーで snapshots フィールド自体は除く (再帰防止)
+  const { snapshots: _ignore, ...metaWithoutSnaps } = state.meta;
+  const id = "snap_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const snap = {
+    id,
+    kind,            // "manual" | "auto_publish" | "auto_autogen" | "daily" | "pre_ai_clear"
+    label: (label || kind).slice(0, 80),
+    createdAt: new Date().toISOString(),
+    payload: {
+      meta: JSON.parse(JSON.stringify(metaWithoutSnaps)),
+      staff: JSON.parse(JSON.stringify(state.staff || [])),
+      weeks: JSON.parse(JSON.stringify(state.weeks || {})),
+    },
+  };
+  state.meta.snapshots.unshift(snap);
+  // 古いものを削除 (新しい順で保持)
+  if (state.meta.snapshots.length > SNAPSHOT_LIMIT) {
+    state.meta.snapshots = state.meta.snapshots.slice(0, SNAPSHOT_LIMIT);
+  }
+  return snap;
+}
+
+function maybeCreateDailySnapshot() {
+  // 1 日 1 回 (UTC ベースで判定)
+  state.meta.snapshots = state.meta.snapshots || [];
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayDaily = state.meta.snapshots.find(s => s.kind === "daily" && (s.createdAt || "").startsWith(todayKey));
+  if (!todayDaily) {
+    createSnapshot("daily", `日次 (${todayKey})`);
+  }
+}
+
+async function restoreSnapshot(snapId) {
+  const snaps = (state.meta && state.meta.snapshots) || [];
+  const snap = snaps.find(s => s.id === snapId);
+  if (!snap) { toast("スナップショットが見つかりません", "error"); return; }
+  if (!confirm(
+    `スナップショット「${snap.label}」(${new Date(snap.createdAt).toLocaleString("ja-JP")}) を復元しますか？\n\n` +
+    `現在の状態は失われます。直前の状態を念のためバックアップ用スナップショットとして残します。`
+  )) return;
+
+  // 復元前に現状をスナップショットとして保存
+  try { createSnapshot("manual", `復元前バックアップ (${new Date().toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit" })})`); } catch (_) {}
+
+  // 復元実行 — snapshots 自体は保持
+  const preservedSnaps = state.meta.snapshots;
+  state.meta = JSON.parse(JSON.stringify(snap.payload.meta));
+  state.meta.snapshots = preservedSnaps;
+  state.staff = JSON.parse(JSON.stringify(snap.payload.staff));
+  state.weeks = JSON.parse(JSON.stringify(snap.payload.weeks));
+  await persist();
+  render();
+  toast(`✓ スナップショット「${snap.label}」を復元しました`, "success", 5000);
+}
+
 // ===== Change Log =====
 function logChange(type, detail, extra = {}) {
   const wk = curWeek();
@@ -1813,8 +1873,35 @@ function openStaffEdit(s = null) {
         <input data-k="email" type="email" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.email || "")}" placeholder="staff@example.com"></label>
     </div>
     <label class="block"><span class="text-slate-600">メモ (店長用・スタッフには非表示)</span>
-      <input data-k="notes" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.notes || "")}"></label>`;
+      <input data-k="notes" class="mt-1 w-full border rounded-md px-3 py-2" value="${escapeAttr(data.notes || "")}"></label>
+    <label class="block"><span class="text-slate-600">📲 Webhook URL <span class="text-[10px] text-slate-400">(任意・LINE 連携 / Slack / Discord)</span></span>
+      <div class="flex gap-1 mt-1">
+        <input data-k="webhookUrl" type="url" class="flex-1 border rounded-md px-3 py-2 text-xs"
+          value="${escapeAttr(data.webhookUrl || "")}" placeholder="https://hooks.slack.com/... or Discord/IFTTT/Zapier">
+        <button id="webhook-test-btn" type="button" class="text-xs bg-slate-700 text-white rounded-md px-3 py-1.5 whitespace-nowrap">🔔 テスト</button>
+      </div>
+      <div class="text-[10px] text-slate-500 mt-1">
+        確定通知を LINE/Slack/Discord に送れます。LINE は IFTTT/Zapier 経由 (LINE Notify は 2025/3 終了)。
+      </div></label>`;
   body.appendChild(form);
+  // Webhook テストボタンの配線 (Round 17 TOP 2)
+  setTimeout(() => {
+    const wt = document.getElementById("webhook-test-btn");
+    if (wt) wt.onclick = async () => {
+      const url = (form.querySelector("[data-k=webhookUrl]")?.value || "").trim();
+      if (!url) { toast("先に Webhook URL を入力してください", "error"); return; }
+      wt.disabled = true; wt.textContent = "送信中…";
+      try {
+        const r = await window.ShiftyAPI.testWebhook(url);
+        if (r.ok) toast("✓ テスト送信成功 (Webhook 側でメッセージを確認してください)", "success", 5000);
+        else toast("送信失敗 — URL の形式または到達性を確認してください", "error", 5000);
+      } catch (e) {
+        toast("テスト失敗: " + (e?.message || ""), "error");
+      } finally {
+        wt.disabled = false; wt.textContent = "🔔 テスト";
+      }
+    };
+  }, 50);
   body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2" }, [
     el("button", { class: "px-3 py-1.5 text-sm", onclick: closeModal }, "キャンセル"),
     el("button", { class: "px-4 py-1.5 text-sm bg-brand-600 text-white rounded-md", onclick: () => {
@@ -2123,6 +2210,23 @@ function viewPreferences() {
 function viewSchedule() {
   const wrap = el("div", { class: "space-y-4" });
 
+  // モバイル D&D ヒント (Round 17 TOP 3) — 一度だけ表示
+  const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  const TOUCH_HINT_KEY = "shifty.schedule.touchHintSeen";
+  if (isTouchDevice && curStatus() === "draft" && curAssignments().length > 0
+      && !localStorage.getItem(TOUCH_HINT_KEY)) {
+    const hint = el("div", { class: "bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs flex items-start gap-2" });
+    hint.innerHTML = `
+      <span class="text-blue-600 text-base">📱</span>
+      <div class="flex-1">
+        <div class="font-semibold text-blue-900">モバイルでもシフトを動かせます</div>
+        <div class="text-blue-800 mt-0.5">シフトを <b>長押し</b> → 別のシフトへドラッグして離すと入替できます。</div>
+      </div>
+      <button class="text-blue-600 hover:text-blue-800 text-xs px-2"
+        onclick="localStorage.setItem('${TOUCH_HINT_KEY}', '1'); this.closest('div').remove();">×</button>`;
+    wrap.appendChild(hint);
+  }
+
   const headerRow = el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
     el("h2", { class: "text-xl font-bold" }, "シフト編成"),
     el("div", { class: "flex gap-2 flex-wrap" }, [
@@ -2376,6 +2480,8 @@ function publishWeek() {
       onclick: async () => {
         const sendMail = $("#pub-send-mail").checked;
         const wasRepublish = curWeek().publishedAt;
+        // 確定前に自動スナップショット (Round 17 TOP 1)
+        try { createSnapshot("auto_publish", `確定前 (${state.meta.currentWeekStart})`); } catch (_) {}
         curWeek().status = "published";
         curWeek().publishedAt = new Date().toISOString();
         logChange("publish", wasRepublish ? "再確定" : "確定", { assignmentCount: curAssignments().length });
@@ -2587,13 +2693,18 @@ function renderCalendar() {
             class: "assignment-chip" + (editable ? " editable" : "") + (isSwapSource ? " swap-source" : "") + (swapModeActive ? " swap-mode" : "") + (isFilteredOut ? " opacity-25" : ""),
             draggable: (editable && !swapModeActive) ? "true" : "false",
             "data-assignment-id": a.id,
-            style: { borderColor: cfg.color },
+            style: { borderColor: cfg.color, touchAction: editable ? "pan-y" : "auto" },
             onclick: () => handleChipTap(a),
             ondragstart: editable ? (e) => handleChipDragStart(e, a) : null,
             ondragover: editable ? (e) => { e.preventDefault(); chip.classList.add("drop-target"); } : null,
             ondragleave: editable ? () => chip.classList.remove("drop-target") : null,
             ondrop: editable ? (e) => { chip.classList.remove("drop-target"); handleChipDrop(e, a); } : null,
             ondragend: () => $$(".assignment-chip").forEach(c => c.classList.remove("drop-target", "dragging")),
+            // Round 17 TOP 3: Touch D&D サポート
+            ontouchstart: editable ? (e) => handleChipTouchStart(e, a) : null,
+            ontouchmove: editable ? (e) => handleChipTouchMove(e) : null,
+            ontouchend: editable ? (e) => handleChipTouchEnd(e) : null,
+            ontouchcancel: editable ? () => { _touchState = null; } : null,
           });
           const memoBadge = a.note ? `<span title="${escapeAttr(a.note)}" class="inline-block ml-1 text-[10px] bg-amber-200 text-amber-900 rounded px-1">📝</span>` : "";
           chip.innerHTML = `<div class="name">${escapeHtml(s?.name || "?")}${memoBadge}</div>
@@ -2985,13 +3096,18 @@ function renderCalendarMobile(days) {
             class: "assignment-chip flex items-center justify-between" + (editable ? " editable" : ""),
             draggable: editable ? "true" : "false",
             "data-assignment-id": a.id,
-            style: { borderColor: cfg.color, padding: "6px 8px" },
+            style: { borderColor: cfg.color, padding: "6px 8px", touchAction: editable ? "pan-y" : "auto" },
             onclick: () => handleChipTap(a),
             ondragstart: editable ? (e) => handleChipDragStart(e, a) : null,
             ondragover: editable ? (e) => { e.preventDefault(); chip.classList.add("drop-target"); } : null,
             ondragleave: editable ? () => chip.classList.remove("drop-target") : null,
             ondrop: editable ? (e) => { chip.classList.remove("drop-target"); handleChipDrop(e, a); } : null,
             ondragend: () => $$(".assignment-chip").forEach(c => c.classList.remove("drop-target", "dragging")),
+            // Round 17 TOP 3: Touch D&D
+            ontouchstart: editable ? (e) => handleChipTouchStart(e, a) : null,
+            ontouchmove: editable ? (e) => handleChipTouchMove(e) : null,
+            ontouchend: editable ? (e) => handleChipTouchEnd(e) : null,
+            ontouchcancel: editable ? () => { _touchState = null; } : null,
           });
           const memoBadge2 = a.note ? `<span title="${escapeAttr(a.note)}" class="inline-block ml-1 text-[10px] bg-amber-200 text-amber-900 rounded px-1">📝</span>` : "";
           chip.innerHTML = `
@@ -3398,6 +3514,82 @@ function handleChipDragStart(e, a) {
   e.target.classList.add("dragging");
 }
 
+// ===== Touch D&D サポート (Round 17 TOP 3) =====
+let _touchState = null;
+
+function handleChipTouchStart(e, a) {
+  if (curStatus() === "published") return;
+  if (e.touches.length !== 1) return;
+  const t = e.touches[0];
+  const chip = e.currentTarget;
+  // 長押し検出 (350ms 静止) で D&D モード開始
+  _touchState = {
+    a, chip, startX: t.clientX, startY: t.clientY,
+    moved: false, dragging: false,
+    longPressTimer: setTimeout(() => {
+      if (_touchState && !_touchState.moved) {
+        _touchState.dragging = true;
+        draggedAssignment = a;
+        chip.classList.add("dragging");
+        // ハプティック
+        if (navigator.vibrate) navigator.vibrate(20);
+        toast("シフトを移動できます (指を移動して別のシフトの上で離す)", "info", 2500);
+      }
+    }, 350),
+  };
+}
+
+function handleChipTouchMove(e) {
+  if (!_touchState) return;
+  const t = e.touches[0];
+  const dx = t.clientX - _touchState.startX;
+  const dy = t.clientY - _touchState.startY;
+  if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+    _touchState.moved = true;
+    if (!_touchState.dragging) {
+      // 通常スクロールへ移行 (D&D 起動前の移動)
+      clearTimeout(_touchState.longPressTimer);
+    }
+  }
+  if (_touchState.dragging) {
+    e.preventDefault();
+    // 指の下のドロップターゲットをハイライト
+    const elUnder = document.elementFromPoint(t.clientX, t.clientY);
+    document.querySelectorAll(".assignment-chip.drop-target").forEach(c => c.classList.remove("drop-target"));
+    if (elUnder) {
+      const targetChip = elUnder.closest(".assignment-chip.editable");
+      if (targetChip && targetChip !== _touchState.chip) {
+        targetChip.classList.add("drop-target");
+      }
+    }
+  }
+}
+
+function handleChipTouchEnd(e) {
+  if (!_touchState) return;
+  clearTimeout(_touchState.longPressTimer);
+  if (_touchState.dragging) {
+    const t = e.changedTouches[0];
+    const elUnder = document.elementFromPoint(t.clientX, t.clientY);
+    if (elUnder) {
+      const targetChip = elUnder.closest(".assignment-chip.editable");
+      if (targetChip && targetChip !== _touchState.chip) {
+        const targetId = targetChip.getAttribute("data-assignment-id");
+        const targetA = curAssignments().find(x => x.id === targetId);
+        if (targetA) {
+          const fakeEvt = { preventDefault: () => {} };
+          handleChipDrop(fakeEvt, targetA);
+        }
+      }
+    }
+    _touchState.chip.classList.remove("dragging");
+    document.querySelectorAll(".assignment-chip.drop-target").forEach(c => c.classList.remove("drop-target"));
+  } else if (!_touchState.moved) {
+    // タップ → 通常のクリックハンドラに任せる (touchend → click)
+  }
+  _touchState = null;
+}
+
 async function notifyShiftChanges(staffIds) {
   // Round 8: 確定後の変更があった場合、該当スタッフのみに再通知メール送信
   if (curStatus() !== "published") return; // 下書きなら通知しない
@@ -3663,6 +3855,10 @@ function autoGenerate() {
   // 実際の生成は requestIdleCallback / setTimeout で UI ブロック回避
   setTimeout(() => {
     try {
+      // AI 生成前に自動スナップショット (Round 17 TOP 1) — 既存アサインがある場合のみ
+      if (curAssignments().length > 0) {
+        try { createSnapshot("auto_autogen", `AI再生成前 (${state.meta.currentWeekStart})`); } catch (_) {}
+      }
       // Round 13: 固定出勤を must preferences として注入
       const w0 = state.meta.currentWeekStart;
       const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
@@ -4436,10 +4632,28 @@ function viewSettings() {
       el("input", { type: "file", accept: "application/json,.json", class: "hidden", onchange: handleRestoreFile }),
     ]),
     el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5",
-      onclick: openSnapshotsDialog }, "🕒 過去スナップショット"),
+      onclick: openSnapshotsDialog }, "🕒 過去スナップショット (サーバ)"),
   ]));
   backupCard.appendChild(el("div", { class: "text-xs text-slate-500 pt-2 border-t border-slate-100" },
     "💡 サーバ側で毎日 03:00 (JST) に自動スナップショット取得（過去 30 日分保持）。「過去スナップショット」ボタンから任意の日に巻き戻せます。"));
+
+  // 操作単位スナップショット (Round 17 TOP 1)
+  const localSnaps = (state.meta.snapshots || []);
+  backupCard.appendChild(el("div", { class: "pt-3 border-t border-slate-100 space-y-2" }, [
+    el("div", { class: "text-xs font-semibold text-slate-700" }, "🔁 操作単位スナップショット (Round 17)"),
+    el("div", { class: "text-xs text-slate-500" },
+      `確定前 / AI 生成前 / 日次に自動取得。最新 ${SNAPSHOT_LIMIT} 件まで保持。誤操作の即時取り戻しに使えます。`),
+    el("div", { class: "flex gap-2 flex-wrap" }, [
+      el("button", { class: "text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-md px-3 py-1.5",
+        onclick: () => {
+          const label = prompt("スナップショット名 (任意・例: 「サンプル投入前」):", "手動 " + new Date().toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit" })) || "手動";
+          const snap = createSnapshot("manual", label);
+          if (snap) { persist(); render(); toast(`✓ スナップショット「${snap.label}」を作成`, "success"); }
+        } }, "📸 今すぐ手動スナップショット"),
+      el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5",
+        onclick: () => openLocalSnapshotsDialog() }, `📋 一覧 (${localSnaps.length}件)`),
+    ]),
+  ]));
   wrap.appendChild(backupCard);
 
   // Danger
@@ -4547,6 +4761,60 @@ async function openSnapshotsDialog() {
   } catch (e) {
     list.appendChild(el("div", { class: "text-sm text-red-600" }, "取得失敗: " + e.message));
   }
+}
+
+// Round 17 TOP 1: ローカルスナップショット一覧
+function openLocalSnapshotsDialog() {
+  const snaps = (state.meta.snapshots || []).slice();
+  const KIND_LABEL = {
+    manual: "✋ 手動",
+    auto_publish: "✅ 確定前",
+    auto_autogen: "🤖 AI生成前",
+    daily: "📅 日次",
+  };
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🔁 操作単位スナップショット"));
+  body.appendChild(el("p", { class: "text-xs text-slate-500" },
+    `最新 ${SNAPSHOT_LIMIT} 件まで保持。クリックで該当時点に巻き戻ります（復元前に現状を自動バックアップ）。`));
+  if (snaps.length === 0) {
+    body.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" },
+      "スナップショットがまだありません。確定 / AI 生成時に自動取得されます。"));
+  } else {
+    const list = el("div", { class: "space-y-1.5 max-h-72 overflow-y-auto" });
+    for (const snap of snaps) {
+      const row = el("div", { class: "border border-slate-200 rounded-md p-2 text-xs flex items-center justify-between gap-2" });
+      const dt = new Date(snap.createdAt);
+      const staffN = (snap.payload?.staff || []).length;
+      const weeksN = Object.keys(snap.payload?.weeks || {}).length;
+      row.innerHTML = `
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">${escapeHtml(snap.label)}</div>
+          <div class="text-slate-500 text-[10px]">${KIND_LABEL[snap.kind] || snap.kind}・${dt.toLocaleString("ja-JP")}</div>
+          <div class="text-slate-400 text-[10px]">スタッフ ${staffN} 名 / 週 ${weeksN} 件</div>
+        </div>
+      `;
+      const restoreBtn = el("button", {
+        class: "text-xs bg-amber-600 hover:bg-amber-700 text-white rounded px-3 py-1.5 font-semibold",
+        onclick: () => restoreSnapshot(snap.id),
+      }, "復元");
+      const deleteBtn = el("button", {
+        class: "text-xs bg-slate-200 hover:bg-slate-300 rounded px-2 py-1.5",
+        onclick: async () => {
+          if (!confirm(`「${snap.label}」を削除しますか？`)) return;
+          state.meta.snapshots = (state.meta.snapshots || []).filter(s => s.id !== snap.id);
+          await persist(); closeModal(); openLocalSnapshotsDialog();
+        },
+      }, "🗑");
+      row.appendChild(restoreBtn);
+      row.appendChild(deleteBtn);
+      list.appendChild(row);
+    }
+    body.appendChild(list);
+  }
+  body.appendChild(el("div", { class: "flex justify-end pt-2 border-t border-slate-100" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+  ]));
+  modal(body);
 }
 
 async function handleRestoreFile(ev) {
@@ -4759,6 +5027,12 @@ function showDemoBanner() {
 async function loadAndRender() {
   try {
     state = await loadState();
+    // 日次スナップショット (Round 17 TOP 1)
+    try {
+      if (!window.__SHIFTY_DEMO_MODE__ && state.staff && state.staff.length > 0) {
+        maybeCreateDailySnapshot();
+      }
+    } catch (e) { console.warn("snapshot failed:", e); }
     setTab("dashboard");
     if (!state.meta.onboardingCompleted && !window.__SHIFTY_DEMO_MODE__) {
       setTimeout(showOnboarding, 500);

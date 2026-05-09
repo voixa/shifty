@@ -510,6 +510,52 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
 NOTIFY_TO = os.environ.get("NOTIFY_TO", "support@in-dx.jp")
 
 
+def send_webhook(webhook_url: str, message: str, title: str = "") -> bool:
+    """汎用 Webhook 通知 (Slack / Discord / IFTTT / Zapier 互換)。
+    Round 17 TOP 2: LINE Notify の代替として追加。
+
+    Slack 形式: {"text": ..., "username": "Shifty"}
+    Discord 形式: {"content": ..., "username": "Shifty"}
+    IFTTT/Zapier: {"value1": title, "value2": message}
+    すべて同じペイロードで送れるよう "text" と "content" 両方含める。
+    """
+    if not webhook_url:
+        return False
+    if not webhook_url.startswith(("https://hooks.slack.com/",
+                                   "https://discord.com/api/webhooks/",
+                                   "https://discordapp.com/api/webhooks/",
+                                   "https://maker.ifttt.com/",
+                                   "https://hooks.zapier.com/")):
+        # 未許可の URL は拒否 (SSRF 対策)
+        print(f"[webhook] rejected unsafe URL: {webhook_url[:60]}")
+        return False
+    body = (message or "")[:1500]
+    title_text = (title or "Shifty 通知")[:200]
+    payload = {
+        "text": f"*{title_text}*\n{body}" if title else body,
+        "content": f"**{title_text}**\n{body}" if title else body,
+        "username": "Shifty",
+        "icon_emoji": ":calendar:",
+        "value1": title_text,
+        "value2": body,
+    }
+    try:
+        import urllib.request as _urlreq
+        req = _urlreq.Request(
+            webhook_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _urlreq.urlopen(req, timeout=8) as resp:
+            ok = 200 <= resp.status < 300
+            print(f"[webhook] {resp.status} -> {webhook_url[:60]}")
+            return ok
+    except Exception as e:
+        print(f"[webhook] send failed: {e}")
+        return False
+
+
 def send_email(to_addr: str, subject: str, body: str, reply_to: str = None) -> bool:
     """Gmail SMTP で送信。GMAIL_APP_PASSWORD 未設定なら no-op."""
     if not GMAIL_APP_PASSWORD:
@@ -1625,8 +1671,49 @@ def api_notify_shifts():
             sent += 1
         else:
             errors.append(email)
+        # Webhook 通知 (Round 17 TOP 2) — メールに加えて (or の代わりに) 設定があれば送信
+        webhook_url = (s.get("webhookUrl") or "").strip()
+        if webhook_url:
+            send_webhook(
+                webhook_url,
+                "\n".join(body_lines),
+                title=f"{subject_prefix}【{restaurant}】{week_start} 週のシフトが確定しました",
+            )
 
     return jsonify({"ok": True, "sent": sent, "skipped_no_email": skipped, "errors": errors})
+
+
+# ============================================================
+# Webhook テスト送信 (Round 17 TOP 2)
+# ============================================================
+@app.post("/api/admin/test_webhook")
+@require_auth
+def api_admin_test_webhook():
+    payload = _get_json()
+    url = (payload.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "missing_url"}), 400
+    ok = send_webhook(
+        url,
+        "Shifty からのテスト通知です。\nこのメッセージが届いていれば Webhook 連携は正常です。",
+        title="🔔 Shifty テスト通知",
+    )
+    return jsonify({"ok": ok})
+
+
+@app.post("/api/t/<slug>/test_webhook")
+@require_tenant_admin()
+def api_t_test_webhook(slug):
+    payload = _get_json()
+    url = (payload.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "missing_url"}), 400
+    ok = send_webhook(
+        url,
+        "Shifty からのテスト通知です。\nこのメッセージが届いていれば Webhook 連携は正常です。",
+        title="🔔 Shifty テスト通知",
+    )
+    return jsonify({"ok": ok})
 
 
 # ============================================================

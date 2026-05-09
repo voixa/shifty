@@ -129,6 +129,15 @@
         body: JSON.stringify({ weekStart, ...options }),
       }),
 
+    // Webhook テスト (Round 17 TOP 2)
+    testWebhook: (url) => tenantSlug
+      ? jsonReq(`${tenantPrefix}/test_webhook`, {
+          method: "POST", body: JSON.stringify({ url }),
+        })
+      : jsonReq("/api/admin/test_webhook", {
+          method: "POST", body: JSON.stringify({ url }),
+        }),
+
     // Snapshots (admin)
     listSnapshots: () => jsonReq("/api/admin/snapshots"),
     restoreSnapshot: (date) => jsonReq(`/api/admin/snapshots/${encodeURIComponent(date)}/restore`, { method: "POST" }),

@@ -289,6 +289,10 @@
     if (!Array.isArray(state.meta.vacationRequests)) state.meta.vacationRequests = [];
     // シフト交換掲示板 (Round 16 TOP 2)
     if (!Array.isArray(state.meta.swapRequests)) state.meta.swapRequests = [];
+    // データ復旧スナップショット (Round 17 TOP 1)
+    if (!Array.isArray(state.meta.snapshots)) state.meta.snapshots = [];
+    // LINE Notify (Round 17 TOP 2) — 店舗デフォルトの token
+    if (state.meta.lineNotifyEnabled === undefined) state.meta.lineNotifyEnabled = false;
     // 自動アップグレード: 旧デフォルト 8h は飲食店現実に合わずカバー率が壊滅するため 12h に引き上げ
     // (lunch 11-15 + dinner 17-22 = 9h を許可。意図的に 8h 設定済みの顧客がいないので無条件で書き換え)
     if (state.meta.laborRules.maxHoursPerDay <= 8) state.meta.laborRules.maxHoursPerDay = 12;
