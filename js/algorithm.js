@@ -188,15 +188,58 @@
         return { value: skillVal / 5, detail: `${slot.position} スキル ${skillVal}/5` };
       },
     },
+    skillMix: {
+      label: "スキル構成",
+      rationale: "Round 23: ピーク時間帯はベテラン×新人のバランス配置を優先。新人ばかりのコマを避ける",
+      compute(staff, slot, state, prefs, lr, ctx) {
+        const staffSkill = (staff.skills && staff.skills[slot.position] != null)
+          ? staff.skills[slot.position]
+          : (staff.skill || 1);
+        // 同 slot (date, position, startTime, endTime) で既に配置済みのスタッフを探す
+        const placedAtSlot = (state.assignments || []).filter(a =>
+          a.date === slot.date && a.position === slot.position &&
+          a.startTime === slot.startTime && a.endTime === slot.endTime
+        );
+        if (placedAtSlot.length === 0) {
+          // 初配置: 高スキルを優先 (=skill そのまま)
+          return { value: staffSkill / 5, detail: "初配置 (高スキル優先)" };
+        }
+        if (!ctx || !ctx.staffMap) {
+          return { value: 0.5, detail: "—" };
+        }
+        // 既存の平均スキル
+        const placedSkills = placedAtSlot.map(a => {
+          const s = ctx.staffMap.get(a.staffId);
+          if (!s) return 1;
+          return (s.skills && s.skills[slot.position] != null) ? s.skills[slot.position] : (s.skill || 1);
+        });
+        const avgPlaced = placedSkills.reduce((a, b) => a + b, 0) / placedSkills.length;
+        // ベテランばかりなら新人を入れたい (低スキル候補に高得点)
+        if (avgPlaced >= 4) {
+          // 候補が新人 (skill <= 2) なら高得点、ベテランなら中程度
+          if (staffSkill <= 2) return { value: 1.0, detail: `育成機会 (既存 avg ${avgPlaced.toFixed(1)}+新人)` };
+          return { value: 0.5, detail: `既存ベテラン揃い` };
+        }
+        // 新人ばかりなら ベテランを入れたい (高スキル候補に高得点)
+        if (avgPlaced <= 2) {
+          if (staffSkill >= 4) return { value: 1.0, detail: `救援 (既存 avg ${avgPlaced.toFixed(1)}+ベテラン)` };
+          if (staffSkill >= 3) return { value: 0.7, detail: `中堅 (既存若手)` };
+          return { value: 0.2, detail: `⚠️ 新人ばかりに更に新人` };
+        }
+        // バランス取れている → 中程度
+        return { value: 0.6, detail: `バランス (avg ${avgPlaced.toFixed(1)})` };
+      },
+    },
   };
 
   // 既定の重み（合計1.0）
   const DEFAULT_WEIGHTS = {
-    preference: 0.40,
-    positionMatch: 0.15,
-    fairness: 0.20,
-    cost: 0.15,
+    preference: 0.38,
+    positionMatch: 0.14,
+    fairness: 0.18,
+    cost: 0.12,
     skill: 0.10,
+    skillMix: 0.08, // Round 23: ベテラン×新人ペアリング
   };
 
   function normalizeWeights(input) {
@@ -209,11 +252,11 @@
     return out;
   }
 
-  function scoreCandidate(staff, slot, state, prefs, lr, weights) {
+  function scoreCandidate(staff, slot, state, prefs, lr, weights, ctx) {
     let total = 0;
     const breakdown = [];
     for (const [k, factor] of Object.entries(SCORE_FACTORS)) {
-      const { value, detail } = factor.compute(staff, slot, state, prefs, lr);
+      const { value, detail } = factor.compute(staff, slot, state, prefs, lr, ctx);
       const weight = weights[k] || 0;
       const contrib = value * weight;
       total += contrib;
@@ -337,6 +380,8 @@
       assignments: [],
       unfilled: [],
     };
+    // Round 23: scoreCandidate に渡すコンテキスト
+    const ctx = { staffMap: new Map(staff.map(s => [s.id, s])) };
 
     const instances = [];
     for (const sl of slots) {
@@ -383,7 +428,7 @@
       const scored = eligible
         .map((s) => ({
           staff: s,
-          ...scoreCandidate(s, slot, state, preferences, laborRules, weights),
+          ...scoreCandidate(s, slot, state, preferences, laborRules, weights, ctx),
         }))
         .sort((a, b) => b.score - a.score || rand() - 0.5);
       const picked = scored[0];
@@ -426,6 +471,7 @@
     let rounds = 0;
     const MAX_ROUNDS = 8;
     const IMPROVEMENT_THRESHOLD = 0.005; // 0.5% 以上の改善のみ採用
+    const ctx = { staffMap: new Map(staff.map(s => [s.id, s])) };
 
     while (improved && rounds < MAX_ROUNDS) {
       improved = false;
@@ -450,7 +496,7 @@
         const scored = eligible
           .map((s) => ({
             staff: s,
-            ...scoreCandidate(s, slotLike, stateMinusA, preferences, laborRules, weights),
+            ...scoreCandidate(s, slotLike, stateMinusA, preferences, laborRules, weights, ctx),
           }))
           .sort((x, y) => y.score - x.score);
         const best = scored[0];
@@ -525,8 +571,8 @@
               hasAvoidPreference(sa, slotA, preferences) ||
               hasAvoidPreference(sb, slotB, preferences);
             if (swapWouldCreateAvoid && !swapResolvesAvoid) continue;
-            const newScoreA = scoreCandidate(sb, slotA, stateMinusBoth, preferences, laborRules, weights).score;
-            const newScoreB = scoreCandidate(sa, slotB, stateMinusBoth, preferences, laborRules, weights).score;
+            const newScoreA = scoreCandidate(sb, slotA, stateMinusBoth, preferences, laborRules, weights, ctx).score;
+            const newScoreB = scoreCandidate(sa, slotB, stateMinusBoth, preferences, laborRules, weights, ctx).score;
             const oldSum = a.score + b.score;
             const newSum = newScoreA + newScoreB;
             if (newSum > oldSum + SWAP_THRESHOLD) {
@@ -996,10 +1042,11 @@
     );
     const eligible = eligibleStrict.length > 0 ? eligibleStrict : eligibleAll;
     const isAvoidRelaxed = eligibleStrict.length === 0 && eligibleAll.length > 0;
+    const ctx = { staffMap: new Map(staff.map(s => [s.id, s])) };
     return eligible
       .map((s) => ({
         staff: s,
-        ...scoreCandidate(s, slotLike, state, preferences, laborRules, weights),
+        ...scoreCandidate(s, slotLike, state, preferences, laborRules, weights, ctx),
         avoidRelaxed: isAvoidRelaxed && hasAvoidPreference(s, slotLike, preferences),
       }))
       .sort((a, b) => b.score - a.score)

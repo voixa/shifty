@@ -3638,17 +3638,196 @@ function renderChangeLog() {
   return card;
 }
 
+// Round 23 TOP 3: 確定前ヘルスチェック
+function renderPublishHealthCheck() {
+  const checks = [];
+  const ass = curAssignments();
+  const slots = curSlots();
+  const w0 = state.meta.currentWeekStart;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+
+  // 1. 不足コマ
+  let unfilledN = 0;
+  for (const sl of slots) {
+    const filled = ass.filter(a => a.date === sl.date && a.position === sl.position && a.startTime === sl.startTime && a.endTime === sl.endTime).length;
+    unfilledN += Math.max(0, sl.requiredCount - filled);
+  }
+  checks.push({
+    id: "unfilled",
+    pass: unfilledN === 0,
+    label: "シフト不足コマ",
+    detail: unfilledN === 0 ? "すべて充足" : `${unfilledN} コマ不足`,
+    severity: unfilledN === 0 ? "ok" : (unfilledN <= 2 ? "warn" : "danger"),
+  });
+
+  // 2. 予算超過
+  const totalCost = ass.reduce((s, a) => s + (a.cost || 0), 0);
+  const budget = state.meta.weeklyBudget || 0;
+  const overBudget = budget > 0 && totalCost > budget;
+  checks.push({
+    id: "budget",
+    pass: !overBudget,
+    label: "週予算",
+    detail: budget === 0 ? "予算未設定" : `${fmtYen(Math.round(totalCost))} / ${fmtYen(budget)} ${overBudget ? `(超過 ${fmtYen(Math.round(totalCost - budget))})` : ""}`,
+    severity: !budget ? "info" : (overBudget ? (totalCost > budget * 1.2 ? "danger" : "warn") : "ok"),
+  });
+
+  // 3. 労務上限近接 (週上限 95% 以上のスタッフ)
+  const lr = state.meta.laborRules || {};
+  const overLaborStaff = [];
+  for (const s of state.staff) {
+    if (s.archived) continue;
+    const myH = ass.filter(a => a.staffId === s.id).reduce((sm, a) => sm + calcHours(a.startTime, a.endTime), 0);
+    const cap = Math.min(s.maxHoursPerWeek || Infinity, lr.maxHoursPerWeek || Infinity);
+    if (cap > 0 && myH >= cap * 0.95) overLaborStaff.push(`${s.name}(${myH.toFixed(0)}/${cap}h)`);
+  }
+  checks.push({
+    id: "labor",
+    pass: overLaborStaff.length === 0,
+    label: "週時間上限",
+    detail: overLaborStaff.length === 0 ? "全員 95% 未満" : `近接 ${overLaborStaff.length} 名 (${overLaborStaff.slice(0, 2).join(", ")})`,
+    severity: overLaborStaff.length === 0 ? "ok" : "warn",
+  });
+
+  // 4. 連勤超過 (5 連勤以上のスタッフ)
+  const consecMax = lr.maxConsecutiveDays || 5;
+  const longStreakStaff = [];
+  for (const s of state.staff) {
+    if (s.archived) continue;
+    const dates = ass.filter(a => a.staffId === s.id).map(a => a.date);
+    const uniqDates = Array.from(new Set(dates)).sort();
+    let streak = 0, maxStreak = 0, prev = null;
+    for (const d of uniqDates) {
+      if (prev && new Date(d) - new Date(prev) === 86400000) streak++;
+      else streak = 1;
+      maxStreak = Math.max(maxStreak, streak);
+      prev = d;
+    }
+    if (maxStreak >= consecMax) longStreakStaff.push(`${s.name}(${maxStreak}日連勤)`);
+  }
+  checks.push({
+    id: "consec",
+    pass: longStreakStaff.length === 0,
+    label: "連勤上限",
+    detail: longStreakStaff.length === 0 ? `全員 ${consecMax} 日未満` : longStreakStaff.slice(0, 2).join(", "),
+    severity: longStreakStaff.length === 0 ? "ok" : "warn",
+  });
+
+  // 5. 新人だけのコマ (skill 平均 < 2.5)
+  const lowSkillSlots = [];
+  for (const sl of slots) {
+    if (sl.requiredCount < 2) continue;
+    const inSlot = ass.filter(a => a.date === sl.date && a.position === sl.position && a.startTime === sl.startTime && a.endTime === sl.endTime);
+    if (inSlot.length < 2) continue;
+    const skills = inSlot.map(a => {
+      const s = state.staff.find(x => x.id === a.staffId);
+      if (!s) return 1;
+      return (s.skills && s.skills[sl.position]) || s.skill || 1;
+    });
+    const avg = skills.reduce((a, b) => a + b, 0) / skills.length;
+    if (avg < 2.5) lowSkillSlots.push(`${sl.date.slice(5)} ${sl.startTime} ${posCfg(sl.position).label}`);
+  }
+  checks.push({
+    id: "skillmix",
+    pass: lowSkillSlots.length === 0,
+    label: "スキル構成",
+    detail: lowSkillSlots.length === 0 ? "ベテラン×新人バランス OK" : `新人ばかり ${lowSkillSlots.length} コマ (${lowSkillSlots.slice(0, 2).join(" / ")})`,
+    severity: lowSkillSlots.length === 0 ? "ok" : (lowSkillSlots.length > 5 ? "danger" : "warn"),
+  });
+
+  // 6. 希望未提出のスタッフ
+  const submitted = new Set((curPrefs() || []).map(p => p.staffId));
+  const noSubmit = state.staff.filter(s => !s.archived && !submitted.has(s.id));
+  checks.push({
+    id: "submit",
+    pass: noSubmit.length === 0,
+    label: "希望提出",
+    detail: noSubmit.length === 0 ? "全員提出済み" : `未提出 ${noSubmit.length} 名 (${noSubmit.slice(0, 2).map(s => s.name).join(", ")})`,
+    severity: noSubmit.length === 0 ? "ok" : "info",
+  });
+
+  // 7. 固定出勤未配置
+  const missingFixed = [];
+  for (const s of state.staff) {
+    if (s.archived || !s.fixedShifts || s.fixedShifts.length === 0) continue;
+    for (const fs of s.fixedShifts) {
+      const sess = (state.meta.sessions || []).find(x => x.id === fs.sessionId);
+      if (!sess) continue;
+      // 該当日付を探す
+      for (const d of days) {
+        if (dayOfWeek(d) !== fs.dow) continue;
+        const placed = ass.find(a => a.staffId === s.id && a.date === d &&
+          a.startTime === sess.startTime && a.endTime === sess.endTime);
+        if (!placed) {
+          missingFixed.push(`${s.name}/${["日","月","火","水","木","金","土"][fs.dow]}${sess.label}`);
+        }
+      }
+    }
+  }
+  checks.push({
+    id: "fixed",
+    pass: missingFixed.length === 0,
+    label: "固定出勤",
+    detail: missingFixed.length === 0 ? "全配置済" : `未配置 ${missingFixed.length} 件 (${missingFixed.slice(0, 2).join(", ")})`,
+    severity: missingFixed.length === 0 ? "ok" : "warn",
+  });
+
+  // 8. メール未登録 (active staff のみ)
+  const activeStaff = state.staff.filter(s => !s.archived);
+  const noEmailN = activeStaff.filter(s => !(s.email || "").trim() && !(s.webhookUrl || "").trim()).length;
+  checks.push({
+    id: "contact",
+    pass: noEmailN === 0,
+    label: "連絡先登録",
+    detail: noEmailN === 0 ? `全員メール/Webhook 登録済` : `未登録 ${noEmailN}/${activeStaff.length} 名`,
+    severity: noEmailN === 0 ? "ok" : "info",
+  });
+
+  const passN = checks.filter(c => c.pass).length;
+  const dangerN = checks.filter(c => c.severity === "danger").length;
+  const warnN = checks.filter(c => c.severity === "warn").length;
+  const headerLevel = dangerN > 0 ? "danger" : warnN > 0 ? "warn" : "ok";
+  const headerColor = headerLevel === "danger" ? "bg-red-50 border-red-300"
+                    : headerLevel === "warn"  ? "bg-amber-50 border-amber-300"
+                    : "bg-emerald-50 border-emerald-300";
+  const headerText = headerLevel === "danger" ? `🚨 重大な問題が ${dangerN} 件あります`
+                   : headerLevel === "warn"   ? `⚠️ 注意点が ${warnN} 件あります`
+                   : `✅ ヘルスチェック OK (${passN}/${checks.length})`;
+
+  const card = el("div", { class: `${headerColor} border rounded-md p-3 space-y-1` });
+  card.appendChild(el("div", { class: "font-semibold text-sm" }, headerText));
+  const list = el("div", { class: "text-xs space-y-0.5" });
+  for (const c of checks) {
+    const icon = c.severity === "danger" ? "🚨" : c.severity === "warn" ? "⚠️" : c.severity === "info" ? "ℹ️" : "✓";
+    const cls = c.severity === "danger" ? "text-red-700"
+             : c.severity === "warn" ? "text-amber-700"
+             : c.severity === "info" ? "text-slate-600"
+             : "text-emerald-700";
+    list.appendChild(el("div", { class: `flex items-start gap-1 ${cls}` }, [
+      el("span", {}, icon),
+      el("span", { class: "font-semibold w-24 flex-none" }, c.label),
+      el("span", { class: "flex-1" }, c.detail),
+    ]));
+  }
+  card.appendChild(list);
+  return card;
+}
+
 function publishWeek() {
   if (!curAssignments().length) { toast("シフトを生成してから確定してください", "error"); return; }
   // Round 3: 確定 + 通知統合フロー
-  const withEmail = state.staff.filter(s => (s.email || "").trim());
-  const totalStaff = state.staff.length;
+  const withEmail = state.staff.filter(s => (s.email || "").trim() && !s.archived);
+  const totalStaff = state.staff.filter(s => !s.archived).length;
   const noEmailCount = totalStaff - withEmail.length;
 
   const body = el("div", { class: "p-6 space-y-3" });
   body.appendChild(el("h3", { class: "font-bold text-lg" }, "✓ 今週のシフトを確定"));
   body.appendChild(el("p", { class: "text-sm text-slate-600" },
     "確定するとスタッフはポータルから自分のシフトを閲覧できるようになります。"));
+
+  // Round 23: ヘルスチェック
+  const healthCard = renderPublishHealthCheck();
+  body.appendChild(healthCard);
 
   body.appendChild(el("div", { class: "bg-slate-50 rounded-md p-3 text-xs space-y-1" }, [
     el("div", {}, `📊 ${curAssignments().length} 件のアサインを確定`),
@@ -4117,7 +4296,170 @@ function openQuickAddDialog(date, sess, suggestedPosition) {
 }
 
 // 印刷ビュー (Round 4)
-function openPrintView() {
+// Round 23: 印刷モード選択ダイアログ
+function openPrintMenuDialog() {
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🖨 印刷モードを選択"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    "用途に応じてレイアウトを選んでください。"));
+  const opts = [
+    {
+      id: "shop",
+      title: "🏪 店内掲示用 (シンプル)",
+      desc: "A4 横、時間帯×日付のマトリクス。冷蔵庫貼り用。情報量を抑えて視認性最優先",
+      action: () => { closeModal(); openPrintView({ mode: "shop" }); },
+    },
+    {
+      id: "detail",
+      title: "📋 詳細・会議用",
+      desc: "従来の詳細版。ポジション×セッション全表示、人件費・労働時間サマリ付き",
+      action: () => { closeModal(); openPrintView({ mode: "detail" }); },
+    },
+    {
+      id: "personal",
+      title: "👤 個人配布用 (1人ずつ 1ページ)",
+      desc: "スタッフ個別の自分のシフトのみ。月間カレンダー風。手渡し配布用",
+      action: () => { closeModal(); openPrintView({ mode: "personal" }); },
+    },
+  ];
+  for (const o of opts) {
+    body.appendChild(el("button", {
+      class: "w-full text-left bg-slate-50 hover:bg-brand-50 border border-slate-200 hover:border-brand-400 rounded-lg p-3 transition",
+      onclick: o.action,
+    }, [
+      el("div", { class: "font-semibold text-sm" }, o.title),
+      el("div", { class: "text-xs text-slate-600 mt-0.5" }, o.desc),
+    ]));
+  }
+  body.appendChild(el("div", { class: "flex justify-end pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "キャンセル"),
+  ]));
+  modal(body);
+}
+
+function openPrintView(options = {}) {
+  const mode = options.mode || "detail";
+  if (mode === "shop") return openPrintViewShop();
+  if (mode === "personal") return openPrintViewPersonal();
+  return openPrintViewDetail();
+}
+
+// シンプル版 (店内掲示・冷蔵庫貼り)
+function openPrintViewShop() {
+  document.querySelectorAll(".print-only").forEach(e => e.remove());
+  const w0 = state.meta.currentWeekStart;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  const restaurant = state.meta.restaurantName || "店舗";
+  const wrap = document.createElement("div");
+  wrap.className = "print-only";
+  let html = `
+    <style>
+      @media print {
+        @page { size: A4 landscape; margin: 12mm; }
+        body > *:not(.print-only) { display: none !important; }
+        .print-only { display: block !important; font-family: 'Hiragino Sans','Yu Gothic',sans-serif; }
+        .print-only .ph { font-size: 16pt; font-weight: bold; margin-bottom: 4mm; }
+        .print-only .pm { font-size: 9pt; color: #555; margin-bottom: 4mm; }
+        .print-only table { width: 100%; border-collapse: collapse; font-size: 11pt; }
+        .print-only th, .print-only td { border: 1px solid #444; padding: 2mm 1mm; text-align: center; }
+        .print-only th { background: #e2e8f0; font-weight: bold; }
+        .print-only .nm { font-size: 12pt; font-weight: bold; }
+        .print-only .pos { font-size: 8pt; color: #666; }
+      }
+    </style>`;
+  html += `<div class="ph">${escapeHtml(restaurant)} / ${w0} 〜 ${addDays(w0, 6)}</div>`;
+  html += `<div class="pm">確定: ${(curWeek().publishedAt || "—").slice(0, 16)} / 印刷: ${new Date().toLocaleString("ja-JP")}</div>`;
+  html += `<table><thead><tr><th style="width:80px">時間</th>`;
+  for (const d of days) {
+    const dow = ["日","月","火","水","木","金","土"][dayOfWeek(d)];
+    html += `<th>${d.slice(5)} (${dow})</th>`;
+  }
+  html += `</tr></thead><tbody>`;
+  for (const sess of state.meta.sessions) {
+    html += `<tr><td><b>${escapeHtml(sess.label)}</b><br><span class="pos">${sess.startTime}〜${sess.endTime}</span></td>`;
+    for (const d of days) {
+      const list = curAssignments().filter(a =>
+        a.date === d && a.startTime === sess.startTime && a.endTime === sess.endTime
+      );
+      if (list.length === 0) {
+        html += `<td>—</td>`;
+      } else {
+        html += `<td>${list.map(a => {
+          const s = state.staff.find(x => x.id === a.staffId);
+          return `<div class="nm">${escapeHtml(s?.name || "?")}</div><div class="pos">${escapeHtml(posCfg(a.position).label)}</div>`;
+        }).join("<hr>")}</td>`;
+      }
+    }
+    html += `</tr>`;
+  }
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
+  document.getElementById("main").appendChild(wrap);
+  setTimeout(() => window.print(), 100);
+}
+
+// 個人配布用 (1ページ 1スタッフ)
+function openPrintViewPersonal() {
+  document.querySelectorAll(".print-only").forEach(e => e.remove());
+  const w0 = state.meta.currentWeekStart;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
+  const restaurant = state.meta.restaurantName || "店舗";
+  const wrap = document.createElement("div");
+  wrap.className = "print-only";
+  let html = `
+    <style>
+      @media print {
+        @page { size: A4 portrait; margin: 15mm; }
+        body > *:not(.print-only) { display: none !important; }
+        .print-only { display: block !important; font-family: 'Hiragino Sans','Yu Gothic',sans-serif; }
+        .print-only .person-page { page-break-after: always; }
+        .print-only .person-page:last-child { page-break-after: auto; }
+        .print-only h1 { font-size: 18pt; margin: 0 0 4mm; }
+        .print-only h2 { font-size: 11pt; color: #555; margin: 0 0 8mm; font-weight: normal; }
+        .print-only table { width: 100%; border-collapse: collapse; font-size: 11pt; margin-top: 4mm; }
+        .print-only th, .print-only td { border: 1px solid #888; padding: 3mm; text-align: left; }
+        .print-only th { background: #e2e8f0; }
+        .print-only .day { font-weight: bold; width: 30mm; }
+        .print-only .off { color: #999; }
+        .print-only .summary { margin-top: 8mm; padding: 4mm; background: #f1f5f9; border: 1px solid #94a3b8; border-radius: 2mm; font-size: 11pt; }
+      }
+    </style>`;
+  const sortedStaff = state.staff.filter(s => !s.archived)
+    .filter(s => curAssignments().some(a => a.staffId === s.id));
+  for (const s of sortedStaff) {
+    const myAss = curAssignments().filter(a => a.staffId === s.id)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+    const totalH = myAss.reduce((sum, a) => sum + calcHours(a.startTime, a.endTime), 0);
+    const totalCost = myAss.reduce((sum, a) => sum + (a.cost || 0), 0);
+    html += `<div class="person-page">`;
+    html += `<h1>${escapeHtml(s.name)} さんのシフト</h1>`;
+    html += `<h2>${escapeHtml(restaurant)} / ${w0} 〜 ${addDays(w0, 6)}</h2>`;
+    html += `<table><tbody>`;
+    for (const d of days) {
+      const dow = ["日","月","火","水","木","金","土"][dayOfWeek(d)];
+      const list = myAss.filter(a => a.date === d);
+      html += `<tr><td class="day">${d.slice(5)} (${dow}曜)</td>`;
+      if (list.length === 0) {
+        html += `<td class="off">— お休み —</td>`;
+      } else {
+        html += `<td>${list.map(a => {
+          const memoLine = a.note ? `<div style="font-size:9pt;color:#92400e;margin-top:1mm">📝 ${escapeHtml(a.note)}</div>` : "";
+          return `${escapeHtml(a.startTime)}〜${escapeHtml(a.endTime)} (${escapeHtml(posCfg(a.position).label)})${memoLine}`;
+        }).join("<br><br>")}</td>`;
+      }
+      html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+    html += `<div class="summary">合計: <b>${totalH.toFixed(1)}h</b> / 予定給与 <b>${fmtYen(Math.round(totalCost))}</b></div>`;
+    html += `<div style="margin-top:6mm;font-size:9pt;color:#94a3b8">変更・質問はスタッフポータルからどうぞ。</div>`;
+    html += `</div>`;
+  }
+  wrap.innerHTML = html;
+  document.getElementById("main").appendChild(wrap);
+  setTimeout(() => window.print(), 100);
+}
+
+function openPrintViewDetail() {
   // 既存印刷 DOM を削除して再生成
   document.querySelectorAll(".print-only").forEach(e => e.remove());
 
@@ -5435,7 +5777,7 @@ function viewExport() {
     el("button", { class: "text-sm bg-emerald-700 hover:bg-emerald-800 text-white rounded-md px-3 py-1.5",
       onclick: () => openPayrollCsvDialog(), title: "月次の給与計算用 CSV" }, "💴 給与計算 CSV"),
     el("button", { class: "text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-md px-3 py-1.5",
-      onclick: openPrintView }, "🖨 印刷ビュー"),
+      onclick: () => openPrintMenuDialog(), title: "店内掲示用 / 個人配布用 / 詳細" }, "🖨 印刷"),
     el("button", { class: "text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-md px-3 py-1.5",
       onclick: () => openWeeklyReport(), title: "店舗管理用の今週サマリレポート" }, "📊 週次レポート"),
     el("button", { class: "text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-md px-3 py-1.5",
