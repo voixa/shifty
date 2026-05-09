@@ -1218,7 +1218,10 @@
         <button id="icalBtn" class="bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-5 py-3 text-sm font-semibold">
           📅 カレンダーに追加 (.ics)
         </button>
-        <button id="statementBtn" class="bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg px-5 py-3 text-sm font-semibold sm:col-span-2">
+        <button id="calendarBtn" class="bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg px-5 py-3 text-sm font-semibold">
+          📅 月カレンダー表示
+        </button>
+        <button id="statementBtn" class="bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg px-5 py-3 text-sm font-semibold">
           🧾 今月の給与明細を見る
         </button>
         <button id="pushBtn" class="bg-purple-500 hover:bg-purple-600 text-white rounded-lg px-5 py-3 text-sm font-semibold sm:col-span-2 hidden">
@@ -1363,6 +1366,10 @@
     // 給与明細ボタン (Round 24 TOP 2)
     const stmtBtn = document.getElementById("statementBtn");
     if (stmtBtn) stmtBtn.onclick = () => openMonthlyStatement();
+
+    // カレンダー表示ボタン (Round 36 TOP 2)
+    const calBtn = document.getElementById("calendarBtn");
+    if (calBtn) calBtn.onclick = () => openMonthlyCalendarView();
 
     // Web Push 通知ボタン (Round 34 TOP 3)
     setupPushNotificationButton();
@@ -1743,6 +1750,130 @@
         toast("送信失敗: " + (e?.message || ""), "error");
       }
     };
+  }
+
+  // ===== 月カレンダービュー (Round 36 TOP 2) =====
+  function openMonthlyCalendarView() {
+    const allAss = [];
+    const seen = new Set();
+    const monthKey = (data.weekStart || "").slice(0, 7);
+    if (!monthKey) { toast("対象月を判定できません", "error"); return; }
+
+    // history (確定済) + 今週 assignments
+    for (const h of (data.history || [])) {
+      const key = `${h.date}|${h.startTime}|${h.endTime}`;
+      if (seen.has(key)) continue;
+      if (!(h.date || "").startsWith(monthKey)) continue;
+      allAss.push(h); seen.add(key);
+    }
+    for (const a of (data.assignments || [])) {
+      const key = `${a.date}|${a.startTime}|${a.endTime}`;
+      if (seen.has(key)) continue;
+      if (!(a.date || "").startsWith(monthKey)) continue;
+      allAss.push({ ...a, hours: calcHours(a.startTime, a.endTime), pay: a.cost || 0 });
+      seen.add(key);
+    }
+
+    // 月のすべての日を生成 (日曜起点)
+    const [year, month] = monthKey.split("-").map(Number);
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay = new Date(year, month, 0);
+    const startDow = firstDay.getDay(); // 0=日
+    const totalDays = lastDay.getDate();
+
+    // 日別に grouping
+    const byDate = {};
+    for (const a of allAss) {
+      if (!byDate[a.date]) byDate[a.date] = [];
+      byDate[a.date].push(a);
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 bg-black/40 z-50 overflow-y-auto p-2";
+    const content = document.createElement("div");
+    content.className = "bg-white dark:bg-slate-800 rounded-xl max-w-md mx-auto p-4 my-4 shadow-2xl";
+    overlay.appendChild(content);
+
+    const positions = data.positions || [];
+    const posLabel = (pid) => (positions.find(p => p.id === pid) || {}).label || pid;
+
+    let html = `
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-bold text-lg">📅 ${escapeHtml(monthKey)} 月カレンダー</h3>
+        <button id="cal-close" class="text-2xl text-slate-400 hover:text-slate-700">&times;</button>
+      </div>
+      <div class="text-xs text-slate-500 mb-3">合計 ${allAss.length} 件のシフト</div>
+      <div class="grid grid-cols-7 gap-1 mb-2 text-[10px] text-center font-semibold">
+        <div class="text-red-600">日</div>
+        <div>月</div><div>火</div><div>水</div><div>木</div><div>金</div>
+        <div class="text-blue-600">土</div>
+      </div>
+      <div class="grid grid-cols-7 gap-1">`;
+    // Empty cells before first day
+    for (let i = 0; i < startDow; i++) {
+      html += `<div class="aspect-square"></div>`;
+    }
+    for (let d = 1; d <= totalDays; d++) {
+      const dateStr = `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      const list = byDate[dateStr] || [];
+      const dow = new Date(dateStr).getDay();
+      const dowColor = dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "";
+      const isToday = dateStr === new Date().toISOString().slice(0, 10);
+      const cellCls = list.length > 0
+        ? "bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200"
+        : "bg-slate-50 dark:bg-slate-700";
+      const todayCls = isToday ? "ring-2 ring-brand-600" : "";
+      html += `<button class="cal-day aspect-square ${cellCls} ${todayCls} rounded p-1 text-left flex flex-col" data-date="${dateStr}">
+        <div class="text-[10px] ${dowColor} font-semibold">${d}</div>
+        ${list.length > 0 ? `<div class="text-[8px] text-emerald-700 dark:text-emerald-300 mt-auto truncate">${list.length}件</div>
+          <div class="text-[8px] text-slate-600 dark:text-slate-400 truncate">${escapeHtml(list[0].startTime || "")}〜</div>` : ""}
+      </button>`;
+    }
+    html += `</div>`;
+    // 集計
+    const totalH = allAss.reduce((s, a) => s + (a.hours || 0), 0);
+    const totalP = allAss.reduce((s, a) => s + (a.pay || 0), 0);
+    html += `
+      <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+        <div class="bg-slate-50 dark:bg-slate-700 rounded p-2 text-center">
+          <div class="text-[10px] text-slate-500">合計時間</div>
+          <div class="font-bold text-base">${totalH.toFixed(1)}h</div>
+        </div>
+        <div class="bg-slate-50 dark:bg-slate-700 rounded p-2 text-center">
+          <div class="text-[10px] text-slate-500">予定給与</div>
+          <div class="font-bold text-base text-brand-700">${fmtYen(totalP)}</div>
+        </div>
+      </div>`;
+    content.innerHTML = html;
+    document.body.appendChild(overlay);
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    content.querySelector("#cal-close").onclick = () => overlay.remove();
+    content.querySelectorAll(".cal-day").forEach(btn => {
+      btn.onclick = () => {
+        const d = btn.getAttribute("data-date");
+        const list = byDate[d] || [];
+        if (list.length === 0) {
+          toast(`${d} はお休みです`, "info"); return;
+        }
+        // 詳細ダイアログ
+        const detail = document.createElement("div");
+        detail.className = "fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4";
+        const dow = ["日","月","火","水","木","金","土"][new Date(d).getDay()];
+        detail.innerHTML = `
+          <div class="bg-white dark:bg-slate-800 rounded-xl max-w-sm w-full p-4 space-y-2">
+            <h3 class="font-bold">${escapeHtml(d)} (${dow}) のシフト</h3>
+            ${list.map(a => `
+              <div class="bg-slate-50 dark:bg-slate-700 rounded p-2 text-sm">
+                <div class="font-semibold">${escapeHtml(a.startTime || "")}〜${escapeHtml(a.endTime || "")} (${escapeHtml(posLabel(a.position))})</div>
+                <div class="text-xs text-slate-600 dark:text-slate-400">${(a.hours || 0).toFixed(1)}h / ${fmtYen(Math.round(a.pay || 0))}</div>
+                ${a.note ? `<div class="text-[10px] text-amber-700 mt-1">📝 ${escapeHtml(a.note)}</div>` : ""}
+              </div>`).join("")}
+            <button class="w-full bg-slate-200 dark:bg-slate-700 rounded py-2 text-sm" onclick="this.closest('.fixed').remove()">閉じる</button>
+          </div>`;
+        document.body.appendChild(detail);
+        detail.onclick = (e) => { if (e.target === detail) detail.remove(); };
+      };
+    });
   }
 
   // ===== Web Push 通知 (Round 34 TOP 3) =====

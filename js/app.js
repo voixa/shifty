@@ -1671,6 +1671,200 @@ function showShortcutsHelp() {
   });
 })();
 
+// ===== コマンドパレット (Round 36 TOP 1) =====
+const COMMAND_PALETTE_ITEMS = [
+  // ナビゲーション
+  { kind: "tab", label: "🏠 ホーム", desc: "ダッシュボード", action: () => setTab("dashboard"), keywords: "home dashboard" },
+  { kind: "tab", label: "👥 スタッフ&希望", desc: "スタッフ管理 + 希望収集", action: () => setTab("staff"), keywords: "staff people preferences" },
+  { kind: "tab", label: "📅 シフト", desc: "シフト編成 + エクスポート", action: () => setTab("schedule"), keywords: "schedule shift" },
+  { kind: "tab", label: "⚙️ 設定", desc: "店舗設定", action: () => setTab("settings"), keywords: "settings config" },
+  // 主要アクション
+  { kind: "action", label: "🤖 AI 自動生成", desc: "シフトを AI で生成", action: () => { setTab("schedule"); setTimeout(autoGenerate, 200); }, keywords: "ai generate auto" },
+  { kind: "action", label: "✓ シフトを確定", desc: "今週のシフトを確定", action: () => { setTab("schedule"); setTimeout(publishWeek, 200); }, keywords: "publish confirm" },
+  { kind: "action", label: "+ スタッフを追加", desc: "新規スタッフ登録", action: () => { setTab("staff"); setTimeout(() => openStaffEdit(), 200); }, keywords: "add staff new" },
+  { kind: "action", label: "📥 CSV 取込", desc: "スタッフを CSV で一括追加", action: () => { setTab("staff"); setTimeout(importCsvDialog, 200); }, keywords: "csv import" },
+  { kind: "action", label: "🔗 全員のリンクをコピー", desc: "希望入力リンクを一括コピー", action: copyAllStaffLinks, keywords: "links copy share" },
+  { kind: "action", label: "📨 募集メッセージ生成", desc: "希望募集の LINE 文を生成", action: openRecruitDialog, keywords: "recruit message line" },
+  { kind: "action", label: "📢 全員に通知", desc: "緊急連絡を一斉送信", action: openBroadcastDialog, keywords: "broadcast notify all" },
+  { kind: "action", label: "🤖 業態セットアップ", desc: "業態テンプレを適用", action: () => { setTab("settings"); setTimeout(openQuickSetupWizard, 200); }, keywords: "wizard setup" },
+  { kind: "action", label: "💡 AI 推奨人数", desc: "過去データから人数提案", action: () => { setTab("settings"); setTimeout(openModelShiftDialog, 200); }, keywords: "model shift recommend" },
+  { kind: "action", label: "💴 給与計算 CSV", desc: "月次給与 CSV ダウンロード", action: () => { setTab("schedule"); setTimeout(openPayrollCsvDialog, 200); }, keywords: "payroll csv salary" },
+  { kind: "action", label: "📊 週次レポート", desc: "印刷/PDF 用の今週サマリ", action: () => { setTab("schedule"); setTimeout(openWeeklyReport, 200); }, keywords: "weekly report" },
+  { kind: "action", label: "📈 月次レポート", desc: "印刷/PDF 用の月次サマリ", action: () => { setTab("schedule"); setTimeout(openMonthlyReport, 200); }, keywords: "monthly report" },
+  { kind: "action", label: "🔮 売上予測+人件費シミュ", desc: "What-if 分析", action: openSimulationDialog, keywords: "forecast simulation what-if" },
+  { kind: "action", label: "🕒 過去スナップショット", desc: "復元ポイント", action: openSnapshotsDialog, keywords: "snapshot restore" },
+  { kind: "action", label: "📚 ヘルプ / FAQ", desc: "Q&A 検索", action: () => { setTab("settings"); setTimeout(() => location.hash = "#main", 200); }, keywords: "help faq" },
+  { kind: "action", label: "⌨️ キーボードショートカット", desc: "ショートカット一覧", action: () => showShortcutsHelp(), keywords: "shortcut keyboard" },
+  { kind: "action", label: "🎓 機能ツアーを開始", desc: "主要機能を順に紹介", action: () => startFeatureTour(), keywords: "tour onboarding tutorial" },
+  // 設定ジャンプ
+  { kind: "settings", label: "🏪 基本情報", desc: "店舗名・予算", action: () => { setTab("settings"); setTimeout(() => location.hash = "#set-basic", 200); }, keywords: "basic name budget" },
+  { kind: "settings", label: "👥 ポジション", desc: "ホール/キッチン等", action: () => { setTab("settings"); setTimeout(() => location.hash = "#set-positions", 200); }, keywords: "positions roles" },
+  { kind: "settings", label: "🕐 営業時間", desc: "セッション設定", action: () => { setTab("settings"); setTimeout(() => location.hash = "#set-sessions", 200); }, keywords: "sessions hours business" },
+  { kind: "settings", label: "🔢 必要人数", desc: "曜日×時間帯の人数", action: () => { setTab("settings"); setTimeout(() => location.hash = "#set-staffing", 200); }, keywords: "staffing count required" },
+  { kind: "settings", label: "⚖️ 労務ルール", desc: "週上限/連勤など", action: () => { setTab("settings"); setTimeout(() => location.hash = "#set-labor", 200); }, keywords: "labor rules" },
+  { kind: "settings", label: "🌙 深夜手当", desc: "給与計算オプション", action: () => { setTab("settings"); setTimeout(() => location.hash = "#set-payroll", 200); }, keywords: "night payroll" },
+  { kind: "settings", label: "🤖 AI 重み", desc: "希望/コスト/公平性の重み", action: () => { setTab("settings"); setTimeout(() => location.hash = "#set-algo", 200); }, keywords: "ai weights algorithm" },
+];
+
+let _commandPaletteOpen = false;
+function openCommandPalette() {
+  if (_commandPaletteOpen) return;
+  _commandPaletteOpen = true;
+  const overlay = document.createElement("div");
+  overlay.id = "command-palette";
+  overlay.className = "fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-start justify-center p-4 pt-20";
+  overlay.innerHTML = `
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-xl w-full overflow-hidden">
+      <input id="cmdpalette-input" type="search" placeholder="🔍 機能名・スタッフ・設定を検索..."
+        class="w-full p-4 text-base border-0 outline-none bg-transparent border-b border-slate-200 dark:border-slate-700"
+        autocomplete="off" aria-label="コマンド検索">
+      <div id="cmdpalette-list" class="max-h-96 overflow-y-auto"></div>
+      <div class="p-2 text-[10px] text-slate-400 border-t border-slate-100 dark:border-slate-700 flex justify-between">
+        <span>↑↓ 移動 / Enter 実行 / Esc 閉じる</span>
+        <span>Cmd/Ctrl + K で開く</span>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const inp = overlay.querySelector("#cmdpalette-input");
+  const list = overlay.querySelector("#cmdpalette-list");
+  let selectedIdx = 0;
+  let filtered = [];
+
+  function renderList() {
+    const q = (inp.value || "").toLowerCase().trim();
+    // スタッフを動的追加
+    const staffItems = (state.staff || []).filter(s => !s.archived).map(s => ({
+      kind: "staff",
+      label: `👤 ${s.name}`,
+      desc: `${posCfg(s.position).label} · ¥${s.hourlyWage}/h`,
+      action: () => { setTab("staff"); setTimeout(() => openStaffEdit(s), 200); },
+      keywords: s.name + " " + (s.notes || ""),
+    }));
+    const allItems = [...COMMAND_PALETTE_ITEMS, ...staffItems];
+    filtered = q
+      ? allItems.filter(it => it.label.toLowerCase().includes(q) || (it.desc || "").toLowerCase().includes(q) || (it.keywords || "").toLowerCase().includes(q))
+      : allItems.slice(0, 20);
+    selectedIdx = 0;
+    list.innerHTML = "";
+    if (filtered.length === 0) {
+      list.innerHTML = `<div class="p-4 text-center text-sm text-slate-500">該当なし</div>`;
+      return;
+    }
+    filtered.forEach((it, i) => {
+      const row = el("button", {
+        class: `w-full text-left p-3 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-3 ${i === selectedIdx ? "bg-brand-50 dark:bg-brand-900/30" : ""}`,
+        onclick: () => { close(); it.action(); },
+        "data-idx": i,
+      });
+      const kindBadge = { tab: "[タブ]", action: "[操作]", settings: "[設定]", staff: "[スタッフ]" }[it.kind] || "";
+      row.innerHTML = `
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-sm">${escapeHtml(it.label)}</div>
+          ${it.desc ? `<div class="text-xs text-slate-500 truncate">${escapeHtml(it.desc)}</div>` : ""}
+        </div>
+        <span class="text-[10px] text-slate-400">${kindBadge}</span>`;
+      list.appendChild(row);
+    });
+  }
+
+  function moveSel(delta) {
+    if (filtered.length === 0) return;
+    selectedIdx = (selectedIdx + delta + filtered.length) % filtered.length;
+    list.querySelectorAll("[data-idx]").forEach(b => {
+      const i = Number(b.getAttribute("data-idx"));
+      if (i === selectedIdx) {
+        b.classList.add("bg-brand-50", "dark:bg-brand-900/30");
+        b.scrollIntoView({ block: "nearest" });
+      } else {
+        b.classList.remove("bg-brand-50", "dark:bg-brand-900/30");
+      }
+    });
+  }
+
+  function close() {
+    overlay.remove();
+    _commandPaletteOpen = false;
+  }
+
+  inp.oninput = renderList;
+  inp.onkeydown = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); close(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); moveSel(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); moveSel(-1); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (filtered[selectedIdx]) { close(); filtered[selectedIdx].action(); }
+    }
+  };
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  renderList();
+  setTimeout(() => inp.focus(), 50);
+}
+
+// グローバルショートカット (Cmd+K / Ctrl+K)
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+    e.preventDefault();
+    openCommandPalette();
+  }
+});
+
+// ===== 機能ツアー (Round 36 TOP 3) =====
+const FEATURE_TOUR_STEPS = [
+  { tab: "dashboard", title: "🏠 ホームタブ", desc: "「次にやること」と進捗バーで、今やるべきことが一目で分かります。スタッフ・希望提出・AI 生成・確定の 4 ステップを順に進めましょう。" },
+  { tab: "staff", title: "👥 スタッフ&希望タブ", desc: "スタッフを登録 → 希望入力リンクを LINE で一斉配信 → スタッフのスマホから希望提出。提出状況をリアルタイムで把握できます。" },
+  { tab: "schedule", title: "📅 シフトタブ", desc: "「🤖 AI 自動生成」で 5 秒で配置案を作成。改善ポイントが自動表示されるので、内容を確認してから「✓ 確定」してください。" },
+  { tab: "settings", title: "⚙️ 設定タブ", desc: "業態テンプレで一括最適化。AI 重み・労務ルール・給与計算オプションをカスタマイズできます。「📚 ヘルプセンター」で困った時のFAQ も。" },
+  { tab: "dashboard", title: "💡 困ったら Cmd+K", desc: "Cmd+K (Mac) / Ctrl+K (Windows) でコマンドパレットが開きます。機能名・スタッフ名・設定項目を全文検索 → Enter で即ジャンプ。" },
+];
+
+function startFeatureTour() {
+  let step = 0;
+  function show() {
+    const s = FEATURE_TOUR_STEPS[step];
+    setTab(s.tab);
+    const overlay = document.createElement("div");
+    overlay.id = "feature-tour";
+    overlay.className = "fixed inset-0 bg-black/60 backdrop-blur-sm z-[101] flex items-end sm:items-center justify-center p-4";
+    overlay.innerHTML = `
+      <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-md w-full p-5 space-y-3">
+        <div class="flex items-center gap-3">
+          <div class="text-3xl">🎓</div>
+          <div class="flex-1">
+            <div class="text-xs text-slate-500">機能ツアー ${step + 1}/${FEATURE_TOUR_STEPS.length}</div>
+            <h3 class="font-bold text-base">${escapeHtml(s.title)}</h3>
+          </div>
+        </div>
+        <div class="flex gap-1.5">
+          ${FEATURE_TOUR_STEPS.map((_, i) =>
+            `<div class="flex-1 h-1 rounded-full ${i <= step ? "bg-brand-600" : "bg-slate-200 dark:bg-slate-700"}"></div>`
+          ).join("")}
+        </div>
+        <p class="text-sm text-slate-700 dark:text-slate-300">${escapeHtml(s.desc)}</p>
+        <div class="flex justify-between gap-2 pt-2 border-t">
+          <button id="ft-skip" class="text-xs text-slate-500 hover:text-slate-700">ツアーを閉じる</button>
+          <div class="flex gap-2">
+            <button id="ft-prev" class="px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md ${step === 0 ? "opacity-50 pointer-events-none" : ""}">← 戻る</button>
+            <button id="ft-next" class="px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-bold">${step === FEATURE_TOUR_STEPS.length - 1 ? "✓ 完了" : "次へ →"}</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#ft-skip").onclick = () => overlay.remove();
+    overlay.querySelector("#ft-prev").onclick = () => { overlay.remove(); if (step > 0) { step--; show(); } };
+    overlay.querySelector("#ft-next").onclick = () => {
+      overlay.remove();
+      if (step < FEATURE_TOUR_STEPS.length - 1) { step++; show(); }
+      else {
+        try { localStorage.setItem("shifty.featureTourSeen", "1"); } catch (_) {}
+        toast("🎉 機能ツアー完了！Cmd+K で再開できます", "success", 5000);
+      }
+    };
+  }
+  show();
+}
+
 // ===== ヘルプセンター (Round 25 TOP 1) =====
 const FAQ_DATA = [
   // 基本操作
@@ -1721,6 +1915,18 @@ function renderHelpCenter() {
   card.appendChild(el("div", { class: "font-semibold" }, "📚 ヘルプセンター / FAQ"));
   card.appendChild(el("div", { class: "text-xs text-slate-500" },
     `${FAQ_DATA.length} 件の Q&A から検索できます。`));
+
+  // Round 36 TOP 3: 機能ツアー起動ボタン
+  card.appendChild(el("div", { class: "bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/30 dark:to-pink-900/30 rounded-md p-3 flex items-center justify-between mb-3" }, [
+    el("div", {}, [
+      el("div", { class: "font-semibold text-sm" }, "🎓 機能ツアーを開始"),
+      el("div", { class: "text-xs text-slate-600 dark:text-slate-400" }, "5 ステップで主要機能を順に紹介 (約 2 分)"),
+    ]),
+    el("button", {
+      class: "bg-purple-600 hover:bg-purple-700 text-white rounded px-3 py-1.5 text-xs font-bold",
+      onclick: () => startFeatureTour(),
+    }, "▶ 開始"),
+  ]));
 
   // Round 35 TOP 2: 操作デモ (CSS アニメーション)
   const demos = el("details", { class: "border border-slate-200 dark:border-slate-700 rounded-md p-2 mb-3" });
