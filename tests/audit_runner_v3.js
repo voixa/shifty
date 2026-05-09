@@ -192,6 +192,70 @@ console.log('\n=== T21: must が満たせない (固定休日と衝突) ===');
 }
 
 // =====================================================================
+// T23: Round 18 TOP 3a — Slot 細分化で部分希望が反映される
+// 17-22 dinner × 2、A は 17-20 must、B は 19-22 must
+// 細分化により: A=17-20、B=19-22、C=17-19、D=20-22 のような切り出しが可能
+// =====================================================================
+console.log('\n=== T23: Round 18 — slot 細分化 (部分時間希望が反映) ===');
+{
+  const staffList = [
+    staff('a','Alice','hall',{maxHoursPerWeek:40}),
+    staff('b','Bob','hall',{maxHoursPerWeek:40}),
+    staff('c','Carol','hall',{maxHoursPerWeek:40}),
+    staff('d','Dave','hall',{maxHoursPerWeek:40}),
+  ];
+  const day = addDays(WK, 0);
+  const slots = [{id:'sl1',date:day,position:'hall',startTime:'17:00',endTime:'22:00',requiredCount:2}];
+  const prefs = [
+    {id:'p1',staffId:'a',date:day,startTime:'17:00',endTime:'20:00',priority:'must'},
+    {id:'p2',staffId:'b',date:day,startTime:'19:00',endTime:'22:00',priority:'must'},
+  ];
+  const r = generateShift({staff:staffList,slots,preferences:prefs,laborRules:{maxHoursPerWeek:40},randomStarts:3,decompose:true});
+  ok('hard violations 0', r.audit.hardViolations.length === 0);
+  ok('decomposition occurred', r.audit.decomposition.splitCount === 1);
+  ok('decomposed slots > 1', r.audit.decomposition.decomposedSlots > 1);
+  // Alice should get a partial assignment matching 17-20 (not 17-22)
+  const aliceAss = r.assignments.find(x => x.staffId === 'a');
+  ok('Alice has assignment', !!aliceAss);
+  if (aliceAss) {
+    ok('Alice ends at 20:00 (not 22:00)', aliceAss.endTime === '20:00',
+      `Alice: ${aliceAss.startTime}-${aliceAss.endTime}`);
+  }
+  const bobAss = r.assignments.find(x => x.staffId === 'b');
+  ok('Bob has assignment', !!bobAss);
+  if (bobAss) {
+    ok('Bob starts at 19:00 (not 17:00)', bobAss.startTime === '19:00',
+      `Bob: ${bobAss.startTime}-${bobAss.endTime}`);
+  }
+  ok('preference satisfaction high (>= 100%)', r.metrics.preferenceSatisfaction >= 1.0);
+}
+
+// =====================================================================
+// T24: Round 18 TOP 3a — 細分化を OFF にした場合の旧挙動 (回帰確認)
+// =====================================================================
+console.log('\n=== T24: 細分化 OFF (decompose=false) で旧挙動を維持 ===');
+{
+  const staffList = [
+    staff('a','Alice','hall',{maxHoursPerWeek:40}),
+    staff('b','Bob','hall',{maxHoursPerWeek:40}),
+  ];
+  const day = addDays(WK, 0);
+  const slots = [{id:'sl1',date:day,position:'hall',startTime:'17:00',endTime:'22:00',requiredCount:2}];
+  const prefs = [
+    {id:'p1',staffId:'a',date:day,startTime:'17:00',endTime:'20:00',priority:'must'},
+  ];
+  const r = generateShift({staff:staffList,slots,preferences:prefs,laborRules:{maxHoursPerWeek:40},randomStarts:3,decompose:false});
+  ok('hard violations 0', r.audit.hardViolations.length === 0);
+  // 旧挙動: Alice は 17-22 全部に配置される (細分化なし)
+  const aliceAss = r.assignments.find(x => x.staffId === 'a');
+  if (aliceAss) {
+    ok('Alice gets full slot 17-22 (legacy behavior)',
+      aliceAss.startTime === '17:00' && aliceAss.endTime === '22:00',
+      `Alice: ${aliceAss.startTime}-${aliceAss.endTime}`);
+  }
+}
+
+// =====================================================================
 // T22: weights = 0 for fairness — does it still produce coverage?
 // =====================================================================
 console.log('\n=== T22: weights.fairness = 0 でも動作 ===');

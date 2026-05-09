@@ -681,6 +681,154 @@ function renderMonthlyLaborRisk() {
   return card;
 }
 
+// ===== セッションタイムライン可視化 (Round 18 TOP 2) =====
+function renderSessionsTimeline(sessions) {
+  if (!sessions || sessions.length === 0) return null;
+  // 表示範囲: 全 sessions の min start ～ max end
+  function _t(s) { const [h, m] = s.split(":").map(Number); return h * 60 + m; }
+  let minMin = Math.min(...sessions.map(s => _t(s.startTime)));
+  let maxMin = Math.max(...sessions.map(s => _t(s.endTime)));
+  // 1 時間刻みの目盛
+  minMin = Math.floor(minMin / 60) * 60;
+  maxMin = Math.ceil(maxMin / 60) * 60;
+  const totalMin = maxMin - minMin;
+  if (totalMin <= 0) return null;
+  const wrap = el("div", { class: "bg-slate-50 border border-slate-200 rounded-md p-3 mt-2" });
+  wrap.appendChild(el("div", { class: "text-[10px] text-slate-500 mb-1" }, "🕐 営業時間タイムライン"));
+
+  // 時間軸
+  const ruler = el("div", { class: "relative h-6 mb-1 border-b border-slate-300", style: { fontSize: "9px", color: "#64748b" } });
+  const hours = Math.floor(totalMin / 60);
+  for (let i = 0; i <= hours; i++) {
+    const m = minMin + i * 60;
+    const pct = (m - minMin) / totalMin * 100;
+    const tick = el("div", { style: { position: "absolute", left: pct + "%", top: "0", bottom: "0", borderLeft: "1px solid #cbd5e1", paddingLeft: "2px" } });
+    tick.textContent = `${Math.floor(m / 60)}:00`;
+    ruler.appendChild(tick);
+  }
+  wrap.appendChild(ruler);
+
+  // 各セッションをバーとして配置 (重なり対応のため row 動的計算)
+  const rows = []; // 各 row は終わりの時刻を保持
+  const sorted = sessions.slice().sort((a, b) => _t(a.startTime) - _t(b.startTime));
+  const colors = ["#fbbf24", "#fb923c", "#f87171", "#a78bfa", "#60a5fa", "#34d399", "#f472b6", "#94a3b8"];
+  const placedRows = sorted.map((s, i) => {
+    const sStart = _t(s.startTime);
+    const sEnd = _t(s.endTime);
+    let row = 0;
+    while (rows[row] !== undefined && rows[row] > sStart) row++;
+    rows[row] = sEnd;
+    return { sess: s, row, color: colors[i % colors.length] };
+  });
+  const rowCount = rows.length;
+  const rowHeight = 22;
+  const tlWrap = el("div", { class: "relative", style: { height: (rowCount * rowHeight) + "px" } });
+  for (const { sess, row, color } of placedRows) {
+    const sStart = _t(sess.startTime);
+    const sEnd = _t(sess.endTime);
+    const left = (sStart - minMin) / totalMin * 100;
+    const width = (sEnd - sStart) / totalMin * 100;
+    const bar = el("div", {
+      style: {
+        position: "absolute", left: left + "%", width: width + "%",
+        top: (row * rowHeight) + "px", height: (rowHeight - 4) + "px",
+        background: color, color: "white", borderRadius: "4px",
+        fontSize: "10px", padding: "2px 6px",
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+      },
+      title: `${sess.label}: ${sess.startTime}〜${sess.endTime}`,
+    });
+    bar.textContent = `${sess.icon || ""} ${sess.label} ${sess.startTime.slice(0, 5)}〜${sess.endTime.slice(0, 5)}`;
+    tlWrap.appendChild(bar);
+  }
+  wrap.appendChild(tlWrap);
+  // 重なりがあれば警告
+  const overlaps = [];
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      const a = sorted[i], b = sorted[j];
+      if (_t(a.startTime) < _t(b.endTime) && _t(b.startTime) < _t(a.endTime)) {
+        overlaps.push(`${a.label} ⇆ ${b.label}`);
+      }
+    }
+  }
+  if (overlaps.length > 0) {
+    wrap.appendChild(el("div", { class: "mt-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5" },
+      `⚠️ 時間が重複: ${overlaps.slice(0, 3).join(" / ")}${overlaps.length > 3 ? ` 他 ${overlaps.length - 3} 件` : ""}`));
+  }
+  return wrap;
+}
+
+// セッションプリセット選択ダイアログ (Round 18 TOP 2)
+function openSessionPresetsDialog() {
+  const presets = window.ShiftyData.SESSION_PRESETS || {};
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "📋 セッションプリセット選択"));
+  body.appendChild(el("p", { class: "text-xs text-slate-600" },
+    "業態に合わせて、時間帯セットをワンクリックで設定できます。現在のセッション設定は上書きされます (必要人数マトリクスはリセット)。"));
+  const list = el("div", { class: "space-y-2 max-h-96 overflow-y-auto" });
+  for (const [key, preset] of Object.entries(presets)) {
+    const card = el("div", { class: "border border-slate-200 rounded-md p-3 hover:bg-slate-50 cursor-pointer" });
+    card.innerHTML = `
+      <div class="font-semibold text-sm">${escapeHtml(preset.label)}</div>
+      <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(preset.description)}</div>
+      <div class="text-[10px] text-slate-600 mt-1">
+        ${preset.sessions.map(s => `<span class="inline-block bg-slate-100 rounded px-1.5 py-0.5 mr-1 mb-1">${s.icon || ""} ${escapeHtml(s.label)} ${s.startTime}〜${s.endTime}</span>`).join("")}
+      </div>`;
+    card.appendChild(el("button", {
+      class: "mt-2 text-xs bg-brand-600 hover:bg-brand-700 text-white rounded px-3 py-1 font-semibold",
+      onclick: () => applySessionPreset(key, preset),
+    }, "このプリセットを適用 →"));
+    list.appendChild(card);
+  }
+  body.appendChild(list);
+  body.appendChild(el("div", { class: "flex justify-end pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+  ]));
+  modal(body);
+}
+
+function applySessionPreset(key, preset) {
+  if (!confirm(
+    `「${preset.label}」を適用しますか？\n\n` +
+    `現在のセッション ${state.meta.sessions.length} 個 → ${preset.sessions.length} 個に置き換わり、` +
+    `必要人数マトリクスは初期化されます (適用前に自動スナップショットを取得)。`
+  )) return;
+  // 先にスナップショット
+  try { createSnapshot("manual", `セッションプリセット適用前 (${preset.label})`); } catch (_) {}
+
+  state.meta.sessions = JSON.parse(JSON.stringify(preset.sessions));
+  // 必要人数マトリクスを規模に応じて適切に再構築
+  const newPlan = {};
+  for (const sess of preset.sessions) {
+    newPlan[sess.id] = {};
+    // ピーク時間 (12-14, 18-21) は厚め、他は薄め
+    function _t(s) { const [h, m] = s.split(":").map(Number); return h * 60 + m; }
+    const sStart = _t(sess.startTime);
+    const sEnd = _t(sess.endTime);
+    const isLunchPeak  = sStart >= 11*60 && sEnd <= 14*60+30;
+    const isDinnerPeak = sStart >= 17*60 && sEnd <= 21*60+30;
+    const isPeak = isLunchPeak || isDinnerPeak || sess.id.includes("peak");
+    for (let dow = 0; dow < 7; dow++) {
+      const isWeekend = dow === 0 || dow === 6;
+      newPlan[sess.id][dow] = {};
+      for (const pos of state.meta.positions) {
+        let count = 1;
+        if (isPeak) count = isWeekend ? 2 : 1;
+        if (pos.id === "manager") count = 1; // マネージャーは常に 1
+        newPlan[sess.id][dow][pos.id] = count;
+      }
+    }
+  }
+  state.meta.staffingPlan = newPlan;
+  regenerateCurSlots();
+  persist();
+  closeModal();
+  render();
+  toast(`✓ プリセット「${preset.label}」を適用 (${preset.sessions.length} セッション)`, "success", 5000);
+}
+
 // ===== データ復旧スナップショット (Round 17 TOP 1) =====
 const SNAPSHOT_LIMIT = 20;
 function createSnapshot(kind = "manual", label = "") {
@@ -1266,6 +1414,14 @@ function renderAuditReport(audit) {
     { label: "目的関数値", value: (audit.bestObjective).toFixed(3), ok: true },
     { label: "重み設定", value: "標準" + (state.meta.algorithmWeights ? "（カスタム可）" : ""), ok: true },
   ];
+  // Round 18: 細分化情報
+  if (audit.decomposition && audit.decomposition.splitCount > 0) {
+    items.push({
+      label: "🔪 希望ベース細分化",
+      value: `${audit.decomposition.splitCount}/${audit.decomposition.originalSlots} 枠を分割`,
+      ok: true,
+    });
+  }
   items.forEach(it => {
     metricsGrid.appendChild(el("div", { class: "bg-white rounded p-2" }, [
       el("div", { class: "text-slate-500 text-[10px]" }, it.label),
@@ -4291,11 +4447,19 @@ function viewSettings() {
 
   // Sessions
   const sessCard = el("div", { id: "set-sessions", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
-  sessCard.appendChild(el("div", { class: "flex items-center justify-between" }, [
+  sessCard.appendChild(el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
     el("div", { class: "font-semibold" }, "4. 営業セッション（時間帯）"),
-    el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
-      onclick: () => editSessionDialog() }, "＋ 追加"),
+    el("div", { class: "flex gap-2" }, [
+      el("button", { class: "text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-md px-3 py-1.5",
+        onclick: openSessionPresetsDialog,
+        title: "業態に合わせたプリセットから選択" }, "📋 プリセット選択"),
+      el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
+        onclick: () => editSessionDialog() }, "＋ 追加"),
+    ]),
   ]));
+  // セッションタイムライン可視化 (Round 18 TOP 2)
+  const tl = renderSessionsTimeline(state.meta.sessions);
+  if (tl) sessCard.appendChild(tl);
   const sessList = el("div", { class: "space-y-2" });
   state.meta.sessions.forEach(s => {
     const row = el("div", { class: "flex items-center gap-2 bg-slate-50 rounded-md p-2 text-sm flex-wrap" });

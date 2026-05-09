@@ -736,6 +736,100 @@
   // =====================================================================
   // Public API
   // =====================================================================
+  // =====================================================================
+  // Slot 細分化 (Round 18 TOP 3a) — スタッフの希望時間境界で slot を分割
+  // 「17-22 を 2 人」 + 「A は 17-20 want」 + 「B は 19-22 want」
+  //   → 「17-19 × 2」「19-20 × 2」「20-22 × 2」に分割
+  // 各 sub-slot を埋めることで、staff のpartial 希望に AI が応えられる
+  // =====================================================================
+  function _toMin(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
+  function _fromMin(m) {
+    const h = String(Math.floor(m / 60)).padStart(2, "0");
+    const mm = String(m % 60).padStart(2, "0");
+    return `${h}:${mm}`;
+  }
+  function decomposeSlots(slots, preferences) {
+    const out = [];
+    const decompositionMap = {}; // parentId -> [child slot ids]
+    for (const slot of slots) {
+      // 該当 slot の時間内に start/end が落ちる pref を集める (avoid 含めて分割理由にする)
+      const slotStartMin = _toMin(slot.startTime);
+      const slotEndMin = _toMin(slot.endTime);
+      const points = new Set([slotStartMin, slotEndMin]);
+      for (const p of preferences) {
+        if (p.date !== slot.date) continue;
+        const pStart = _toMin(p.startTime);
+        const pEnd = _toMin(p.endTime);
+        // pref が slot と重なるか
+        if (pStart >= slotEndMin || pEnd <= slotStartMin) continue;
+        if (pStart > slotStartMin && pStart < slotEndMin) points.add(pStart);
+        if (pEnd > slotStartMin && pEnd < slotEndMin) points.add(pEnd);
+      }
+      const sortedPoints = Array.from(points).sort((a, b) => a - b);
+      if (sortedPoints.length === 2) {
+        // 分割不要
+        out.push({ ...slot, parentSlotId: slot.id });
+        decompositionMap[slot.id] = [slot.id];
+      } else {
+        // 分割
+        const childIds = [];
+        for (let i = 0; i < sortedPoints.length - 1; i++) {
+          const childId = `${slot.id}_seg${i}`;
+          out.push({
+            ...slot,
+            id: childId,
+            startTime: _fromMin(sortedPoints[i]),
+            endTime: _fromMin(sortedPoints[i + 1]),
+            parentSlotId: slot.id,
+            _segIndex: i,
+            _segCount: sortedPoints.length - 1,
+          });
+          childIds.push(childId);
+        }
+        decompositionMap[slot.id] = childIds;
+      }
+    }
+    return { decomposedSlots: out, decompositionMap };
+  }
+
+  // 連続する同一スタッフ・同日・同ポジションのアサインメントを 1 件にマージ
+  // 細分化された結果を「人間にとって自然な勤務シフト」に戻す
+  function mergeAdjacentAssignments(assignments, staff) {
+    const groups = new Map();
+    for (const a of assignments) {
+      const key = `${a.staffId}|${a.date}|${a.position}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(a);
+    }
+    const merged = [];
+    const staffMap = new Map(staff.map(s => [s.id, s]));
+    for (const list of groups.values()) {
+      list.sort((a, b) => a.startTime.localeCompare(b.startTime));
+      let i = 0;
+      while (i < list.length) {
+        let j = i;
+        while (j + 1 < list.length && list[j].endTime === list[j + 1].startTime) j++;
+        const first = list[i], last = list[j];
+        if (i === j) {
+          merged.push(first);
+        } else {
+          const s = staffMap.get(first.staffId);
+          const totalHours = calcHours(first.startTime, last.endTime);
+          // breakdown / score は最初のセグメントを採用 (代表値として)
+          merged.push({
+            ...first,
+            startTime: first.startTime,
+            endTime: last.endTime,
+            cost: (s ? s.hourlyWage : 0) * totalHours,
+            mergedFrom: list.slice(i, j + 1).map(x => x.id),
+          });
+        }
+        i = j + 1;
+      }
+    }
+    return merged;
+  }
+
   function generateShift({
     staff,
     slots,
@@ -743,6 +837,7 @@
     laborRules,
     weights: rawWeights,
     randomStarts = 5,
+    decompose = true, // Round 18 TOP 3: 希望ベース slot 細分化を有効化
   }) {
     const weights = normalizeWeights(rawWeights);
 
@@ -756,6 +851,21 @@
       _costFactor: 1 - (s.hourlyWage - minW) / range,
     }));
 
+    // Slot 細分化 (Round 18 TOP 3a)
+    let workingSlots = slots;
+    let decompMap = null;
+    let decompStats = { originalSlots: slots.length, decomposedSlots: slots.length, splitCount: 0 };
+    if (decompose && preferences && preferences.length > 0) {
+      const r = decomposeSlots(slots, preferences);
+      workingSlots = r.decomposedSlots;
+      decompMap = r.decompositionMap;
+      decompStats = {
+        originalSlots: slots.length,
+        decomposedSlots: workingSlots.length,
+        splitCount: Object.values(decompMap).filter(arr => arr.length > 1).length,
+      };
+    }
+
     let bestState = null;
     let bestObj = -Infinity;
     let bestSeed = -1;
@@ -765,7 +875,7 @@
       const seed = (r + 1) * 12345;
       let state = phase1Coverage({
         staff: staffWithCost,
-        slots,
+        slots: workingSlots,
         preferences,
         laborRules,
         weights,
@@ -777,7 +887,7 @@
         laborRules,
         weights,
       });
-      const m = calcMetrics(state, { staff: staffWithCost, slots, preferences });
+      const m = calcMetrics(state, { staff: staffWithCost, slots: workingSlots, preferences });
       const obj = objectiveValue(m, weights);
       trial.push({ seed, obj, coverage: m.coverageRate, prefSat: m.preferenceSatisfaction });
       if (obj > bestObj) {
@@ -787,18 +897,40 @@
       }
     }
 
-    const metrics = calcMetrics(bestState, {
+    // 細分化前の assignment 数 (= sub-slot 充足数) でカバー率を測る
+    const preMergeCount = bestState.assignments.length;
+    // 連続する細分化アサインメントを統合 (Round 18 TOP 3a)
+    let finalAssignments = bestState.assignments;
+    if (decompose) {
+      finalAssignments = mergeAdjacentAssignments(finalAssignments, staffWithCost);
+    }
+
+    // メトリクスは元の slots ベースで計算 (ユーザー視点)
+    const metricsState = {
+      ...bestState,
+      assignments: finalAssignments,
+      byStaff: Object.fromEntries(staffWithCost.map(s => [s.id, finalAssignments.filter(a => a.staffId === s.id)])),
+      hours: Object.fromEntries(staffWithCost.map(s => [s.id, finalAssignments.filter(a => a.staffId === s.id).reduce((sum, a) => sum + calcHours(a.startTime, a.endTime), 0)])),
+    };
+    const metrics = calcMetrics(metricsState, {
       staff: staffWithCost,
       slots,
       preferences,
     });
-    const violations = verifyHardConstraints(bestState, {
+    // カバー率を細分化前ベース (sub-slot ベース) で再計算
+    if (decompose) {
+      const decomposedTotal = workingSlots.reduce((s, x) => s + x.requiredCount, 0);
+      metrics.coverageRate = decomposedTotal ? preMergeCount / decomposedTotal : 1;
+      metrics.filled = preMergeCount;
+      metrics.totalSlots = decomposedTotal;
+    }
+    const violations = verifyHardConstraints(metricsState, {
       staff: staffWithCost,
       laborRules,
     });
 
     return {
-      assignments: bestState.assignments,
+      assignments: finalAssignments,
       metrics,
       unfilled: bestState.unfilled,
       audit: {
@@ -807,6 +939,7 @@
         bestSeed,
         bestObjective: bestObj,
         trials: trial,
+        decomposition: decompStats,
         hardConstraintsChecked: HARD_CONSTRAINTS.map((c) => ({
           id: c.id,
           label: c.label,

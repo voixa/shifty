@@ -24,6 +24,76 @@
     { id: "dinner", label: "ディナー", startTime: "17:00", endTime: "22:00", icon: "🌙" },
   ];
 
+  // セッションプリセット (Round 18 TOP 2) — 飲食店の典型パターン
+  const SESSION_PRESETS = {
+    simple_lunch_dinner: {
+      label: "シンプル (ランチ + ディナー)",
+      description: "1日2回転。最もシンプル。家族経営や小規模店向け",
+      sessions: [
+        { id: "lunch",  label: "ランチ",  startTime: "11:00", endTime: "15:00", icon: "☀️" },
+        { id: "dinner", label: "ディナー", startTime: "17:00", endTime: "22:00", icon: "🌙" },
+      ],
+    },
+    detailed_peak: {
+      label: "ピーク区別 (ランチ・ディナーの繁閑分離)",
+      description: "12-14・18-21 のピークタイムを切り出して、人数を厚く配置可能。中規模店向け",
+      sessions: [
+        { id: "lunch_prep",  label: "ランチ準備", startTime: "10:00", endTime: "11:00", icon: "🔧" },
+        { id: "lunch_peak",  label: "ランチピーク", startTime: "11:00", endTime: "14:00", icon: "🔥" },
+        { id: "lunch_off",   label: "ランチ閑散", startTime: "14:00", endTime: "16:00", icon: "🍵" },
+        { id: "dinner_prep", label: "ディナー準備", startTime: "16:00", endTime: "17:00", icon: "🔧" },
+        { id: "dinner_peak", label: "ディナーピーク", startTime: "17:00", endTime: "21:00", icon: "🔥" },
+        { id: "dinner_late", label: "ディナー閑散", startTime: "21:00", endTime: "23:00", icon: "🌙" },
+      ],
+    },
+    early_mid_late: {
+      label: "早番 / 中番 / 遅番",
+      description: "オープンからクローズまで通し営業。3 交代制。朝〜夜まで営業する店向け",
+      sessions: [
+        { id: "early",  label: "早番", startTime: "08:00", endTime: "13:00", icon: "🌅" },
+        { id: "middle", label: "中番", startTime: "12:00", endTime: "18:00", icon: "☀️" },
+        { id: "late",   label: "遅番", startTime: "17:00", endTime: "23:00", icon: "🌙" },
+      ],
+    },
+    izakaya: {
+      label: "居酒屋・夜営業中心",
+      description: "夕方オープン〜深夜営業。ピークと深夜帯を分離。居酒屋・バー向け",
+      sessions: [
+        { id: "open_prep",  label: "仕込み", startTime: "16:00", endTime: "17:00", icon: "🔧" },
+        { id: "early_evening", label: "宵の口", startTime: "17:00", endTime: "20:00", icon: "🍶" },
+        { id: "peak",   label: "ピーク",  startTime: "20:00", endTime: "23:00", icon: "🔥" },
+        { id: "midnight", label: "深夜",   startTime: "23:00", endTime: "26:00", icon: "🌃" },
+      ],
+    },
+    cafe_allday: {
+      label: "カフェ・終日営業",
+      description: "朝〜夕方の通し営業。モーニング/ランチ/カフェタイムを分離。カフェ向け",
+      sessions: [
+        { id: "morning", label: "モーニング", startTime: "07:00", endTime: "11:00", icon: "🥐" },
+        { id: "lunch",   label: "ランチ", startTime: "11:00", endTime: "14:00", icon: "🍽" },
+        { id: "cafe",    label: "カフェ", startTime: "14:00", endTime: "18:00", icon: "☕" },
+        { id: "evening", label: "夕方〜閉店", startTime: "18:00", endTime: "21:00", icon: "🌆" },
+      ],
+    },
+    hourly: {
+      label: "1時間刻み (細粒度配置)",
+      description: "営業時間を1時間ごとに区切って細かく配置。AI最適化で人件費削減狙い。中〜大規模店向け",
+      sessions: (() => {
+        const out = [];
+        for (let h = 11; h < 23; h++) {
+          out.push({
+            id: `h${h}`,
+            label: `${h}:00`,
+            startTime: `${String(h).padStart(2,"0")}:00`,
+            endTime: `${String(h+1).padStart(2,"0")}:00`,
+            icon: h < 14 ? "☀️" : h < 17 ? "🍵" : h < 21 ? "🔥" : "🌙",
+          });
+        }
+        return out;
+      })(),
+    },
+  };
+
   function defaultStaffingPlan() {
     const plan = {};
     for (const sess of DEFAULT_SESSIONS) {
@@ -444,7 +514,7 @@
 
   window.ShiftyData = {
     DAY_LABELS,
-    DEFAULT_POSITIONS, DEFAULT_SESSIONS, defaultStaffingPlan,
+    DEFAULT_POSITIONS, DEFAULT_SESSIONS, defaultStaffingPlan, SESSION_PRESETS,
     uid, todayMonday, fmtDate, addDays, dayOfWeek,
     timeToMin, calcHours, timeOverlap, timeContains,
     buildSlots, newWeek, ensureWeek, listWeeks,
