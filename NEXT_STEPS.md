@@ -49,7 +49,8 @@ git push -u origin main
 #### 4. **Stripe アカウント作成（KYC は数日かかるので先に着手）** (15 分)
 - https://signup.sendgrid.com/ ではなく **https://dashboard.stripe.com/register**
 - 飲DX 情報入力
-- 商品 3 つ作成: Starter (¥3,000), Standard (¥6,000), Pro (¥10,000) すべて 14 日トライアル付き
+- 商品 2 つ作成: Pro (¥1,980/月), Business (¥4,980/月) すべて 14 日トライアル付き
+  ※ Round 40 で 4 段階プラン化 (Free/Pro/Business/Enterprise)
 - API キー取得後、私に教えてもらえれば即接続します
 
 ---

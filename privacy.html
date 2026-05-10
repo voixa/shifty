@@ -5,9 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>プライバシーポリシー — Shifty</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/styles.css" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='white' font-family='system-ui,sans-serif' font-weight='700'%3ES%3C/text%3E%3C/svg%3E">
+  <script>
+    tailwind.config = { darkMode: 'class' };
+    (function () {
+      try {
+        const saved = localStorage.getItem("shifty.theme") || "auto";
+        if (saved === "dark" || (saved === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (_) {}
+    })();
+  </script>
 </head>
-<body class="bg-slate-50 text-slate-900">
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
   <header class="bg-white border-b border-slate-200">
     <div class="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
       <a href="/" class="flex items-center gap-2">

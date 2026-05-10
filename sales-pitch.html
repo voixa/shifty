@@ -6,6 +6,18 @@
   <meta name="robots" content="noindex">
   <title>Shifty 営業資料</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/styles.css" />
+  <script>
+    tailwind.config = { darkMode: 'class' };
+    (function () {
+      try {
+        const saved = localStorage.getItem("shifty.theme") || "auto";
+        if (saved === "dark" || (saved === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (_) {}
+    })();
+  </script>
   <style>
     @media print {
       body { font-size: 10.5pt; }
@@ -15,7 +27,7 @@
     body { font-family: "Hiragino Sans","Yu Gothic",Meiryo,system-ui,sans-serif; }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900">
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
   <div class="max-w-4xl mx-auto bg-white shadow-lg my-6 p-10">
     <!-- 印刷ボタン -->
     <div class="no-print fixed top-4 right-4 z-50">
@@ -102,52 +114,66 @@
       </div>
     </section>
 
-    <!-- Section 4: Pricing -->
+    <!-- Section 4: Pricing (Round 40 で 4 段階化) -->
     <section class="mb-8 page">
       <h2 class="text-2xl font-bold mb-4 text-indigo-700">料金プラン</h2>
-      <div class="grid grid-cols-3 gap-3 mb-4">
-        <div class="border-2 border-slate-200 rounded-lg p-4">
-          <div class="text-sm text-slate-500">小規模</div>
-          <div class="font-bold text-xl">Starter</div>
-          <div class="text-3xl font-bold my-2">¥3,000<span class="text-sm font-normal">/月</span></div>
-          <div class="text-sm text-slate-600 mb-3">スタッフ 5 名まで</div>
-          <ul class="text-xs space-y-1 text-slate-700">
+      <div class="grid grid-cols-4 gap-2 mb-4">
+        <div class="border-2 border-emerald-500 rounded-lg p-3 bg-emerald-50 relative">
+          <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">永久無料</span>
+          <div class="text-xs text-emerald-700 font-semibold">個人店</div>
+          <div class="font-bold text-lg">Free</div>
+          <div class="text-2xl font-bold my-1">¥0<span class="text-xs font-normal">/月</span></div>
+          <div class="text-xs text-slate-600 mb-2">1 店舗・8 名まで</div>
+          <ul class="text-[11px] space-y-0.5 text-slate-700">
             <li>✓ AI 自動生成</li>
             <li>✓ モバイル希望収集</li>
-            <li>✓ LINE 通知</li>
-            <li>✓ 複数週管理</li>
+            <li>✓ LINE 通知文生成</li>
+            <li>✓ 給与計算 CSV (基本)</li>
           </ul>
         </div>
-        <div class="border-2 border-indigo-600 rounded-lg p-4 bg-indigo-50 relative">
-          <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">推奨</span>
-          <div class="text-sm text-indigo-700 font-semibold">中規模</div>
-          <div class="font-bold text-xl">Standard</div>
-          <div class="text-3xl font-bold my-2">¥6,000<span class="text-sm font-normal">/月</span></div>
-          <div class="text-sm text-slate-600 mb-3">スタッフ 15 名まで</div>
-          <ul class="text-xs space-y-1 text-slate-700">
-            <li>✓ Starterの全機能</li>
-            <li>✓ テンプレート保存</li>
-            <li>✓ 過去週分析</li>
-            <li>✓ ドラッグ&ドロップ編集</li>
-            <li>✓ 労務ルール詳細設定</li>
+        <div class="border-2 border-slate-300 rounded-lg p-3">
+          <div class="text-xs text-slate-500 font-semibold">単店舗</div>
+          <div class="font-bold text-lg">Pro</div>
+          <div class="text-2xl font-bold my-1">¥1,980<span class="text-xs font-normal">/月</span></div>
+          <div class="text-xs text-slate-600 mb-2">1 店舗・無制限</div>
+          <ul class="text-[11px] space-y-0.5 text-slate-700">
+            <li>✓ Free の全機能 +</li>
+            <li>✓ スタッフ無制限</li>
+            <li>✓ 全 AI 戦略</li>
+            <li>✓ 打刻・実績給与</li>
+            <li>✓ Web Push / 月次レポート</li>
           </ul>
         </div>
-        <div class="border-2 border-slate-200 rounded-lg p-4">
-          <div class="text-sm text-slate-500">大規模</div>
-          <div class="font-bold text-xl">Pro</div>
-          <div class="text-3xl font-bold my-2">¥10,000<span class="text-sm font-normal">/月</span></div>
-          <div class="text-sm text-slate-600 mb-3">スタッフ 30 名まで</div>
-          <ul class="text-xs space-y-1 text-slate-700">
-            <li>✓ Standardの全機能</li>
-            <li>✓ カスタムドメイン</li>
-            <li>✓ 自動バックアップ</li>
-            <li>✓ API アクセス</li>
-            <li>✓ 電話サポート</li>
+        <div class="border-2 border-indigo-600 rounded-lg p-3 bg-indigo-50 relative">
+          <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">人気</span>
+          <div class="text-xs text-indigo-700 font-semibold">多店舗</div>
+          <div class="font-bold text-lg">Business</div>
+          <div class="text-2xl font-bold my-1">¥4,980<span class="text-xs font-normal">/月</span></div>
+          <div class="text-xs text-slate-600 mb-2">5 店舗・無制限</div>
+          <ul class="text-[11px] space-y-0.5 text-slate-700">
+            <li>✓ Pro の全機能 +</li>
+            <li>✓ 5 店舗まで対応</li>
+            <li>✓ 全店舗集計</li>
+            <li>✓ 優先サポート</li>
+            <li>✓ 自動バックアップ 90 日</li>
+          </ul>
+        </div>
+        <div class="border-2 border-slate-200 rounded-lg p-3">
+          <div class="text-xs text-slate-500 font-semibold">大規模</div>
+          <div class="font-bold text-lg">Enterprise</div>
+          <div class="text-2xl font-bold my-1">要相談</div>
+          <div class="text-xs text-slate-600 mb-2">6 店舗以上</div>
+          <ul class="text-[11px] space-y-0.5 text-slate-700">
+            <li>✓ Business の全機能 +</li>
+            <li>✓ 店舗数無制限</li>
+            <li>✓ SSO 連携</li>
+            <li>✓ 専任サポート</li>
+            <li>✓ カスタム機能開発</li>
           </ul>
         </div>
       </div>
       <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm">
-        🎁 <strong>14 日間 無料トライアル</strong> / クレカ不要 / 自動課金なし
+        🎁 <strong>有料プランは 14 日間 無料トライアル</strong> / クレカ不要 / 自動課金なし
         <span class="ml-3 text-emerald-700 font-semibold">VOIXA 併用で月 ¥1,500 OFF</span>
       </div>
     </section>
