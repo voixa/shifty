@@ -1302,9 +1302,10 @@ def api_list_staff_messages():
 # ============================================================
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
-# Free + Pro モデルへ移行 (旧 starter/standard は archived)
+# Round 40: Free + Pro + Business + Enterprise (Enterprise は Stripe ではなく要相談)
 STRIPE_PRICES = {
-    "pro":      os.environ.get("STRIPE_PRICE_PRO",      ""),
+    "pro":      os.environ.get("STRIPE_PRICE_PRO",      ""),  # ¥1,980/月
+    "business": os.environ.get("STRIPE_PRICE_BUSINESS", ""),  # ¥4,980/月
 }
 
 

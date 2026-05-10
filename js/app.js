@@ -3262,72 +3262,146 @@ async function fetchAndRenderPlanInfo() {
   }
 }
 
+// Round 40: 4 段階プラン構造
+const PLAN_INFO = {
+  free:       { label: "Free",       icon: "🆓", price: 0,    description: "8 名まで永久無料" },
+  pro:        { label: "Pro",        icon: "💎", price: 1980, description: "1 店舗・スタッフ無制限" },
+  business:   { label: "Business",   icon: "🏪", price: 4980, description: "5 店舗まで・全店舗集計" },
+  enterprise: { label: "Enterprise", icon: "🏢", price: null, description: "6 店舗以上・カスタム" },
+};
+
 function renderPlanCard() {
   const plan = window._currentPlan || "free";
+  const planInfo = PLAN_INFO[plan] || PLAN_INFO.free;
   const activeStaff = state.staff.filter(s => !s.archived).length;
+  const tenantsN = (_ownerTenants || []).length || 1;
   const FREE_LIMIT = 8;
-  const isAtLimit = plan === "free" && activeStaff >= FREE_LIMIT;
-  const isNearLimit = plan === "free" && activeStaff >= FREE_LIMIT - 1 && activeStaff < FREE_LIMIT;
+  const PRO_TENANT_LIMIT = 1;
+  const BUSINESS_TENANT_LIMIT = 5;
 
+  const isStaffAtLimit = plan === "free" && activeStaff >= FREE_LIMIT;
+  const isStaffNearLimit = plan === "free" && activeStaff >= FREE_LIMIT - 1 && activeStaff < FREE_LIMIT;
+  const isTenantAtLimit = (plan === "pro" && tenantsN >= PRO_TENANT_LIMIT && tenantsN > 1)
+                       || (plan === "business" && tenantsN >= BUSINESS_TENANT_LIMIT);
+
+  const isPaid = plan !== "free";
   const card = el("div", {
-    class: `${plan === "free" ? "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700" : "bg-gradient-to-br from-emerald-50 to-blue-50 dark:from-emerald-900/30 dark:to-blue-900/30 border border-emerald-300 dark:border-emerald-700"} rounded-xl p-4`,
+    class: `${isPaid ? "bg-gradient-to-br from-emerald-50 to-blue-50 dark:from-emerald-900/30 dark:to-blue-900/30 border border-emerald-300 dark:border-emerald-700" : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"} rounded-xl p-4`,
   });
   card.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
     el("div", { class: "flex items-center gap-2" }, [
-      el("span", { class: "text-xl" }, plan === "free" ? "🆓" : "💎"),
+      el("span", { class: "text-xl" }, planInfo.icon),
       el("div", {}, [
-        el("div", { class: "font-semibold text-sm" }, plan === "free" ? "Free プラン" : "Pro プラン"),
-        el("div", { class: "text-xs text-slate-500" }, plan === "free" ? "8 名まで永久無料" : "無制限・全機能利用可"),
+        el("div", { class: "font-semibold text-sm" }, `${planInfo.label} プラン`),
+        el("div", { class: "text-xs text-slate-500" }, planInfo.description),
       ]),
     ]),
-    plan === "free" ? el("button", {
+    !isPaid ? el("button", {
       class: "text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded px-3 py-1.5 font-bold",
       onclick: () => openUpgradeDialog(),
-    }, "💎 Pro へアップグレード") : el("span", { class: "text-xs text-emerald-700 dark:text-emerald-400 font-semibold" }, "✓ 全機能利用可"),
+    }, "💎 アップグレード") : el("span", { class: "text-xs text-emerald-700 dark:text-emerald-400 font-semibold" }, "✓ 利用中"),
   ]));
 
-  // スタッフ数バー
-  card.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400 mb-1" },
-    `スタッフ数: ${activeStaff}${plan === "free" ? ` / ${FREE_LIMIT}` : " (無制限)"}`));
-  if (plan === "free") {
+  // スタッフ数バー (Free のみ)
+  if (!isPaid) {
+    card.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400 mb-1" },
+      `スタッフ数: ${activeStaff} / ${FREE_LIMIT}`));
     const ratio = Math.min(1, activeStaff / FREE_LIMIT);
-    const color = isAtLimit ? "#dc2626" : isNearLimit ? "#f59e0b" : "#10b981";
+    const color = isStaffAtLimit ? "#dc2626" : isStaffNearLimit ? "#f59e0b" : "#10b981";
     card.appendChild(el("div", { class: "gauge-bar" }, [
       el("div", { style: { width: (ratio * 100) + "%", background: color } }),
     ]));
-    if (isAtLimit) {
+    if (isStaffAtLimit) {
       card.appendChild(el("div", { class: "mt-2 text-xs text-red-700 bg-red-50 dark:bg-red-900/30 rounded p-2" },
-        "⚠️ Free プランの上限です。アクティブスタッフを 8 名以下に減らすか、Pro へアップグレードしてください。"));
-    } else if (isNearLimit) {
+        "⚠️ Free プランの上限です。スタッフを 8 名以下に減らすか、Pro へアップグレードしてください。"));
+    } else if (isStaffNearLimit) {
       card.appendChild(el("div", { class: "mt-2 text-xs text-amber-700 bg-amber-50 dark:bg-amber-900/30 rounded p-2" },
-        `⚠️ あと ${FREE_LIMIT - activeStaff} 名で Free プラン上限。Pro なら無制限です。`));
+        `⚠️ あと ${FREE_LIMIT - activeStaff} 名で Free プラン上限。Pro (¥1,980/月) なら無制限です。`));
+    }
+  } else {
+    // Pro/Business は店舗数バー
+    const tenantLimit = plan === "business" ? BUSINESS_TENANT_LIMIT : PRO_TENANT_LIMIT;
+    if (tenantsN > 0) {
+      card.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400 mb-1" },
+        plan === "enterprise" ? `店舗数: ${tenantsN} (無制限)` : `店舗数: ${tenantsN} / ${tenantLimit}`));
+    }
+    if (isTenantAtLimit && plan === "pro") {
+      card.appendChild(el("div", { class: "mt-2 text-xs text-amber-700 bg-amber-50 dark:bg-amber-900/30 rounded p-2" },
+        "💡 多店舗を運営される場合は Business プラン (¥4,980/月) で 5 店舗まで対応可能です。"));
     }
   }
   return card;
 }
 
 function openUpgradeDialog() {
-  const body = el("div", { class: "p-6 space-y-4" });
-  body.appendChild(el("h3", { class: "font-bold text-lg" }, "💎 Pro プランへアップグレード"));
+  const body = el("div", { class: "p-6 space-y-3" });
+  body.appendChild(el("h3", { class: "font-bold text-lg" }, "💎 アップグレードプラン選択"));
   body.appendChild(el("p", { class: "text-sm text-slate-600 dark:text-slate-400" },
-    "Pro プランでは以下の制限が解除されます:"));
-  body.appendChild(el("ul", { class: "space-y-1.5 text-sm" }, [
-    el("li", {}, "✅ スタッフ数 無制限 (Free は 8 名まで)"),
-    el("li", {}, "✅ 多店舗対応 (1 オーナー × 5 店舗まで)"),
-    el("li", {}, "✅ サーバ側自動バックアップ (30 日分)"),
-    el("li", {}, "✅ 優先サポート (平日 9-18 時)"),
-    el("li", {}, "✅ 全 AI 機能 (モデルシフト・自動代打 等)"),
+    "ご利用シーンに合わせてお選びください。すべての有料プランは 14 日間無料でお試しいただけます。"));
+
+  // Pro
+  const proCard = el("div", { class: "border-2 border-slate-300 dark:border-slate-600 rounded-lg p-3 space-y-1.5" });
+  proCard.innerHTML = `
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="font-bold">💎 Pro</div>
+        <div class="text-xs text-slate-500">単店舗・スタッフ無制限</div>
+      </div>
+      <div class="text-xl font-bold">¥1,980<span class="text-xs text-slate-500">/月</span></div>
+    </div>
+    <ul class="text-xs space-y-0.5 mt-2">
+      <li>✓ スタッフ数 無制限 (Free は 8 名まで)</li>
+      <li>✓ 全 AI 戦略 (希望/コスト/スキル/公平性)</li>
+      <li>✓ 打刻 + 実績ベース給与計算</li>
+      <li>✓ Web Push 通知 / 月次レポート PDF</li>
+      <li>✓ 自動バックアップ 30 日</li>
+    </ul>`;
+  proCard.appendChild(el("a", {
+    href: "https://shifty.in-dx.jp/#contact", target: "_blank",
+    class: "block text-center mt-2 bg-slate-700 hover:bg-slate-800 text-white rounded py-1.5 text-xs font-bold",
+  }, "Pro を 14 日無料で試す →"));
+  body.appendChild(proCard);
+
+  // Business (推奨)
+  const bizCard = el("div", { class: "border-2 border-brand-600 rounded-lg p-3 space-y-1.5 relative" });
+  bizCard.innerHTML = `
+    <div class="absolute -top-2 -right-2 bg-brand-600 text-white text-[10px] font-bold rounded-full px-2 py-0.5">人気</div>
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="font-bold text-brand-700 dark:text-brand-400">🏪 Business</div>
+        <div class="text-xs text-slate-500">多店舗運営者向け</div>
+      </div>
+      <div class="text-xl font-bold text-brand-700 dark:text-brand-400">¥4,980<span class="text-xs text-slate-500">/月</span></div>
+    </div>
+    <ul class="text-xs space-y-0.5 mt-2">
+      <li>✓ <b>5 店舗まで対応</b> (Pro は 1 店舗のみ)</li>
+      <li>✓ 全店舗集計ダッシュボード</li>
+      <li>✓ 優先サポート (チャット即応)</li>
+      <li>✓ 自動バックアップ 90 日</li>
+      <li>✓ Pro の全機能</li>
+    </ul>`;
+  bizCard.appendChild(el("a", {
+    href: "https://shifty.in-dx.jp/#contact", target: "_blank",
+    class: "block text-center mt-2 bg-brand-600 hover:bg-brand-700 text-white rounded py-1.5 text-xs font-bold",
+  }, "Business を 14 日無料で試す →"));
+  body.appendChild(bizCard);
+
+  // Enterprise
+  body.appendChild(el("div", { class: "border border-slate-200 dark:border-slate-700 rounded-lg p-3 text-xs" }, [
+    el("div", { class: "flex items-center justify-between" }, [
+      el("div", {}, [
+        el("div", { class: "font-bold" }, "🏢 Enterprise"),
+        el("div", { class: "text-slate-500" }, "6 店舗以上 / カスタム"),
+      ]),
+      el("a", {
+        href: "https://shifty.in-dx.jp/#contact", target: "_blank",
+        class: "bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 rounded px-3 py-1.5 font-bold",
+      }, "お問合せ"),
+    ]),
   ]));
-  body.appendChild(el("div", { class: "bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-300 rounded-lg p-3 text-center" }, [
-    el("div", { class: "text-2xl font-bold" }, "¥1,980 / 月"),
-    el("div", { class: "text-xs text-slate-600 dark:text-slate-400" }, "1 店舗あたり / 14 日無料トライアル"),
-  ]));
-  body.appendChild(el("div", { class: "flex justify-end gap-2 pt-2 border-t" }, [
-    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "あとで"),
-    el("a", {
-      href: "https://shifty.in-dx.jp/#contact", target: "_blank",
-      class: "px-4 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-bold",
-    }, "📞 アップグレード相談"),
+
+  body.appendChild(el("div", { class: "flex justify-end pt-2 border-t" }, [
+    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md", onclick: closeModal }, "閉じる"),
   ]));
   modal(body);
 }
