@@ -1739,16 +1739,16 @@ const COMMAND_PALETTE_ITEMS = [
   { kind: "action", label: "🔗 全員のリンクをコピー", desc: "希望入力リンクを一括コピー", action: copyAllStaffLinks, keywords: "links copy share" },
   { kind: "action", label: "📨 募集メッセージ生成", desc: "希望募集の LINE 文を生成", action: openRecruitDialog, keywords: "recruit message line" },
   { kind: "action", label: "📢 全員に通知", desc: "緊急連絡を一斉送信", action: openBroadcastDialog, keywords: "broadcast notify all" },
-  { kind: "action", label: "🤖 業態セットアップ", desc: "業態テンプレを適用", action: () => { setTab("settings"); setTimeout(openQuickSetupWizard, 200); }, keywords: "wizard setup" },
+  { kind: "action", label: "🚀 業態セットアップ", desc: "業態テンプレを適用 (使い方ガイド)", action: () => openHelpGuide("setup"), keywords: "wizard setup business" },
   { kind: "action", label: "💡 AI 推奨人数", desc: "過去データから人数提案", action: () => { setTab("settings"); setTimeout(openModelShiftDialog, 200); }, keywords: "model shift recommend" },
   { kind: "action", label: "💴 給与計算 CSV", desc: "月次給与 CSV ダウンロード", action: () => { setTab("schedule"); setTimeout(openPayrollCsvDialog, 200); }, keywords: "payroll csv salary" },
   { kind: "action", label: "📊 週次レポート", desc: "印刷/PDF 用の今週サマリ", action: () => { setTab("schedule"); setTimeout(openWeeklyReport, 200); }, keywords: "weekly report" },
   { kind: "action", label: "📈 月次レポート", desc: "印刷/PDF 用の月次サマリ", action: () => { setTab("schedule"); setTimeout(openMonthlyReport, 200); }, keywords: "monthly report" },
   { kind: "action", label: "🔮 売上予測+人件費シミュ", desc: "What-if 分析", action: openSimulationDialog, keywords: "forecast simulation what-if" },
-  { kind: "action", label: "🕒 過去スナップショット", desc: "復元ポイント", action: openSnapshotsDialog, keywords: "snapshot restore" },
-  { kind: "action", label: "📚 ヘルプ / FAQ", desc: "Q&A 検索", action: () => { setTab("settings"); setTimeout(() => location.hash = "#main", 200); }, keywords: "help faq" },
+  { kind: "action", label: "↩️ 過去に戻る / バックアップ", desc: "操作単位 / サーバ / JSON を 1 か所に集約", action: () => openHistoryDialog("local"), keywords: "snapshot restore backup undo history json" },
+  { kind: "action", label: "📖 使い方ガイド", desc: "FAQ / ツアー / デモ / セットアップ", action: () => openHelpGuide("faq"), keywords: "help faq guide tour demo" },
   { kind: "action", label: "⌨️ キーボードショートカット", desc: "ショートカット一覧", action: () => showShortcutsHelp(), keywords: "shortcut keyboard" },
-  { kind: "action", label: "🎓 機能ツアーを開始", desc: "主要機能を順に紹介", action: () => startFeatureTour(), keywords: "tour onboarding tutorial" },
+  { kind: "action", label: "🎓 機能ツアーを開始", desc: "主要機能を順に紹介", action: () => openHelpGuide("tour"), keywords: "tour onboarding tutorial" },
   // 設定ジャンプ
   { kind: "settings", label: "🏪 基本情報", desc: "店舗名・予算", action: () => { setTab("settings"); setTimeout(() => location.hash = "#set-basic", 200); }, keywords: "basic name budget" },
   { kind: "settings", label: "👥 ポジション", desc: "ホール/キッチン等", action: () => { setTab("settings"); setTimeout(() => location.hash = "#set-positions", 200); }, keywords: "positions roles" },
@@ -2014,107 +2014,204 @@ const FAQ_DATA = [
   { cat: "🔒 セキュリティ", q: "退職者の処理は？", a: "「📁 アーカイブ」が推奨です。削除と異なり履歴・給与計算データは残ります。「📤 復帰」で戻せます。完全削除も可能ですが警告が出ます。" },
 ];
 
-function renderHelpCenter() {
-  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
-  card.appendChild(el("div", { class: "font-semibold" }, "📚 ヘルプセンター / FAQ"));
-  card.appendChild(el("div", { class: "text-xs text-slate-500" },
-    `${FAQ_DATA.length} 件の Q&A から検索できます。`));
+// Round 42: ヘルプセンター / 機能ツアー / 操作デモ / セットアップウィザード を
+// 1 つの「使い方ガイド」モーダルに統合 (タブ切替で全部含む)。
+// 旧: renderHelpCenter() (FAQ + ツアー + デモ) + 別 amber カード (セットアップ) + Cmd+K 別エントリ
+// 新: openHelpGuide(initialTab) 1 関数 + renderHelpCenter() は単純なラウンチャになる。
+function openHelpGuide(initialTab) {
+  let activeTab = initialTab || "faq";
+  const TABS = [
+    { id: "faq",   label: "📚 FAQ" },
+    { id: "tour",  label: "🎓 ツアー" },
+    { id: "demo",  label: "📺 デモ" },
+    { id: "setup", label: "🚀 セットアップ" },
+  ];
 
-  // Round 36 TOP 3: 機能ツアー起動ボタン
-  card.appendChild(el("div", { class: "bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/30 dark:to-pink-900/30 rounded-md p-3 flex items-center justify-between mb-3" }, [
-    el("div", {}, [
-      el("div", { class: "font-semibold text-sm" }, "🎓 機能ツアーを開始"),
-      el("div", { class: "text-xs text-slate-600 dark:text-slate-400" }, "5 ステップで主要機能を順に紹介 (約 2 分)"),
-    ]),
-    el("button", {
-      class: "bg-purple-600 hover:bg-purple-700 text-white rounded px-3 py-1.5 text-xs font-bold",
-      onclick: () => startFeatureTour(),
-    }, "▶ 開始"),
-  ]));
+  function renderTabContent() {
+    if (activeTab === "faq") return renderFaqTab();
+    if (activeTab === "tour") return renderTourTab();
+    if (activeTab === "demo") return renderDemoTab();
+    if (activeTab === "setup") return renderSetupTab();
+    return el("div");
+  }
 
-  // Round 35 TOP 2: 操作デモ (CSS アニメーション)
-  const demos = el("details", { class: "border border-slate-200 dark:border-slate-700 rounded-md p-2 mb-3" });
-  demos.appendChild(el("summary", { class: "cursor-pointer text-sm font-semibold" }, "📺 操作デモを見る (動画なし、CSS のみ)"));
-  const demoBody = el("div", { class: "mt-3 space-y-3" });
-  // デモ 1: AI 自動生成
-  demoBody.appendChild(el("div", { class: "demo-frame", style: { height: "120px" } }, [
-    el("div", { class: "demo-cursor demo-anim-1" }),
-    el("div", { class: "absolute top-2 left-2 text-xs font-semibold" }, "1. シフトタブで AI 自動生成"),
-    el("div", { class: "absolute bottom-3 right-3 bg-brand-600 text-white rounded px-3 py-1.5 text-sm font-bold" }, "🤖 AI 自動生成"),
-    el("div", { class: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl" }, "📅 → 🤖 → ✓"),
-  ]));
-  demoBody.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
-    "💡 シフトタブの「🤖 AI 自動生成」ボタンをタップ。3 秒で配置案ができます。"));
-
-  // デモ 2: 希望入力 (スタッフ側)
-  demoBody.appendChild(el("div", { class: "demo-frame mt-3 grid grid-cols-4 gap-1 p-2" }, [
-    el("div", { class: "bg-red-100 text-red-700 rounded text-center py-1 text-[10px]" }, "🔥 必須"),
-    el("div", { class: "bg-emerald-500 text-white rounded text-center py-1 text-[10px]" }, "✅ 希望"),
-    el("div", { class: "bg-slate-200 text-slate-700 rounded text-center py-1 text-[10px]" }, "🚫 不可"),
-    el("div", { class: "bg-slate-100 text-slate-500 rounded text-center py-1 text-[10px]" }, "— 未定"),
-  ]));
-  demoBody.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
-    "💡 スタッフは 4 ボタンから 1 つを選ぶだけ。または「⏰ 自由時間で希望」で時間範囲を直接入力できます。"));
-
-  // デモ 3: 確定 → 通知
-  demoBody.appendChild(el("div", { class: "demo-frame mt-3 flex items-center justify-around", style: { height: "60px" } }, [
-    el("div", { class: "text-3xl" }, "📝"),
-    el("div", { class: "text-2xl text-slate-400" }, "→"),
-    el("div", { class: "text-3xl" }, "✓"),
-    el("div", { class: "text-2xl text-slate-400" }, "→"),
-    el("div", { class: "text-3xl" }, "📧"),
-  ]));
-  demoBody.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
-    "💡 「確定」ボタンを押すと、ヘルスチェック表示 → 確定 → スタッフへメール自動送信。"));
-
-  demos.appendChild(demoBody);
-  card.appendChild(demos);
-
-  const searchInput = el("input", {
-    type: "search",
-    placeholder: "🔍 質問を検索 (例: 打刻 / 希望 / 給与)",
-    class: "w-full border rounded-md px-3 py-2 text-sm",
-  });
-  card.appendChild(searchInput);
-
-  const list = el("div", { class: "space-y-1.5 max-h-96 overflow-y-auto" });
-  card.appendChild(list);
-
-  function renderFiltered() {
-    const q = (searchInput.value || "").toLowerCase().trim();
-    list.innerHTML = "";
-    const filtered = q
-      ? FAQ_DATA.filter(f =>
-          f.q.toLowerCase().includes(q) || f.a.toLowerCase().includes(q) || f.cat.toLowerCase().includes(q))
-      : FAQ_DATA;
-
-    if (filtered.length === 0) {
-      list.appendChild(el("div", { class: "text-xs text-slate-500 text-center py-4" },
-        `「${q}」に一致する FAQ がありません`));
-      return;
-    }
-    // カテゴリ別にグループ化
-    const byCat = {};
-    for (const f of filtered) {
-      if (!byCat[f.cat]) byCat[f.cat] = [];
-      byCat[f.cat].push(f);
-    }
-    for (const [cat, items] of Object.entries(byCat)) {
-      list.appendChild(el("div", { class: "text-[10px] font-semibold text-slate-500 mt-2" }, cat));
-      for (const f of items) {
-        const det = el("details", { class: "border border-slate-100 rounded p-2 hover:bg-slate-50" });
-        det.appendChild(el("summary", { class: "text-sm cursor-pointer" }, `Q. ${f.q}`));
-        det.appendChild(el("div", { class: "text-xs text-slate-700 mt-2 whitespace-pre-wrap" }, f.a));
-        list.appendChild(det);
+  function renderFaqTab() {
+    const wrap = el("div", { class: "space-y-2" });
+    wrap.appendChild(el("div", { class: "text-xs text-slate-500" },
+      `${FAQ_DATA.length} 件の Q&A から検索できます。`));
+    const searchInput = el("input", {
+      type: "search",
+      placeholder: "🔍 質問を検索 (例: 打刻 / 希望 / 給与)",
+      class: "w-full border rounded-md px-3 py-2 text-sm dark:bg-slate-700 dark:border-slate-600",
+    });
+    wrap.appendChild(searchInput);
+    const list = el("div", { class: "space-y-1.5 max-h-80 overflow-y-auto" });
+    wrap.appendChild(list);
+    function renderFiltered() {
+      const q = (searchInput.value || "").toLowerCase().trim();
+      list.innerHTML = "";
+      const filtered = q
+        ? FAQ_DATA.filter(f =>
+            f.q.toLowerCase().includes(q) || f.a.toLowerCase().includes(q) || f.cat.toLowerCase().includes(q))
+        : FAQ_DATA;
+      if (filtered.length === 0) {
+        list.appendChild(el("div", { class: "text-xs text-slate-500 text-center py-4" },
+          `「${q}」に一致する FAQ がありません`));
+        return;
+      }
+      const byCat = {};
+      for (const f of filtered) {
+        if (!byCat[f.cat]) byCat[f.cat] = [];
+        byCat[f.cat].push(f);
+      }
+      for (const [cat, items] of Object.entries(byCat)) {
+        list.appendChild(el("div", { class: "text-[10px] font-semibold text-slate-500 mt-2" }, cat));
+        for (const f of items) {
+          const det = el("details", { class: "border border-slate-100 dark:border-slate-700 rounded p-2 hover:bg-slate-50 dark:hover:bg-slate-700" });
+          det.appendChild(el("summary", { class: "text-sm cursor-pointer" }, `Q. ${f.q}`));
+          det.appendChild(el("div", { class: "text-xs text-slate-700 dark:text-slate-300 mt-2 whitespace-pre-wrap" }, f.a));
+          list.appendChild(det);
+        }
       }
     }
+    searchInput.oninput = renderFiltered;
+    renderFiltered();
+    wrap.appendChild(el("div", { class: "text-[10px] text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-700" },
+      "💡 解決しない場合: support@in-dx.jp までご連絡ください"));
+    return wrap;
   }
-  searchInput.oninput = renderFiltered;
-  renderFiltered();
 
-  card.appendChild(el("div", { class: "text-[10px] text-slate-400 pt-2 border-t border-slate-100" },
-    "💡 解決しない場合: support@in-dx.jp までご連絡ください"));
+  function renderTourTab() {
+    const wrap = el("div", { class: "space-y-3" });
+    wrap.appendChild(el("div", { class: "bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/30 dark:to-pink-900/30 rounded-md p-3" }, [
+      el("div", { class: "font-semibold text-sm" }, "🎓 機能ツアー"),
+      el("div", { class: "text-xs text-slate-600 dark:text-slate-400 mt-1" },
+        `${FEATURE_TOUR_STEPS.length} ステップで主要機能を順に紹介 (約 2 分)。各タブを実際に切り替えながらガイドします。`),
+    ]));
+    const stepsList = el("ol", { class: "list-decimal pl-5 space-y-1 text-xs text-slate-700 dark:text-slate-300" });
+    for (const s of FEATURE_TOUR_STEPS) {
+      stepsList.appendChild(el("li", {}, `${s.title}`));
+    }
+    wrap.appendChild(stepsList);
+    wrap.appendChild(el("button", {
+      class: "w-full bg-purple-600 hover:bg-purple-700 text-white rounded-md px-4 py-2 text-sm font-bold",
+      onclick: () => { closeModal(); startFeatureTour(); },
+    }, "▶ ツアーを開始"));
+    return wrap;
+  }
 
+  function renderDemoTab() {
+    const wrap = el("div", { class: "space-y-3" });
+    wrap.appendChild(el("div", { class: "text-xs text-slate-500" },
+      "📺 主要操作の動きを CSS アニメーションで確認できます (動画なし)"));
+    // デモ 1: AI 自動生成
+    wrap.appendChild(el("div", { class: "demo-frame relative", style: { height: "120px" } }, [
+      el("div", { class: "demo-cursor demo-anim-1" }),
+      el("div", { class: "absolute top-2 left-2 text-xs font-semibold" }, "1. シフトタブで AI 自動生成"),
+      el("div", { class: "absolute bottom-3 right-3 bg-brand-600 text-white rounded px-3 py-1.5 text-sm font-bold" }, "🤖 AI 自動生成"),
+      el("div", { class: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-3xl" }, "📅 → 🤖 → ✓"),
+    ]));
+    wrap.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
+      "💡 シフトタブの「🤖 AI 自動生成」ボタンをタップ。3 秒で配置案ができます。"));
+    // デモ 2: 希望入力 (スタッフ側)
+    wrap.appendChild(el("div", { class: "demo-frame mt-3 grid grid-cols-4 gap-1 p-2" }, [
+      el("div", { class: "bg-red-100 text-red-700 rounded text-center py-1 text-[10px]" }, "🔥 必須"),
+      el("div", { class: "bg-emerald-500 text-white rounded text-center py-1 text-[10px]" }, "✅ 希望"),
+      el("div", { class: "bg-slate-200 text-slate-700 rounded text-center py-1 text-[10px]" }, "🚫 不可"),
+      el("div", { class: "bg-slate-100 text-slate-500 rounded text-center py-1 text-[10px]" }, "— 未定"),
+    ]));
+    wrap.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
+      "💡 スタッフは 4 ボタンから 1 つを選ぶだけ。または「⏰ 自由時間で希望」で時間範囲を直接入力できます。"));
+    // デモ 3: 確定 → 通知
+    wrap.appendChild(el("div", { class: "demo-frame mt-3 flex items-center justify-around", style: { height: "60px" } }, [
+      el("div", { class: "text-3xl" }, "📝"),
+      el("div", { class: "text-2xl text-slate-400" }, "→"),
+      el("div", { class: "text-3xl" }, "✓"),
+      el("div", { class: "text-2xl text-slate-400" }, "→"),
+      el("div", { class: "text-3xl" }, "📧"),
+    ]));
+    wrap.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400" },
+      "💡 「確定」ボタンを押すと、ヘルスチェック表示 → 確定 → スタッフへメール自動送信。"));
+    return wrap;
+  }
+
+  function renderSetupTab() {
+    const wrap = el("div", { class: "space-y-3" });
+    wrap.appendChild(el("div", { class: "bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30 rounded-md p-3" }, [
+      el("div", { class: "font-semibold text-sm" }, "🚀 業態セットアップ"),
+      el("div", { class: "text-xs text-slate-600 dark:text-slate-400 mt-1" },
+        "業態 → 営業時間 → スタッフ人数 を 3 ステップで選ぶと、シフト枠・必要人数・労務ルール・AI 重み・人件費目標を一括最適化します。後から個別調整可。"),
+    ]));
+    if (state.meta.businessType) {
+      const BTYPES = (window.ShiftyData || {}).BUSINESS_TYPES || {};
+      const cur = BTYPES[state.meta.businessType];
+      if (cur) {
+        wrap.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-700 rounded p-2" },
+          `現在の業態: ${cur.label} (${cur.description})`));
+      }
+    }
+    wrap.appendChild(el("button", {
+      class: "w-full bg-amber-500 hover:bg-amber-600 text-white rounded-md px-4 py-2 text-sm font-bold",
+      onclick: () => { closeModal(); openQuickSetupWizard(); },
+    }, state.meta.businessType ? "🔄 セットアップを再実行" : "🎯 セットアップを開始"));
+    return wrap;
+  }
+
+  function renderGuide() {
+    const root = el("div", { class: "p-5 space-y-3" });
+    // ヘッダー
+    root.appendChild(el("div", { class: "flex items-center gap-3" }, [
+      el("div", { class: "text-3xl" }, "📖"),
+      el("div", { class: "flex-1" }, [
+        el("div", { class: "text-xs text-slate-500" }, "Shifty"),
+        el("h3", { class: "font-bold text-lg" }, "使い方ガイド"),
+      ]),
+      el("button", {
+        class: "text-slate-400 hover:text-slate-700 text-2xl leading-none",
+        onclick: closeModal,
+        "aria-label": "閉じる",
+      }, "×"),
+    ]));
+    // タブ
+    const tabRow = el("div", { class: "flex gap-1 border-b border-slate-200 dark:border-slate-700 -mx-1" });
+    for (const t of TABS) {
+      const isActive = t.id === activeTab;
+      tabRow.appendChild(el("button", {
+        class: `px-3 py-2 text-sm rounded-t transition ${isActive ? "bg-brand-600 text-white font-semibold" : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"}`,
+        onclick: () => { activeTab = t.id; redraw(); },
+      }, t.label));
+    }
+    root.appendChild(tabRow);
+    // コンテンツ
+    root.appendChild(renderTabContent());
+    return root;
+  }
+
+  function redraw() {
+    const mb = $("#modalBody");
+    if (!mb) return;
+    mb.innerHTML = "";
+    mb.appendChild(renderGuide());
+    const m = $("#modal");
+    if (m) m.classList.remove("hidden");
+  }
+
+  redraw();
+}
+
+function renderHelpCenter() {
+  // Round 42: 巨大な inline カードから launcher 1 つに圧縮
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex items-center gap-3" });
+  card.appendChild(el("div", { class: "text-3xl" }, "📖"));
+  card.appendChild(el("div", { class: "flex-1" }, [
+    el("div", { class: "font-semibold text-sm" }, "使い方ガイド"),
+    el("div", { class: "text-xs text-slate-500 dark:text-slate-400" },
+      `FAQ ${FAQ_DATA.length} 件・機能ツアー・操作デモ・業態セットアップを 1 か所に集約 (Round 42)`),
+  ]));
+  card.appendChild(el("button", {
+    class: "bg-brand-600 hover:bg-brand-700 text-white rounded px-3 py-1.5 text-sm font-bold",
+    onclick: () => openHelpGuide("faq"),
+  }, "開く →"));
   return card;
 }
 
@@ -3171,83 +3268,7 @@ const TASK_CHECKLIST = {
   ],
 };
 
-function renderTaskChecklist() {
-  const completed = state.meta.taskChecklist || {};
-  const isSetupComplete = (TASK_CHECKLIST.setup || []).every(t => completed[t.id]);
-
-  // セットアップ未完なら最優先表示、完了したら毎週/毎月を表示
-  const sections = isSetupComplete
-    ? [
-        { key: "weekly", label: "📅 毎週のルーチン", items: TASK_CHECKLIST.weekly },
-        { key: "monthly", label: "📊 毎月のルーチン", items: TASK_CHECKLIST.monthly },
-      ]
-    : [
-        { key: "setup", label: "🚀 初日のセットアップ", items: TASK_CHECKLIST.setup },
-      ];
-
-  // 進捗計算
-  let totalTasks = 0, completedTasks = 0;
-  for (const sec of sections) {
-    for (const t of sec.items) {
-      totalTasks++;
-      if (completed[t.id]) completedTasks++;
-    }
-  }
-  const pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-
-  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
-  card.appendChild(el("details", { open: pct < 100 ? "" : null }, [
-    el("summary", { class: "cursor-pointer flex items-center justify-between gap-2" }, [
-      el("div", { class: "flex items-center gap-2" }, [
-        el("span", { class: "font-semibold text-sm" }, "📋 やることリスト"),
-        el("span", { class: "text-xs text-slate-500" }, `${completedTasks}/${totalTasks} 完了`),
-      ]),
-      el("div", { class: "flex items-center gap-2 flex-1 max-w-32" }, [
-        el("div", { class: "flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded" }, [
-          el("div", { class: "h-full rounded bg-emerald-500", style: { width: pct + "%" } }),
-        ]),
-        el("span", { class: "text-xs font-bold text-emerald-700 w-8 text-right" }, pct + "%"),
-      ]),
-    ]),
-    (() => {
-      const wrap = el("div", { class: "mt-3 space-y-3" });
-      for (const sec of sections) {
-        const secEl = el("div", {});
-        secEl.appendChild(el("div", { class: "text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1" }, sec.label));
-        for (const t of sec.items) {
-          const isDone = !!completed[t.id];
-          const row = el("label", { class: `flex items-start gap-2 p-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer ${isDone ? "opacity-60" : ""}` });
-          const cb = el("input", { type: "checkbox" });
-          if (isDone) cb.checked = true;
-          cb.onchange = () => {
-            if (cb.checked) {
-              state.meta.taskChecklist[t.id] = { completedAt: new Date().toISOString() };
-            } else {
-              delete state.meta.taskChecklist[t.id];
-            }
-            persist();
-            // 即座に再描画 (進捗バー更新)
-            render();
-          };
-          row.appendChild(cb);
-          row.appendChild(el("div", { class: "flex-1" }, [
-            el("div", { class: `text-sm ${isDone ? "line-through text-slate-500" : ""}` }, t.label),
-            el("div", { class: "text-[10px] text-slate-500 dark:text-slate-400" }, "💡 " + t.tip),
-          ]));
-          secEl.appendChild(row);
-        }
-        wrap.appendChild(secEl);
-      }
-      // セットアップ完了時の祝福
-      if (isSetupComplete && completedTasks === totalTasks) {
-        wrap.appendChild(el("div", { class: "bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-300 dark:border-emerald-700 rounded p-3 text-sm text-emerald-800 dark:text-emerald-300" },
-          "🎉 今週のルーチン完了です！来週もこのペースを維持しましょう。"));
-      }
-      return wrap;
-    })(),
-  ]));
-  return card;
-}
+// Round 42: renderTaskChecklist は viewHome 内に統合済 (重複排除のため削除)
 
 // ===== プラン表示 + アップグレード動線 (Round 34 TOP 2) =====
 async function fetchAndRenderPlanInfo() {
@@ -3549,75 +3570,105 @@ function viewHome() {
     return wrap;
   }
 
-  // Round 30: 進捗バー (4 ステップ: スタッフ→希望→生成→確定)
+  // Round 42: 統合 — 進捗バー + 次にやること + チェックリストを 1 カードに
+  // (旧: 別々の 3 つのカードで似た情報を繰り返していた)
   if (state.staff.length > 0) {
     const submittedN = state.staff.filter(s => !s.archived && curPrefs().some(p => p.staffId === s.id)).length;
     const activeN = state.staff.filter(s => !s.archived).length;
     const steps = [
       { id: 1, label: "スタッフ", done: state.staff.length > 0, hint: `${activeN} 名` },
-      { id: 2, label: "希望収集", done: submittedN > 0, hint: `${submittedN}/${activeN} 提出` },
+      { id: 2, label: "希望収集", done: submittedN > 0, hint: `${submittedN}/${activeN}` },
       { id: 3, label: "AI 生成", done: curAssignments().length > 0, hint: `${curAssignments().length} 件` },
       { id: 4, label: "確定", done: curStatus() === "published", hint: curStatus() === "published" ? "✓" : "未" },
     ];
-    const progressCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
-    progressCard.appendChild(el("div", { class: "text-xs font-semibold text-slate-500 mb-2" }, "📍 今週の進捗"));
-    const stepsRow = el("div", { class: "flex items-center justify-between" });
+    const next = getNextAction();
+    const card = el("div", { class: "bg-gradient-to-br from-blue-500 to-brand-700 rounded-xl p-4 text-white shadow-lg" });
+
+    // 上部: 進捗バー (コンパクト)
+    const stepsRow = el("div", { class: "flex items-center justify-between mb-4" });
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i];
-      const cls = s.done ? "bg-emerald-500 text-white"
-                : (i === 0 || steps[i - 1].done) ? "bg-brand-600 text-white"
-                : "bg-slate-200 dark:bg-slate-600 text-slate-500";
+      const cls = s.done ? "bg-emerald-500" : (i === 0 || steps[i - 1].done) ? "bg-white text-brand-700" : "bg-white/20";
       stepsRow.appendChild(el("div", { class: "flex flex-col items-center flex-1" }, [
-        el("div", { class: `w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${cls}` }, s.done ? "✓" : String(s.id)),
-        el("div", { class: "text-[11px] mt-1 text-slate-700 dark:text-slate-300 text-center" }, s.label),
-        el("div", { class: "text-[10px] text-slate-500" }, s.hint),
+        el("div", { class: `w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${cls}` }, s.done ? "✓" : String(s.id)),
+        el("div", { class: "text-[10px] mt-1 text-center opacity-90" }, s.label),
+        el("div", { class: "text-[9px] opacity-70" }, s.hint),
       ]));
       if (i < steps.length - 1) {
-        const lineColor = steps[i].done ? "bg-emerald-500" : "bg-slate-200 dark:bg-slate-600";
-        stepsRow.appendChild(el("div", { class: `flex-grow h-1 mx-1 ${lineColor}`, style: { marginTop: "-22px", flex: "0.5" } }));
+        const lineColor = steps[i].done ? "bg-emerald-500" : "bg-white/20";
+        stepsRow.appendChild(el("div", { class: `h-0.5 mx-1 ${lineColor}`, style: { marginTop: "-22px", flex: "0.5" } }));
       }
     }
-    progressCard.appendChild(stepsRow);
-    wrap.appendChild(progressCard);
-  }
+    card.appendChild(stepsRow);
 
-  // Round 34 TOP 1: タスクチェックリスト
-  if (state.staff.length > 0) {
-    const checklistCard = renderTaskChecklist();
-    if (checklistCard) wrap.appendChild(checklistCard);
+    // 下部: 次のアクション
+    if (next) {
+      const action = el("div", { class: "flex items-start gap-3 pt-3 border-t border-white/20" });
+      action.appendChild(el("div", { class: "text-2xl" }, next.icon));
+      const main = el("div", { class: "flex-1" });
+      main.appendChild(el("h3", { class: "font-bold text-base" }, next.title));
+      main.appendChild(el("p", { class: "text-xs opacity-90 mt-0.5" }, next.desc));
+      const btnRow = el("div", { class: "flex gap-2 flex-wrap mt-2" });
+      for (const b of next.buttons) {
+        btnRow.appendChild(el("button", {
+          class: b.primary
+            ? "bg-white text-brand-700 hover:bg-slate-100 rounded px-3 py-1.5 text-sm font-bold"
+            : "bg-white/20 hover:bg-white/30 text-white rounded px-3 py-1.5 text-xs",
+          onclick: b.onclick,
+        }, b.label));
+      }
+      main.appendChild(btnRow);
+      action.appendChild(main);
+      card.appendChild(action);
+    }
+
+    // 詳細チェックリスト (折りたたみ)
+    const completed = state.meta.taskChecklist || {};
+    const isSetupComplete = (TASK_CHECKLIST.setup || []).every(t => completed[t.id]);
+    const sections = isSetupComplete
+      ? [{ key: "weekly", label: "📅 毎週", items: TASK_CHECKLIST.weekly },
+         { key: "monthly", label: "📊 毎月", items: TASK_CHECKLIST.monthly }]
+      : [{ key: "setup", label: "🚀 初日", items: TASK_CHECKLIST.setup }];
+    let totalT = 0, completedT = 0;
+    for (const sec of sections) for (const t of sec.items) { totalT++; if (completed[t.id]) completedT++; }
+    if (totalT > 0) {
+      const checklist = el("details", { class: "mt-3 pt-3 border-t border-white/20" });
+      checklist.appendChild(el("summary", { class: "cursor-pointer text-xs flex items-center justify-between" }, [
+        el("span", {}, `📋 詳細チェックリスト (${completedT}/${totalT})`),
+        el("span", { class: "text-[10px] opacity-70" }, "クリックで開閉"),
+      ]));
+      const list = el("div", { class: "mt-2 space-y-2" });
+      for (const sec of sections) {
+        list.appendChild(el("div", { class: "text-[10px] font-semibold opacity-80 mt-2" }, sec.label));
+        for (const t of sec.items) {
+          const isDone = !!completed[t.id];
+          const row = el("label", { class: `flex items-start gap-2 p-1.5 rounded hover:bg-white/10 cursor-pointer text-xs ${isDone ? "opacity-60" : ""}` });
+          const cb = el("input", { type: "checkbox" });
+          if (isDone) cb.checked = true;
+          cb.onchange = () => {
+            if (cb.checked) state.meta.taskChecklist[t.id] = { completedAt: new Date().toISOString() };
+            else delete state.meta.taskChecklist[t.id];
+            persist(); render();
+          };
+          row.appendChild(cb);
+          row.appendChild(el("div", { class: "flex-1" }, [
+            el("div", { class: isDone ? "line-through" : "" }, t.label),
+            el("div", { class: "text-[10px] opacity-70 mt-0.5" }, "💡 " + t.tip),
+          ]));
+          list.appendChild(row);
+        }
+      }
+      checklist.appendChild(list);
+      card.appendChild(checklist);
+    }
+
+    wrap.appendChild(card);
   }
 
   // Round 34 TOP 2: プラン情報カード (Pro 表示や上限警告)
   if (window.ShiftyAPI && window.ShiftyAPI.tenantSlug) {
     const planCard = renderPlanCard();
     if (planCard) wrap.appendChild(planCard);
-  }
-
-  // 「次にやること」カード
-  const next = getNextAction();
-  if (next) {
-    const naCard = el("div", { class: "bg-gradient-to-br from-blue-500 to-brand-700 rounded-xl p-4 text-white shadow-lg" });
-    naCard.appendChild(el("div", { class: "flex items-start gap-3" }, [
-      el("div", { class: "text-3xl" }, next.icon),
-      el("div", { class: "flex-1" }, [
-        el("div", { class: "text-xs opacity-90 uppercase tracking-wider" }, "次にやること"),
-        el("h3", { class: "font-bold text-lg mt-0.5" }, next.title),
-        el("p", { class: "text-sm opacity-90 mt-1" }, next.desc),
-        (() => {
-          const btnRow = el("div", { class: "flex gap-2 flex-wrap mt-3" });
-          for (const b of next.buttons) {
-            btnRow.appendChild(el("button", {
-              class: b.primary
-                ? "bg-white text-brand-700 hover:bg-slate-100 rounded px-4 py-2 text-sm font-bold"
-                : "bg-white/20 hover:bg-white/30 text-white rounded px-3 py-2 text-sm",
-              onclick: b.onclick,
-            }, b.label));
-          }
-          return btnRow;
-        })(),
-      ]),
-    ]));
-    wrap.appendChild(naCard);
   }
 
   // 多店舗対応: 集計ダッシュボード ボタン
@@ -8713,7 +8764,7 @@ function viewSettings() {
       </div>`;
     quickCard.appendChild(el("button", {
       class: "mt-3 w-full bg-amber-500 hover:bg-amber-600 text-white rounded-md px-4 py-2.5 text-sm font-bold",
-      onclick: openQuickSetupWizard,
+      onclick: () => openHelpGuide("setup"),  // Round 42: 統一ガイド経由
     }, "🎯 業態を選んで一括設定 →"));
     wrap.appendChild(quickCard);
   }
@@ -9191,41 +9242,19 @@ function viewSettings() {
 
   setTimeout(loadStaffMessages, 100);
 
-  // Backup
-  const backupCard = el("div", { id: "set-backup", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
-  backupCard.appendChild(el("div", { class: "font-semibold" }, "9. データバックアップ"));
-  backupCard.appendChild(el("div", { class: "text-xs text-slate-500" },
-    "全データ（店舗・スタッフ・全週・トークン）を JSON でエクスポート/インポートできます。定期的にダウンロードして保管推奨。"));
-  backupCard.appendChild(el("div", { class: "flex gap-2 flex-wrap" }, [
-    el("button", { class: "text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-md px-3 py-1.5",
-      onclick: downloadBackup }, "📥 JSONでダウンロード"),
-    el("label", { class: "text-sm bg-amber-600 hover:bg-amber-700 text-white rounded-md px-3 py-1.5 cursor-pointer" }, [
-      el("span", {}, "📤 JSONから復元"),
-      el("input", { type: "file", accept: "application/json,.json", class: "hidden", onchange: handleRestoreFile }),
-    ]),
-    el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5",
-      onclick: openSnapshotsDialog }, "🕒 過去スナップショット (サーバ)"),
+  // Round 42: バックアップ + 操作単位スナップショット + サーバスナップショット を統一ダイアログに集約
+  const localSnapsCount = (state.meta.snapshots || []).length;
+  const backupCard = el("div", { id: "set-backup", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex items-center gap-3 scroll-mt-4" });
+  backupCard.appendChild(el("div", { class: "text-3xl" }, "↩️"));
+  backupCard.appendChild(el("div", { class: "flex-1" }, [
+    el("div", { class: "font-semibold text-sm" }, "9. 過去に戻る / バックアップ"),
+    el("div", { class: "text-xs text-slate-500 dark:text-slate-400" },
+      `操作単位スナップショット (${localSnapsCount} 件) / サーバ自動 (毎日 03:00) / JSON ダウンロード を 1 つのダイアログに集約 (Round 42)`),
   ]));
-  backupCard.appendChild(el("div", { class: "text-xs text-slate-500 pt-2 border-t border-slate-100" },
-    "💡 サーバ側で毎日 03:00 (JST) に自動スナップショット取得（過去 30 日分保持）。「過去スナップショット」ボタンから任意の日に巻き戻せます。"));
-
-  // 操作単位スナップショット (Round 17 TOP 1)
-  const localSnaps = (state.meta.snapshots || []);
-  backupCard.appendChild(el("div", { class: "pt-3 border-t border-slate-100 space-y-2" }, [
-    el("div", { class: "text-xs font-semibold text-slate-700" }, "🔁 操作単位スナップショット (Round 17)"),
-    el("div", { class: "text-xs text-slate-500" },
-      `確定前 / AI 生成前 / 日次に自動取得。最新 ${SNAPSHOT_LIMIT} 件まで保持。誤操作の即時取り戻しに使えます。`),
-    el("div", { class: "flex gap-2 flex-wrap" }, [
-      el("button", { class: "text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-md px-3 py-1.5",
-        onclick: () => {
-          const label = prompt("スナップショット名 (任意・例: 「サンプル投入前」):", "手動 " + new Date().toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit" })) || "手動";
-          const snap = createSnapshot("manual", label);
-          if (snap) { persist(); render(); toast(`✓ スナップショット「${snap.label}」を作成`, "success"); }
-        } }, "📸 今すぐ手動スナップショット"),
-      el("button", { class: "text-sm border border-slate-300 rounded-md px-3 py-1.5",
-        onclick: () => openLocalSnapshotsDialog() }, `📋 一覧 (${localSnaps.length}件)`),
-    ]),
-  ]));
+  backupCard.appendChild(el("button", {
+    class: "bg-brand-600 hover:bg-brand-700 text-white rounded px-3 py-1.5 text-sm font-bold",
+    onclick: () => openHistoryDialog("local"),
+  }, "開く →"));
   wrap.appendChild(backupCard);
 
   // テーマ設定 (Round 25 TOP 3)
@@ -9501,72 +9530,73 @@ function openEmergencySubstituteFlow(message) {
   modal(body);
 }
 
-async function openSnapshotsDialog() {
-  const body = el("div", { class: "p-6 space-y-3" });
-  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🕒 過去スナップショット"));
-  body.appendChild(el("p", { class: "text-xs text-slate-500" },
-    "毎日 03:00 (JST) に自動取得。クリックで該当日の状態に巻き戻ります（現在のデータは上書きされます）。"));
-  const list = el("div", { class: "space-y-1.5 max-h-72 overflow-y-auto" });
-  body.appendChild(list);
-  body.appendChild(el("div", { class: "flex justify-end" }, [
-    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
-  ]));
-  modal(body);
-  try {
-    const snapshots = await window.ShiftyAPI.listSnapshots();
-    if (!snapshots.length) {
-      list.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" },
-        "スナップショットがまだありません。毎日 03:00 から取得開始されます。"));
-      return;
-    }
-    snapshots.forEach(snap => {
-      const row = el("div", { class: "flex items-center justify-between bg-slate-50 rounded-md p-2 text-sm" });
-      row.innerHTML = `
-        <div>
-          <span class="font-mono">${snap.date}</span>
-          ${snap.createdAt ? `<span class="text-xs text-slate-500 ml-2">${snap.createdAt.slice(11, 19)} UTC</span>` : ""}
-        </div>`;
-      const restoreBtn = el("button", {
-        class: "text-xs bg-amber-600 text-white rounded px-3 py-1.5",
-        onclick: async () => {
-          if (!confirm(`${snap.date} の状態に巻き戻します。現在のデータは上書きされます。よろしいですか？`)) return;
-          try {
-            await window.ShiftyAPI.restoreSnapshot(snap.date);
-            state = await loadState();
-            closeModal(); render(); toast(`✅ ${snap.date} の状態に復元しました`, "success");
-          } catch (e) {
-            toast("復元失敗: " + e.message, "error");
-          }
-        },
-      }, "復元");
-      row.appendChild(restoreBtn);
-      list.appendChild(row);
-    });
-  } catch (e) {
-    list.appendChild(el("div", { class: "text-sm text-red-600" }, "取得失敗: " + e.message));
-  }
-}
+// Round 42: 「過去に戻る」を 1 ダイアログに集約
+// 旧: openSnapshotsDialog (サーバ) + openLocalSnapshotsDialog (操作単位) + downloadBackup/handleRestoreFile (JSON)
+// 新: openHistoryDialog(initialTab) でタブ切替
+function openHistoryDialog(initialTab) {
+  let activeTab = initialTab || "local";
+  const TABS = [
+    { id: "local",  label: "🔁 操作単位",   desc: "確定前 / AI 生成前 / 日次に自動取得" },
+    { id: "server", label: "🕒 サーバ自動", desc: "毎日 03:00 JST 自動・30 日保持" },
+    { id: "json",   label: "📦 JSON",      desc: "全データを JSON でダウンロード/復元" },
+  ];
 
-// Round 17 TOP 1: ローカルスナップショット一覧
-function openLocalSnapshotsDialog() {
-  const snaps = (state.meta.snapshots || []).slice();
-  const KIND_LABEL = {
-    manual: "✋ 手動",
-    auto_publish: "✅ 確定前",
-    auto_autogen: "🤖 AI生成前",
-    daily: "📅 日次",
-  };
-  const body = el("div", { class: "p-6 space-y-3" });
-  body.appendChild(el("h3", { class: "font-bold text-lg" }, "🔁 操作単位スナップショット"));
-  body.appendChild(el("p", { class: "text-xs text-slate-500" },
-    `最新 ${SNAPSHOT_LIMIT} 件まで保持。クリックで該当時点に巻き戻ります（復元前に現状を自動バックアップ）。`));
-  if (snaps.length === 0) {
-    body.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" },
-      "スナップショットがまだありません。確定 / AI 生成時に自動取得されます。"));
-  } else {
+  function renderRoot() {
+    const root = el("div", { class: "p-5 space-y-3" });
+    root.appendChild(el("div", { class: "flex items-center gap-3" }, [
+      el("div", { class: "text-3xl" }, "↩️"),
+      el("div", { class: "flex-1" }, [
+        el("div", { class: "text-xs text-slate-500" }, "Shifty"),
+        el("h3", { class: "font-bold text-lg" }, "過去に戻る / バックアップ"),
+      ]),
+      el("button", {
+        class: "text-slate-400 hover:text-slate-700 text-2xl leading-none",
+        onclick: closeModal,
+        "aria-label": "閉じる",
+      }, "×"),
+    ]));
+    // タブ
+    const tabRow = el("div", { class: "flex gap-1 border-b border-slate-200 dark:border-slate-700" });
+    for (const t of TABS) {
+      const isActive = t.id === activeTab;
+      tabRow.appendChild(el("button", {
+        class: `px-3 py-2 text-sm rounded-t transition ${isActive ? "bg-brand-600 text-white font-semibold" : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"}`,
+        onclick: () => { activeTab = t.id; redraw(); },
+      }, t.label));
+    }
+    root.appendChild(tabRow);
+    // 説明
+    const cur = TABS.find(t => t.id === activeTab);
+    if (cur) {
+      root.appendChild(el("div", { class: "text-xs text-slate-500 dark:text-slate-400" }, cur.desc));
+    }
+    // 内容
+    if (activeTab === "local")  root.appendChild(renderLocalTab());
+    if (activeTab === "server") root.appendChild(renderServerTab());
+    if (activeTab === "json")   root.appendChild(renderJsonTab());
+    return root;
+  }
+
+  function renderLocalTab() {
+    const wrap = el("div", { class: "space-y-2" });
+    wrap.appendChild(el("button", {
+      class: "w-full text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-md px-3 py-2",
+      onclick: () => {
+        const label = prompt("スナップショット名 (任意):", "手動 " + new Date().toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit" })) || "手動";
+        const snap = createSnapshot("manual", label);
+        if (snap) { persist(); window.render && window.render(); toast(`✓ スナップショット「${snap.label}」を作成`, "success"); redraw(); }
+      },
+    }, "📸 今すぐ手動スナップショットを作成"));
+    const snaps = (state.meta.snapshots || []).slice();
+    const KIND_LABEL = { manual: "✋ 手動", auto_publish: "✅ 確定前", auto_autogen: "🤖 AI生成前", daily: "📅 日次" };
+    if (snaps.length === 0) {
+      wrap.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" },
+        "まだスナップショットがありません。確定 / AI 生成時に自動取得されます。"));
+      return wrap;
+    }
     const list = el("div", { class: "space-y-1.5 max-h-72 overflow-y-auto" });
     for (const snap of snaps) {
-      const row = el("div", { class: "border border-slate-200 rounded-md p-2 text-xs flex items-center justify-between gap-2" });
+      const row = el("div", { class: "border border-slate-200 dark:border-slate-700 rounded-md p-2 text-xs flex items-center justify-between gap-2" });
       const dt = new Date(snap.createdAt);
       const staffN = (snap.payload?.staff || []).length;
       const weeksN = Object.keys(snap.payload?.weeks || {}).length;
@@ -9575,31 +9605,104 @@ function openLocalSnapshotsDialog() {
           <div class="font-medium">${escapeHtml(snap.label)}</div>
           <div class="text-slate-500 text-[10px]">${KIND_LABEL[snap.kind] || snap.kind}・${dt.toLocaleString("ja-JP")}</div>
           <div class="text-slate-400 text-[10px]">スタッフ ${staffN} 名 / 週 ${weeksN} 件</div>
-        </div>
-      `;
-      const restoreBtn = el("button", {
+        </div>`;
+      row.appendChild(el("button", {
         class: "text-xs bg-amber-600 hover:bg-amber-700 text-white rounded px-3 py-1.5 font-semibold",
         onclick: () => restoreSnapshot(snap.id),
-      }, "復元");
-      const deleteBtn = el("button", {
-        class: "text-xs bg-slate-200 hover:bg-slate-300 rounded px-2 py-1.5",
+      }, "復元"));
+      row.appendChild(el("button", {
+        class: "text-xs bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 rounded px-2 py-1.5",
         onclick: async () => {
           if (!confirm(`「${snap.label}」を削除しますか？`)) return;
           state.meta.snapshots = (state.meta.snapshots || []).filter(s => s.id !== snap.id);
-          await persist(); closeModal(); openLocalSnapshotsDialog();
+          await persist(); redraw();
         },
-      }, "🗑");
-      row.appendChild(restoreBtn);
-      row.appendChild(deleteBtn);
+      }, "🗑"));
       list.appendChild(row);
     }
-    body.appendChild(list);
+    wrap.appendChild(list);
+    wrap.appendChild(el("div", { class: "text-[10px] text-slate-400 pt-1" }, `最新 ${SNAPSHOT_LIMIT} 件まで保持`));
+    return wrap;
   }
-  body.appendChild(el("div", { class: "flex justify-end pt-2 border-t border-slate-100" }, [
-    el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
-  ]));
-  modal(body);
+
+  function renderServerTab() {
+    const wrap = el("div", { class: "space-y-2" });
+    const list = el("div", { class: "space-y-1.5 max-h-72 overflow-y-auto" });
+    list.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" }, "読み込み中..."));
+    wrap.appendChild(list);
+    (async () => {
+      try {
+        const snapshots = await window.ShiftyAPI.listSnapshots();
+        list.innerHTML = "";
+        if (!snapshots.length) {
+          list.appendChild(el("div", { class: "text-sm text-slate-500 text-center py-4" },
+            "サーバスナップショットがまだありません。毎日 03:00 から取得開始されます。"));
+          return;
+        }
+        snapshots.forEach(snap => {
+          const row = el("div", { class: "flex items-center justify-between bg-slate-50 dark:bg-slate-700 rounded-md p-2 text-sm" });
+          row.innerHTML = `
+            <div>
+              <span class="font-mono">${snap.date}</span>
+              ${snap.createdAt ? `<span class="text-xs text-slate-500 ml-2">${snap.createdAt.slice(11, 19)} UTC</span>` : ""}
+            </div>`;
+          row.appendChild(el("button", {
+            class: "text-xs bg-amber-600 hover:bg-amber-700 text-white rounded px-3 py-1.5",
+            onclick: async () => {
+              if (!confirm(`${snap.date} の状態に巻き戻します。現在のデータは上書きされます。よろしいですか？`)) return;
+              try {
+                await window.ShiftyAPI.restoreSnapshot(snap.date);
+                state = await loadState();
+                closeModal(); window.render(); toast(`✅ ${snap.date} の状態に復元しました`, "success");
+              } catch (e) { toast("復元失敗: " + e.message, "error"); }
+            },
+          }, "復元"));
+          list.appendChild(row);
+        });
+      } catch (e) {
+        list.innerHTML = "";
+        list.appendChild(el("div", { class: "text-sm text-red-600" }, "取得失敗: " + e.message));
+      }
+    })();
+    return wrap;
+  }
+
+  function renderJsonTab() {
+    const wrap = el("div", { class: "space-y-3" });
+    wrap.appendChild(el("div", { class: "text-xs text-slate-500" },
+      "全データ（店舗・スタッフ・全週・トークン）を JSON でエクスポート/インポートできます。定期的にダウンロードして保管推奨。"));
+    const btnRow = el("div", { class: "flex gap-2 flex-wrap" });
+    btnRow.appendChild(el("button", {
+      class: "text-sm bg-slate-700 hover:bg-slate-800 text-white rounded-md px-3 py-1.5",
+      onclick: () => { closeModal(); downloadBackup(); },
+    }, "📥 JSONでダウンロード"));
+    const restoreLabel = el("label", { class: "text-sm bg-amber-600 hover:bg-amber-700 text-white rounded-md px-3 py-1.5 cursor-pointer" }, [
+      el("span", {}, "📤 JSONから復元"),
+    ]);
+    const fi = el("input", { type: "file", accept: "application/json,.json", class: "hidden", onchange: handleRestoreFile });
+    restoreLabel.appendChild(fi);
+    btnRow.appendChild(restoreLabel);
+    wrap.appendChild(btnRow);
+    wrap.appendChild(el("div", { class: "text-[10px] text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-700" },
+      "💡 月 1 回以上のダウンロードを推奨。災害時 / 移行時の最終バックアップに。"));
+    return wrap;
+  }
+
+  function redraw() {
+    const mb = $("#modalBody");
+    if (!mb) return;
+    mb.innerHTML = "";
+    mb.appendChild(renderRoot());
+    const m = $("#modal");
+    if (m) m.classList.remove("hidden");
+  }
+
+  redraw();
 }
+
+// Round 42: 旧 API は openHistoryDialog の薄いラッパに変更 (互換性維持)
+async function openSnapshotsDialog() { return openHistoryDialog("server"); }
+function openLocalSnapshotsDialog() { return openHistoryDialog("local"); }
 
 async function handleRestoreFile(ev) {
   const file = ev.target.files?.[0];
