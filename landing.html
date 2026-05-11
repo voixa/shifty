@@ -134,7 +134,7 @@
 <body class="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans">
 
   <!-- Header -->
-  <header class="sticky top-0 z-40 bg-white/80 backdrop-blur border-b border-slate-200">
+  <header class="sticky top-0 z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur border-b border-slate-200 dark:border-slate-700">
     <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
       <a href="/" class="flex items-center gap-2">
         <div class="w-8 h-8 gradient-bg rounded-lg flex items-center justify-center text-white font-bold">S</div>
@@ -1027,9 +1027,13 @@
           body: JSON.stringify(data),
         });
         if (!r.ok) throw new Error('送信失敗');
-        msg.innerHTML = '✅ 送信ありがとうございます。1営業日以内に support@in-dx.jp からご連絡いたします。<br><br>'
-          + '<span class="text-slate-700 font-normal">お返事をお待ちいただく間に、ぜひ機能を体験してください：</span><br>'
-          + '<a href="/demo" class="inline-block mt-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-2.5 text-sm">🎮 デモを触ってみる（登録不要）</a>';
+        msg.innerHTML = '✅ 送信ありがとうございます！<br><br>'
+          + '<span class="text-slate-700 font-normal">'
+          + '<strong class="text-emerald-700">数十秒以内</strong>に <code class="bg-slate-100 px-1 rounded text-xs">support@in-dx.jp</code> から'
+          + '<strong>ログインリンク付きメール</strong>が届きます。<br>'
+          + '届いていない場合は <strong>迷惑メールフォルダ</strong> もご確認ください。'
+          + '</span><br>'
+          + '<a href="/demo" class="inline-block mt-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-2.5 text-sm">🎮 メール待ちの間にデモを試す</a>';
         msg.className = 'text-sm text-center font-semibold text-emerald-600';
         msg.classList.remove('hidden');
         form.reset();
@@ -1044,19 +1048,31 @@
     });
 
     // ===== サインアップモーダル =====
-    // Free プラン: 店舗情報 → /api/inquiry でセットアップ依頼メール
-    // Pro プラン:  店舗情報 → Stripe Checkout (クレカ任意・14日トライアル)
+    // Free プラン:     店舗情報 → /api/inquiry でセットアップ依頼メール (自動 magic link)
+    // Pro/Business:    店舗情報 → Stripe Checkout (クレカ任意・14日トライアル)
+    // Enterprise:      anchor #contact へ誘導 (4-tier 化対応・問合せフォーム)
+    const PLAN_META = {
+      free:       { label: 'Free（永久無料・スタッフ 8 名まで）',         priceLabel: '¥0/月',     stripe: false },
+      pro:        { label: 'Pro（¥1,980/月・単店舗・無制限スタッフ）',     priceLabel: '¥1,980/月', stripe: true  },
+      business:   { label: 'Business（¥4,980/月・5 店舗まで・無制限）',    priceLabel: '¥4,980/月', stripe: true  },
+      enterprise: { label: 'Enterprise（要相談・6 店舗以上）',             priceLabel: '要相談',     stripe: false, contact: true },
+    };
     function showSignupModal(plan) {
       const isFree = plan === 'free';
-      const planLabel = isFree ? 'Free（永久無料・スタッフ 8 名まで）' : 'Pro（¥1,980/月・無制限）';
+      const meta = PLAN_META[plan] || PLAN_META.free;
+      const planLabel = meta.label;
       const overlay = document.createElement('div');
       overlay.className = 'fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto';
+      const titleText = isFree
+        ? '無料アカウント登録'
+        : (plan === 'business' ? 'Business 14 日間トライアル登録'
+                               : 'Pro 14 日間トライアル登録');
       overlay.innerHTML = `
-        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 my-8">
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4 my-8">
           <div class="flex justify-between items-start">
             <div>
-              <h3 class="font-bold text-xl">${isFree ? '無料アカウント登録' : '14 日間 無料トライアル登録'}</h3>
-              <p class="text-xs text-slate-500 mt-1">${planLabel}</p>
+              <h3 class="font-bold text-xl">${titleText}</h3>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">${planLabel}</p>
             </div>
             <button id="su-close" class="text-slate-400 hover:text-slate-600 text-2xl leading-none px-2" aria-label="閉じる">×</button>
           </div>
@@ -1168,15 +1184,17 @@
             // 成功画面に置き換え
             overlay.querySelector('.bg-white').innerHTML = `
               <div class="text-center py-6 px-4 space-y-4">
-                <div class="text-5xl">🎉</div>
-                <h3 class="font-bold text-xl">登録ありがとうございます</h3>
-                <p class="text-sm text-slate-600">
-                  飲DX から <strong>1 営業日以内</strong>に <code>support@in-dx.jp</code> よりセットアップ手順をお送りします。
+                <div class="text-5xl">📧</div>
+                <h3 class="font-bold text-xl">メールをご確認ください</h3>
+                <p class="text-sm text-slate-700">
+                  <strong class="text-emerald-700">数十秒以内</strong>に <code class="bg-slate-100 px-1 rounded text-xs">support@in-dx.jp</code> から
+                  <strong>ログインリンク付きのメール</strong>が届きます。<br>
+                  リンクをクリックするとそのままシフト作成画面に入れます。
                 </p>
-                <p class="text-xs text-slate-500">届いていない場合は迷惑メールフォルダもご確認ください。</p>
+                <p class="text-xs text-slate-500">届いていない場合は <strong>迷惑メールフォルダ</strong> もご確認ください。<br>5 分経っても届かない場合は support@in-dx.jp までご一報を。</p>
                 <div class="pt-2 space-y-2">
                   <a href="/demo" class="block bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-2.5 text-sm font-semibold">
-                    🎮 待っている間に機能を試す（デモ環境）
+                    🎮 メール待ちの間にデモを試す
                   </a>
                   <button id="su-done" class="block w-full text-xs text-slate-500 hover:text-slate-700">閉じる</button>
                 </div>
@@ -1185,13 +1203,13 @@
             overlay.querySelector('#su-done').onclick = close;
             return;
           }
-          // Pro プラン: Stripe Checkout
+          // Pro / Business プラン: Stripe Checkout (plan キーをそのまま転送)
           const sc = overlay.querySelector('#su-staff');
           const resp = await fetch('/api/checkout/session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              plan: 'pro',
+              plan: plan,
               restaurantName: r, contactName: c, email: e2,
               staffCount: sc ? sc.value : '',
             }),
@@ -1211,15 +1229,16 @@
       };
     }
 
-    // Pro プラン CTA (Stripe 経由)
+    // 有料プラン CTA (Stripe 経由) — data-plan で Pro / Business を区別
     document.querySelectorAll('.plan-cta').forEach(el => {
       el.addEventListener('click', async (e) => {
         e.preventDefault();
-        showSignupModal('pro');
+        const plan = el.getAttribute('data-plan') || 'pro';
+        showSignupModal(plan);
       });
     });
 
-    // Free プラン CTA (inquiry 経由)
+    // Free プラン CTA (inquiry 経由・自動 magic link)
     document.querySelectorAll('.plan-cta-free').forEach(el => {
       el.addEventListener('click', async (e) => {
         e.preventDefault();
