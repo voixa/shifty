@@ -10390,6 +10390,52 @@ function showOnboarding() {
 }
 
 // ===== Boot =====
+// Round 42: グローバルエラー捕捉 — 未処理例外でスケルトン UI のまま固まる事象を防ぐ
+// (新規 tenant ログイン直後など、想定外のデータ形状で viewHome が throw すると
+// render() が main を空にした後で止まり、空白画面になる事象が発生していた)
+window.addEventListener("error", (ev) => {
+  try {
+    const main = document.getElementById("main");
+    if (!main) return;
+    // 既に正常コンテンツがある場合はトーストのみ。空ならエラーカードを描画
+    const isSkeleton = main.querySelector(".skeleton") !== null;
+    if (main.children.length === 0 || isSkeleton) {
+      main.innerHTML = `
+        <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-xl p-6 text-center space-y-3 max-w-lg mx-auto mt-8">
+          <div class="text-4xl">⚠️</div>
+          <div class="text-base font-semibold text-red-900 dark:text-red-200">画面の読み込みに失敗しました</div>
+          <div class="text-xs text-red-700 dark:text-red-400 font-mono break-words">${(ev.error && ev.error.message) || ev.message || "(unknown)"}</div>
+          <div class="flex gap-2 justify-center pt-2">
+            <button onclick="location.reload()" class="bg-red-600 hover:bg-red-700 text-white rounded-md px-4 py-2 text-sm font-bold">🔄 再読み込み</button>
+            <a href="/login" class="bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 rounded-md px-4 py-2 text-sm font-bold">ログイン画面</a>
+          </div>
+          <div class="text-[10px] text-slate-500 pt-2 border-t border-red-200 dark:border-red-700">
+            それでも直らない場合: support@in-dx.jp までご連絡ください
+          </div>
+        </div>`;
+    }
+  } catch (_) {}
+});
+window.addEventListener("unhandledrejection", (ev) => {
+  // Promise 内 throw も同様にユーザに見せる
+  const main = document.getElementById("main");
+  if (!main) return;
+  const isSkeleton = main.querySelector(".skeleton") !== null;
+  if (main.children.length === 0 || isSkeleton) {
+    const msg = (ev.reason && (ev.reason.message || String(ev.reason))) || "(unknown)";
+    main.innerHTML = `
+      <div class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-xl p-6 text-center space-y-3 max-w-lg mx-auto mt-8">
+        <div class="text-4xl">⚠️</div>
+        <div class="text-base font-semibold text-red-900 dark:text-red-200">通信エラー</div>
+        <div class="text-xs text-red-700 dark:text-red-400 font-mono break-words">${msg}</div>
+        <div class="flex gap-2 justify-center pt-2">
+          <button onclick="location.reload()" class="bg-red-600 hover:bg-red-700 text-white rounded-md px-4 py-2 text-sm font-bold">🔄 再読み込み</button>
+          <a href="/login" class="bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 rounded-md px-4 py-2 text-sm font-bold">ログイン画面</a>
+        </div>
+      </div>`;
+  }
+});
+
 document.addEventListener("DOMContentLoaded", () => {
   // Tab buttons
   $$(".tab-btn").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));

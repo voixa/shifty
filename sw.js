@@ -1,7 +1,8 @@
-// Shifty Service Worker v6 — HTML はキャッシュせず常に network、静的アセットのみキャッシュ
+// Shifty Service Worker v7 — HTML はキャッシュせず常に network、静的アセットのみキャッシュ
 // + Round 34: Web Push 通知サポート
+// + Round 42 (SameSite fix): キャッシュをまるごと bump して古い app.js を一掃する
 // CACHE 名を bump すると activate 時に旧キャッシュを削除する
-const CACHE = "shifty-v6";
+const CACHE = "shifty-v7";
 const STATIC_ASSETS = [
   "/styles.css",
   "/manifest.json",
@@ -29,8 +30,14 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
 
   // API はキャッシュしない
+  // Round 42: ネットワーク失敗時は 503 で返す。以前は 200 + {"error":"offline"} で返していたが
+  // クライアント側 (api.js / loadState) が 401 / 認証エラーと区別できず、
+  // 「認証されてないのに認証されたフリ」をしてスケルトン UI で固まる原因になっていた。
   if (url.pathname.startsWith("/api/")) {
-    e.respondWith(fetch(e.request).catch(() => new Response('{"error":"offline"}', { headers: { "Content-Type": "application/json" } })));
+    e.respondWith(fetch(e.request).catch(() => new Response(
+      JSON.stringify({ error: "offline", message: "ネットワーク接続失敗" }),
+      { status: 503, headers: { "Content-Type": "application/json" } }
+    )));
     return;
   }
 
