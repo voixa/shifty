@@ -826,8 +826,43 @@
         </div>
       </div>
 
-      <div class="mt-8 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-900 max-w-3xl mx-auto">
-        💡 <strong>料金の選び方</strong>: 個人飲食店 (8 名以下) は <strong>Free</strong> で十分。15-30 名スタッフ規模の単店舗は <strong>Pro</strong>、2 店舗以上を運営される方は <strong>Business</strong>、6 店舗以上のチェーン店は <strong>Enterprise</strong> をご検討ください。すべての有料プランは 14 日間無料でお試しいただけます。
+      <!-- サイクル 8 #22: 「料金の選び方」を決定ツリー表に変更
+           スタッフ数 × 店舗数 の 2 軸マトリクスで自己判定の認知負荷を削減 -->
+      <div class="mt-8 max-w-3xl mx-auto">
+        <div class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl p-5">
+          <div class="font-bold text-emerald-900 dark:text-emerald-300 mb-3 flex items-center gap-2">
+            <span class="text-xl">💡</span><span>あなたのお店はどのプラン？</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[500px] text-sm border-collapse">
+              <thead>
+                <tr class="border-b border-emerald-300 dark:border-emerald-600">
+                  <th class="text-left p-2 font-semibold text-emerald-900 dark:text-emerald-200 w-32"></th>
+                  <th class="text-center p-2 font-semibold text-emerald-900 dark:text-emerald-200">1 店舗</th>
+                  <th class="text-center p-2 font-semibold text-emerald-900 dark:text-emerald-200">2〜5 店舗</th>
+                  <th class="text-center p-2 font-semibold text-emerald-900 dark:text-emerald-200">6 店舗〜</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="border-b border-emerald-200 dark:border-emerald-700">
+                  <td class="p-2 font-medium text-emerald-900 dark:text-emerald-200">8 名以下</td>
+                  <td class="text-center p-2"><a href="#" data-plan="free" class="plan-cta-free font-bold text-emerald-700 dark:text-emerald-400 underline">Free</a></td>
+                  <td class="text-center p-2"><a href="#" data-plan="business" class="plan-cta font-bold text-brand-700 dark:text-brand-400 underline">Business</a></td>
+                  <td class="text-center p-2"><a href="#contact" class="font-bold text-slate-700 dark:text-slate-300 underline">Enterprise</a></td>
+                </tr>
+                <tr>
+                  <td class="p-2 font-medium text-emerald-900 dark:text-emerald-200">9 名以上</td>
+                  <td class="text-center p-2"><a href="#" data-plan="pro" class="plan-cta font-bold text-brand-700 dark:text-brand-400 underline">Pro</a></td>
+                  <td class="text-center p-2"><a href="#" data-plan="business" class="plan-cta font-bold text-brand-700 dark:text-brand-400 underline">Business</a></td>
+                  <td class="text-center p-2"><a href="#contact" class="font-bold text-slate-700 dark:text-slate-300 underline">Enterprise</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-xs text-emerald-800 dark:text-emerald-400 mt-3">
+            ⚪ 有料プランはすべて <strong>14 日間無料トライアル</strong>。クレカ未登録なら自動終了。
+          </p>
+        </div>
       </div>
     </div>
   </section>
@@ -846,73 +881,73 @@
       </div>
       <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden overflow-x-auto">
         <table class="w-full min-w-[720px] text-sm">
-          <thead class="bg-slate-100">
+          <thead class="bg-slate-100 dark:bg-slate-900">
             <tr>
               <th class="text-left p-4 font-semibold">項目</th>
-              <th class="text-center p-4 font-bold text-brand-600">Shifty</th>
-              <th class="text-center p-4">他社 A<br><span class="text-[10px] font-normal text-slate-500">大手・無料縛り型</span></th>
-              <th class="text-center p-4">他社 B<br><span class="text-[10px] font-normal text-slate-500">スタッフ提出特化</span></th>
-              <th class="text-center p-4">エクセル<br><span class="text-[10px] font-normal text-slate-500">手作業</span></th>
+              <th class="text-center p-4 font-bold text-brand-600 dark:text-brand-400">Shifty</th>
+              <th class="text-center p-4">他社 A<br><span class="text-[10px] font-normal text-slate-500 dark:text-slate-400">大手・無料縛り型</span></th>
+              <th class="text-center p-4">他社 B<br><span class="text-[10px] font-normal text-slate-500 dark:text-slate-400">スタッフ提出特化</span></th>
+              <th class="text-center p-4">エクセル<br><span class="text-[10px] font-normal text-slate-500 dark:text-slate-400">手作業</span></th>
             </tr>
           </thead>
           <tbody>
-            <tr class="border-t">
+            <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">AI 自動生成</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
               <td class="p-4 text-center text-slate-400">△</td>
               <td class="p-4 text-center text-slate-400">×</td>
               <td class="p-4 text-center text-slate-400">×</td>
             </tr>
-            <tr class="border-t">
+            <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">希望のスマホ収集</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
               <td class="p-4 text-center">○</td>
               <td class="p-4 text-center">○</td>
               <td class="p-4 text-center text-slate-400">×</td>
             </tr>
-            <tr class="border-t">
+            <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">スコア説明</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
               <td class="p-4 text-center text-slate-400">×</td>
               <td class="p-4 text-center text-slate-400">×</td>
               <td class="p-4 text-center text-slate-400">×</td>
             </tr>
-            <tr class="border-t">
+            <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">代打推薦</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
               <td class="p-4 text-center text-slate-400">×</td>
               <td class="p-4 text-center text-slate-400">×</td>
               <td class="p-4 text-center text-slate-400">×</td>
             </tr>
-            <tr class="border-t">
+            <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">労務ルール厳守</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
               <td class="p-4 text-center">○</td>
               <td class="p-4 text-center text-slate-400">△</td>
               <td class="p-4 text-center text-slate-400">×</td>
             </tr>
-            <tr class="border-t">
+            <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">テンプレート機能</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
               <td class="p-4 text-center">○</td>
               <td class="p-4 text-center text-slate-400">△</td>
               <td class="p-4 text-center">○</td>
             </tr>
-            <tr class="border-t">
+            <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">月額（小規模 8名以下）</td>
               <td class="p-4 text-center text-emerald-600 font-bold">¥0</td>
               <td class="p-4 text-center">¥0(機能制限)〜</td>
               <td class="p-4 text-center">¥0(個人)</td>
               <td class="p-4 text-center">¥0</td>
             </tr>
-            <tr class="border-t">
+            <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">月額（単店舗・無制限スタッフ）</td>
               <td class="p-4 text-center text-brand-600 font-bold">¥1,980</td>
               <td class="p-4 text-center">¥1,000〜/店</td>
               <td class="p-4 text-center">¥980〜/店</td>
               <td class="p-4 text-center">¥4,500〜</td>
             </tr>
-            <tr class="border-t">
+            <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">月額（多店舗・5店舗まで）</td>
               <td class="p-4 text-center text-brand-600 font-bold">¥4,980</td>
               <td class="p-4 text-center">¥5,000〜/店 × 店舗数</td>
@@ -1074,6 +1109,41 @@
       </form>
     </div>
   </section>
+
+  <!-- サイクル 8 #24: モバイル底面 sticky CTA bar
+       (ヒーロー通過後にスクロールしても CTA が常に視界に) -->
+  <div id="stickyCta" class="hidden fixed bottom-0 left-0 right-0 z-40 md:hidden bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-2xl p-2 transition-transform">
+    <div class="flex items-center gap-2 max-w-md mx-auto">
+      <div class="flex-1">
+        <div class="text-[10px] text-slate-500 dark:text-slate-400">8 名まで永久無料</div>
+        <div class="text-xs font-bold text-slate-900 dark:text-slate-100">30 秒で開始 → 即時メール</div>
+      </div>
+      <a href="#contact" data-plan="free" onclick="if(window.gtag)gtag('event','sticky_cta_click');"
+         class="plan-cta-free bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2.5 text-sm font-bold whitespace-nowrap">
+        🎉 無料で始める →
+      </a>
+    </div>
+  </div>
+  <script>
+    // Hero を過ぎたら sticky CTA を表示、Footer に近づいたら隠す
+    (function() {
+      const bar = document.getElementById('stickyCta');
+      const contact = document.getElementById('contact');
+      function update() {
+        const scrolled = window.scrollY;
+        const heroPassed = scrolled > 500;  // Hero ヒーロー過ぎ
+        const contactRect = contact && contact.getBoundingClientRect();
+        const contactVisible = contactRect && contactRect.top < window.innerHeight + 100;
+        if (heroPassed && !contactVisible) {
+          bar.classList.remove('hidden');
+        } else {
+          bar.classList.add('hidden');
+        }
+      }
+      window.addEventListener('scroll', update, { passive: true });
+      update();
+    })();
+  </script>
 
   <!-- Footer -->
   <footer class="bg-slate-900 text-slate-400 py-12">
