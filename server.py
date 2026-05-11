@@ -1586,6 +1586,13 @@ def api_stripe_webhook():
                     "disabledAt": __import__("datetime").datetime.utcnow().isoformat() + "Z",
                     "plan": "cancelled",
                 })
+            elif target:
+                # Round 42 fix: SQLite ローカル / フォールバック時もちゃんと disable
+                with sqlite3.connect(DB_PATH) as c:
+                    c.execute(
+                        "UPDATE tenants SET status='disabled', plan='cancelled' WHERE slug=?",
+                        (target[0],),
+                    )
         except Exception as e:
             print(f"[tenant-disable] failed: {e}")
         send_email(
@@ -1663,15 +1670,27 @@ def api_notify_shifts():
             total_pay = 0.0
             lines = []
             for a in my:
-                pos = positions.get(a["position"], {}).get("label", a["position"])
-                start_h, start_m = map(int, a["startTime"].split(":"))
-                end_h, end_m = map(int, a["endTime"].split(":"))
-                h = ((end_h * 60 + end_m) - (start_h * 60 + start_m)) / 60
-                total_h += h
-                total_pay += a.get("cost", 0) or (s.get("hourlyWage", 0) * h)
-                lines.append(
-                    f"  {a['date']} ({jp_dow(a['date'])}) {a['startTime']}-{a['endTime']} {pos} ({h:.1f}h)"
-                )
+                # Round 42 fix: assignment が古い形式 / 部分書き込みでキー欠落していても
+                # try/except で個別スキップして、残りのスタッフ通知は続行する
+                try:
+                    a_pos = a.get("position", "")
+                    a_st = a.get("startTime", "")
+                    a_et = a.get("endTime", "")
+                    a_dt = a.get("date", "")
+                    if not (a_st and a_et and a_dt):
+                        continue
+                    pos = positions.get(a_pos, {}).get("label", a_pos)
+                    start_h, start_m = map(int, a_st.split(":"))
+                    end_h, end_m = map(int, a_et.split(":"))
+                    h = ((end_h * 60 + end_m) - (start_h * 60 + start_m)) / 60
+                    total_h += h
+                    total_pay += a.get("cost", 0) or (s.get("hourlyWage", 0) or 0) * h
+                    lines.append(
+                        f"  {a_dt} ({jp_dow(a_dt)}) {a_st}-{a_et} {pos} ({h:.1f}h)"
+                    )
+                except (KeyError, ValueError, TypeError) as e:
+                    print(f"[notify_shifts] skipped malformed assignment: {a} ({e})")
+                    continue
             body_lines = [
                 f"{s['name']} 様",
                 "",
@@ -2368,26 +2387,35 @@ def api_t_portal_vacation_request(slug, token):
         "createdAt": _dt_v.datetime.utcnow().isoformat() + "Z",
     }
 
+    # Round 42 fix: state が None (新規 tenant で未初期化) のときも no-op せず
+    # ちゃんと永続化する。旧コードでは {"data": None} を Firestore に書いていた上、
+    # 200 OK + email 送信していたため「申請したのにオーナー画面で見えない」
+    # silent data loss を生じていた。
+    state_after = {"persisted": False}
     def _mutate(current):
         if current is None:
-            return current
+            current = {"meta": {}, "staff": [], "weeks": {}}
         meta = current.setdefault("meta", {})
         reqs = meta.setdefault("vacationRequests", [])
         # 重複チェック (同期間の重複は許可しない)
         for r in reqs:
             if r.get("staffId") == staff_id and r.get("status") == "pending" \
                and r.get("startDate") == start_date and r.get("endDate") == end_date:
-                # Already exists
+                state_after["persisted"] = True  # 既存と同じなので成功扱い
                 return current
         # 上限 200 件 (古いものから削除)
         if len(reqs) >= 200:
             reqs[:] = reqs[-199:]
         reqs.append(new_req)
+        state_after["persisted"] = True
         return current
 
     s.transactional_update(_mutate)
 
-    # オーナーへメール通知
+    if not state_after.get("persisted"):
+        return jsonify({"error": "persist_failed"}), 500
+
+    # オーナーへメール通知 (永続化が成功した場合のみ)
     tm = get_tenant_manager()
     tenant = tm.get(slug)
     notify_to = tenant.get("email") if tenant else NOTIFY_TO
@@ -2468,21 +2496,28 @@ def api_t_portal_swap_create(slug, token):
         "createdAt": _dt_s.datetime.utcnow().isoformat() + "Z",
     }
 
+    # Round 42 fix: state が None でも no-op せず永続化 (vacation-request と同様)
+    state_after = {"persisted": False}
     def _mutate(current):
         if current is None:
-            return current
+            current = {"meta": {}, "staff": [], "weeks": {}}
         meta = current.setdefault("meta", {})
         swaps = meta.setdefault("swapRequests", [])
         # 重複チェック (open 状態の同 assignment)
         for sw in swaps:
             if sw.get("assignmentId") == assignment_id and sw.get("status") == "open":
+                state_after["persisted"] = True
                 return current
         if len(swaps) >= 200:
             swaps[:] = swaps[-199:]
         swaps.append(new_swap)
+        state_after["persisted"] = True
         return current
 
     s.transactional_update(_mutate)
+
+    if not state_after.get("persisted"):
+        return jsonify({"error": "persist_failed"}), 500
 
     # オーナー & 全スタッフ (メールあり) に通知
     tm = get_tenant_manager()
@@ -3255,9 +3290,17 @@ def api_portal_save_prefs(token):
     if not staff_id:
         return jsonify({"error": "invalid_token"}), 404
     try:
-        new_prefs = request.get_json(force=True, silent=True)
+        payload = request.get_json(force=True, silent=True)
     except Exception:
         return jsonify({"error": "invalid_json"}), 400
+    # Round 42 fix: client (api.js) は {preferences, comments, weekStart} dict を送る。
+    # 旧 list 形式は legacy 互換のため引き続き受け付ける。
+    if isinstance(payload, dict):
+        new_prefs = payload.get("preferences", [])
+    elif isinstance(payload, list):
+        new_prefs = payload
+    else:
+        return jsonify({"error": "expected_list_or_object"}), 400
     if not isinstance(new_prefs, list):
         return jsonify({"error": "expected_list"}), 400
     # サイズ・形式バリデーション (各 pref が dict / 必要項目 / 範囲チェック)

@@ -142,7 +142,7 @@
 .dark .text-slate-600 { color: #cbd5e1 !important; }
 .dark .text-slate-500 { color: #94a3b8 !important; }
 .dark .text-slate-400 { color: #64748b !important; }
-.dark .text-slate-300 { color: #64748b !important; }
+/* .text-slate-300 は line 217 でより具体的な値 (#475569) に再定義済 */
 
 /* カラフルな light bg を半透明 dark に */
 .dark .bg-amber-50 { background-color: rgba(146, 64, 14, 0.25) !important; }
@@ -210,10 +210,12 @@
 /* hover 状態 */
 .dark .hover\:bg-slate-50:hover { background-color: #334155 !important; }
 .dark .hover\:bg-slate-100:hover { background-color: #475569 !important; }
+.dark .hover\:bg-slate-200:hover { background-color: #475569 !important; } /* Round 42 fix: help.html sidebar 等 */
+.dark .hover\:bg-slate-300:hover { background-color: #64748b !important; }
 .dark .hover\:bg-amber-100:hover { background-color: rgba(146, 64, 14, 0.5) !important; }
 .dark .hover\:bg-emerald-100:hover { background-color: rgba(6, 95, 70, 0.5) !important; }
 
-/* スキル星色 */
+/* スキル星色 (line 145 と統合: 一番具体的な値を採用) */
 .dark .text-slate-300 { color: #475569 !important; }
 
 /* Round 35 TOP 1: スケルトン UI (ローディング状態) */

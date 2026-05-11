@@ -365,7 +365,7 @@
     // 過去の希望提出履歴 (Round 12)
     const prefHist = data.prefHistory || [];
     const prefHistCard = prefHist.length > 0 ? `
-      <div class="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+      <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 mb-3">
         <details>
           <summary class="text-sm font-semibold cursor-pointer select-none">📊 過去の希望提出履歴 (${prefHist.length} 週分)</summary>
           <div class="mt-2 space-y-1 text-xs">
@@ -384,7 +384,7 @@
     const tpl = loadPrefTemplate();
     const autoApplyOn = loadAutoApply();
     const tplCard = `
-      <div class="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+      <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 mb-3">
         <details ${tpl ? "open" : ""}>
           <summary class="text-sm font-semibold cursor-pointer select-none">⚡ 希望テンプレート (毎週同じパターンの方向け)</summary>
           <div class="mt-2 flex flex-col sm:flex-row gap-2">
@@ -483,7 +483,7 @@
       ${vacCard}
       ${prefHistCard}
       ${monthCard}
-      <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+      <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>
         <h1 class="text-xl font-bold mt-1">${escapeHtml(data.staff.name)}さん</h1>
         <div class="text-sm text-slate-600 mt-1">${data.weekStart} 〜 のシフト希望</div>
@@ -498,7 +498,7 @@
       </div>
       <div id="grid" class="space-y-3"></div>
       ${(data.history && data.history.length) ? `
-      <div class="bg-white rounded-xl border border-slate-200 p-3 mt-4">
+      <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3 mt-4">
         <details>
           <summary class="text-sm font-semibold cursor-pointer select-none">📜 過去シフト履歴（直近 ${data.history.length} 件）</summary>
           <div class="mt-2 space-y-1 text-xs">
@@ -532,7 +532,7 @@
       const dayLabel = DAY_LABELS[dow];
       const dowColor = dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "text-slate-700";
       const dayCard = document.createElement("div");
-      dayCard.className = "bg-white rounded-xl border border-slate-200 overflow-hidden";
+      dayCard.className = "bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden";
       // 通し勤務ボタン (lunch + dinner 両方を一括 "want" に)
       const allDayBtn = sessions.length > 1
         ? `<button class="all-day-btn text-[10px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded px-2 py-1 font-semibold ml-auto" data-date="${date}" aria-label="この日を通し勤務希望">⏩ 1日通し希望</button>`
@@ -1033,7 +1033,8 @@
     for (const a of assignments) {
       const h = calcHours(a.startTime, a.endTime);
       totalH += h;
-      totalPay += a.cost || (data.staff.hourlyWage * h);
+      // Round 42 fix: hourlyWage が null/undefined だと NaN になり「¥NaN」が表示される
+      totalPay += a.cost || ((data.staff.hourlyWage || 0) * h);
     }
 
     const publishedAt = data.publishedAt ? new Date(data.publishedAt).toLocaleString("ja-JP") : "";
@@ -1172,7 +1173,7 @@
       ${swapCard2}
       ${vacCard2}
       ${monthCard}
-      <div class="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+      <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 mb-4">
         <div class="text-xs text-slate-500">${escapeHtml(data.restaurantName)}</div>
         <h1 class="text-xl font-bold mt-1">${escapeHtml(data.staff.name)}さん</h1>
         <div class="text-sm text-slate-600 mt-1">${data.weekStart} 〜 のシフト</div>
@@ -1190,7 +1191,7 @@
       </div>
       <div id="grid" class="space-y-3"></div>
       ${(data.history && data.history.length) ? `
-      <div class="bg-white rounded-xl border border-slate-200 p-3 mt-4">
+      <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-3 mt-4">
         <details>
           <summary class="text-sm font-semibold cursor-pointer select-none">📜 過去シフト履歴（直近 ${data.history.length} 件）</summary>
           <div class="mt-2 space-y-1 text-xs">
@@ -1236,7 +1237,7 @@
       const list = byDate[date] || [];
       const dowColor = dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "text-slate-700";
       const card = document.createElement("div");
-      card.className = "bg-white rounded-xl border border-slate-200 overflow-hidden";
+      card.className = "bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden";
       card.innerHTML = `
         <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 ${dowColor} font-semibold text-sm flex items-center justify-between">
           <span>${fmtDate(date)} (${DAY_LABELS[dow]})</span>
@@ -1304,7 +1305,7 @@
                 <div class="text-base font-semibold">${escapeHtml(pos.label)}</div>
                 <div class="text-sm text-slate-700">${escapeHtml(a.startTime || "")}〜${escapeHtml(a.endTime || "")} <span class="text-xs text-slate-500">(${h.toFixed(1)}h)</span></div>
               </div>
-              <div class="text-right text-xs text-slate-500">${fmtYen(a.cost || (data.staff.hourlyWage * h))}</div>
+              <div class="text-right text-xs text-slate-500">${fmtYen(a.cost || ((data.staff.hourlyWage || 0) * h))}</div>
             </div>
             ${noteHtml}
             ${cwHtml}
@@ -1609,7 +1610,7 @@
           </div>`).join("")}
       </div>` : "";
     return `
-      <div class="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+      <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 mb-3">
         <details ${others.length > 0 ? "open" : ""}>
           <summary class="text-sm font-semibold cursor-pointer select-none flex items-center gap-2">
             🔄 シフト交換掲示板
@@ -1675,7 +1676,7 @@
         ${STATUS_LABEL[v.status] || ""}
       </div>`).join("");
     return `
-      <div class="bg-white border border-slate-200 rounded-xl p-3 mb-3">
+      <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 mb-3">
         <details>
           <summary class="text-sm font-semibold cursor-pointer select-none flex items-center gap-2">
             🏖 長期休暇申請
