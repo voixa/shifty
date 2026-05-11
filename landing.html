@@ -371,19 +371,20 @@
             </a>
           </div>
 
-          <!-- Trust badges -->
-          <div class="flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
-            <span class="font-semibold text-slate-700">🛡️ 安心の運用基盤:</span>
-            <span class="bg-white border border-slate-200 rounded px-2 py-1 flex items-center gap-1">
-              <svg viewBox="0 0 32 32" class="w-4 h-4" role="img" aria-label="Google Cloud" focusable="false"><path fill="#4285F4" d="M9.4 5.5a3.6 3.6 0 0 1 5 1.4l1.9-1.1a5.7 5.7 0 0 0-8 -2.2"/><path fill="#34A853" d="M14.4 6.9a3.6 3.6 0 0 1 1.4 5l1.9 1.1a5.7 5.7 0 0 0-2.2-8"/><path fill="#FBBC04" d="M15.7 12a3.6 3.6 0 0 1-5-1.5l-1.9 1.1a5.7 5.7 0 0 0 8 2.3"/><path fill="#EA4335" d="M10.7 10.5a3.6 3.6 0 0 1-1.5-5L7.3 4.4a5.7 5.7 0 0 0 2.3 8"/></svg>
-              <strong>Google Cloud</strong> で暗号化保存
+          <!-- Trust badges (サイクル 6 #18: SVG 廃止、テキスト + テキスト型ロゴで明瞭化) -->
+          <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+            <span class="font-semibold text-slate-700 dark:text-slate-200 w-full mb-1">🛡️ 安心の運用基盤</span>
+            <span class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 flex items-center gap-1.5">
+              <span class="text-base">☁️</span>
+              <span><strong class="text-slate-900 dark:text-slate-100">Google Cloud</strong> 上で運用 / Firestore 暗号化保存</span>
             </span>
-            <span class="bg-white border border-slate-200 rounded px-2 py-1 flex items-center gap-1">
-              <span class="font-bold text-[#635BFF]">Stripe</span>
-              <span>決済（PCI DSS 準拠）</span>
+            <span class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 flex items-center gap-1.5">
+              <span class="font-bold text-[#635BFF] dark:text-[#7c79ff]">Stripe</span>
+              <span>決済 / <strong>PCI DSS</strong> 準拠</span>
             </span>
-            <span class="bg-white border border-slate-200 rounded px-2 py-1 flex items-center gap-1">
-              🔒 <span>HTTPS / CSP / 監査ログ</span>
+            <span class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 flex items-center gap-1.5">
+              <span class="text-base">🔒</span>
+              <span>HTTPS / CSP / 監査ログ / 日次バックアップ</span>
             </span>
           </div>
           <div class="mt-3 text-[10px] text-slate-500">
@@ -663,29 +664,65 @@
     </div>
   </section>
 
-  <!-- How it works -->
-  <section id="how" class="py-20 bg-slate-50">
-    <div class="max-w-5xl mx-auto px-4">
-      <h2 class="text-2xl md:text-4xl font-bold text-center mb-4">使い方は 3 ステップ</h2>
-      <p class="text-center text-slate-600 mb-12">最短 30 分でセットアップ完了。翌週から運用に入れます。</p>
-      <div class="grid md:grid-cols-3 gap-6">
-        <div class="bg-white rounded-xl p-6 border border-slate-200 relative">
-          <div class="absolute -top-3 -left-3 w-10 h-10 gradient-bg rounded-full flex items-center justify-center text-white font-bold">1</div>
-          <h3 class="font-bold mb-3 mt-2">スタッフ登録</h3>
-          <p class="text-sm text-slate-600 mb-4">CSV 取込 or 手入力。各スタッフの本職・時給・週時間・固定休を設定。</p>
-          <div class="text-xs text-brand-600 font-semibold">所要時間: 10 分</div>
+  <!-- How it works (サイクル 6 #16: 時間軸タイムライン形式に再構成) -->
+  <section id="how" class="py-20 bg-slate-50 dark:bg-slate-900/50">
+    <div class="max-w-4xl mx-auto px-4">
+      <h2 class="text-2xl md:text-4xl font-bold text-center mb-4">運用の流れ</h2>
+      <p class="text-center text-slate-600 dark:text-slate-300 mb-12">セットアップ <strong>初日 16 分</strong> → 翌週から<strong>毎週 5 分</strong>のループ。</p>
+
+      <!-- タイムライン: 初日 + 毎週 -->
+      <div class="relative pl-8 sm:pl-12 space-y-6">
+        <!-- 縦のタイムラインライン -->
+        <div class="absolute left-3 sm:left-5 top-2 bottom-2 w-0.5 bg-gradient-to-b from-brand-600 to-emerald-500" aria-hidden="true"></div>
+
+        <!-- 初日 -->
+        <div class="relative">
+          <div class="absolute -left-8 sm:-left-12 top-0 w-6 h-6 sm:w-10 sm:h-10 gradient-bg rounded-full flex items-center justify-center text-white font-bold text-xs sm:text-sm shadow-lg">D1</div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
+            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <h3 class="font-bold text-lg">📅 初日：セットアップ</h3>
+              <span class="text-xs bg-brand-50 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300 px-2 py-0.5 rounded-full font-semibold">合計 16 分</span>
+            </div>
+            <ul class="text-sm text-slate-700 dark:text-slate-300 space-y-1.5">
+              <li class="flex justify-between gap-2"><span>① スタッフ登録（CSV 取込 or 手入力）</span><span class="text-xs text-slate-500 whitespace-nowrap">10 分</span></li>
+              <li class="flex justify-between gap-2"><span>② 業態テンプレ適用（必要人数・労務ルール自動設定）</span><span class="text-xs text-slate-500 whitespace-nowrap">5 分</span></li>
+              <li class="flex justify-between gap-2"><span>③ 「全員のリンク」を LINE グループに配布</span><span class="text-xs text-slate-500 whitespace-nowrap">1 分</span></li>
+            </ul>
+          </div>
         </div>
-        <div class="bg-white rounded-xl p-6 border border-slate-200 relative">
-          <div class="absolute -top-3 -left-3 w-10 h-10 gradient-bg rounded-full flex items-center justify-center text-white font-bold">2</div>
-          <h3 class="font-bold mb-3 mt-2">希望リンクを LINE で配布</h3>
-          <p class="text-sm text-slate-600 mb-4">「全員のリンクを生成」ボタン → クリップボード → LINE グループに貼り付け。スタッフがスマホで入力。</p>
-          <div class="text-xs text-brand-600 font-semibold">所要時間: 1 分</div>
+
+        <!-- 週次運用 -->
+        <div class="relative">
+          <div class="absolute -left-8 sm:-left-12 top-0 w-6 h-6 sm:w-10 sm:h-10 gradient-bg rounded-full flex items-center justify-center text-white font-bold text-[10px] sm:text-xs shadow-lg">W1+</div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
+            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <h3 class="font-bold text-lg">🔁 毎週：5 分でループ完結</h3>
+              <span class="text-xs bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full font-semibold">合計 5 分</span>
+            </div>
+            <ul class="text-sm text-slate-700 dark:text-slate-300 space-y-1.5">
+              <li class="flex justify-between gap-2"><span>① 希望が自動で集まる（スタッフがスマホでタップ）</span><span class="text-xs text-slate-500 whitespace-nowrap">店長 0 分</span></li>
+              <li class="flex justify-between gap-2"><span>② 「🤖 AI 自動生成」→ 結果確認 → 微調整</span><span class="text-xs text-slate-500 whitespace-nowrap">3 分</span></li>
+              <li class="flex justify-between gap-2"><span>③ 「✓ 確定」→ LINE 通知文ワンタップコピー</span><span class="text-xs text-slate-500 whitespace-nowrap">2 分</span></li>
+            </ul>
+            <div class="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-400">
+              💡 急な欠勤時は <strong>1 分</strong> で代打推薦・入替対応も
+            </div>
+          </div>
         </div>
-        <div class="bg-white rounded-xl p-6 border border-slate-200 relative">
-          <div class="absolute -top-3 -left-3 w-10 h-10 gradient-bg rounded-full flex items-center justify-center text-white font-bold">3</div>
-          <h3 class="font-bold mb-3 mt-2">AI 生成 → 確定 → 通知</h3>
-          <p class="text-sm text-slate-600 mb-4">「AI 自動生成」→ 結果を確認 → 必要なら微調整 → 「確定」→ LINE 通知文がクリップボードに自動コピー。LINE グループに貼り付けて送信。</p>
-          <div class="text-xs text-brand-600 font-semibold">所要時間: 5 分</div>
+
+        <!-- 月次運用 -->
+        <div class="relative">
+          <div class="absolute -left-8 sm:-left-12 top-0 w-6 h-6 sm:w-10 sm:h-10 bg-emerald-600 rounded-full flex items-center justify-center text-white font-bold text-[10px] sm:text-xs shadow-lg">M1+</div>
+          <div class="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700">
+            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <h3 class="font-bold text-lg">📊 毎月：レポートと給与計算</h3>
+              <span class="text-xs bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded-full font-semibold">5 分</span>
+            </div>
+            <ul class="text-sm text-slate-700 dark:text-slate-300 space-y-1.5">
+              <li class="flex justify-between gap-2"><span>① 月次レポート PDF をワンタップ生成</span><span class="text-xs text-slate-500 whitespace-nowrap">1 分</span></li>
+              <li class="flex justify-between gap-2"><span>② 給与計算 CSV エクスポート（弥生 / freee 連携）</span><span class="text-xs text-slate-500 whitespace-nowrap">4 分</span></li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
@@ -996,9 +1033,16 @@
           <label for="iform-msg" class="block text-sm font-semibold mb-1">ご相談・ご質問（任意）</label>
           <textarea id="iform-msg" name="message" class="w-full border border-slate-300 rounded-lg px-4 py-2.5 h-24" placeholder="現在のシフト作成の悩み等、ご自由にお書きください"></textarea>
         </div>
-        <div class="text-xs text-slate-500">
-          送信により <a href="/tos" class="text-brand-600 underline">利用規約</a> と <a href="/privacy" class="text-brand-600 underline">プライバシーポリシー</a> に同意したものとみなされます。
-        </div>
+        <!-- サイクル 6 #17: 利用規約同意を明示的チェックボックスに変更 (法的保護 + 明示同意 UX) -->
+        <label for="iform-tos" class="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+          <input id="iform-tos" name="tosAccepted" type="checkbox" required class="mt-0.5 w-4 h-4 accent-brand-600">
+          <span>
+            <a href="/tos" target="_blank" class="text-brand-600 underline">利用規約</a> および
+            <a href="/privacy" target="_blank" class="text-brand-600 underline">プライバシーポリシー</a>
+            に同意します
+            <span class="text-red-500" aria-hidden="true">*</span>
+          </span>
+        </label>
         <button type="submit" id="submitBtn" class="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 font-semibold">無料トライアルを申し込む →</button>
         <div id="formMessage" class="hidden text-sm text-center font-semibold"></div>
       </form>
