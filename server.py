@@ -56,8 +56,12 @@ if not _secret_key:
     print("[warning] using insecure development SECRET_KEY (set FLASK_ENV=production for hard fail)")
 app.config["SECRET_KEY"] = _secret_key
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-# Strict にして CSRF 攻撃を構造的に防ぐ (admin 操作はアプリ内クリックのみ)
-app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+# Lax にする (Strict だと Gmail 等の外部サイトから magic-link をクリックして
+# /auth/verify でセットした session cookie が次の /t/{slug}/app リダイレクトで送られず
+# 「申込メールは届くがログインできない」状態になる)。
+# CSRF は state-changing API が POST + Content-Type: application/json + 同一オリジン
+# fetch 経由のみという仕様で実質ブロック済 (フォーム送信は受け付けない)。
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # セッション寿命を 7 日に短縮（デフォルト 31 日は長すぎる）
 from datetime import timedelta as _td
 app.config["PERMANENT_SESSION_LIFETIME"] = _td(days=7)
