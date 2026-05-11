@@ -197,10 +197,12 @@
           🎬 実際の使用フロー（30 秒で見る）
         </div>
       </div>
-      <div class="grid md:grid-cols-3 gap-4 md:gap-6" role="img" aria-label="使用フローのモックアップ: スタッフがスマホで希望提出 → 店長が AI 生成 → LINE 通知文ワンタップ">
+      <div class="grid md:grid-cols-3 gap-4 md:gap-6">
+        <!-- サイクル 2 #5: outer の role="img" を外し、各カードに個別 role="img" + 詳細 aria-label
+             を付与。スクリーンリーダーが内部 100+ 要素を 1 個ずつ読み上げてしまうのを防ぐ。 -->
 
         <!-- Step 1: スタッフがスマホで希望提出 -->
-        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden" aria-hidden="true">
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden" role="img" aria-label="ステップ 1: スタッフが LINE 経由の URL を開き、スマホで「希望」「必須」「不可」「未定」のいずれかをタップするだけで希望提出が完了。所要 30 秒。">
           <div class="bg-slate-50 px-3 py-2 border-b flex items-center justify-between">
             <span class="text-xs font-semibold text-slate-700">① スタッフがスマホで希望提出</span>
             <span class="text-[10px] text-slate-500">30 秒</span>
@@ -237,7 +239,7 @@
         </div>
 
         <!-- Step 2: 店長が AI 自動生成 -->
-        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden" aria-hidden="true">
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden" role="img" aria-label="ステップ 2: 店長が「AI 生成」ボタンをタップ。数秒で 1 週間分のシフトが組まれ、充足率 90%・人件費 34 万円・希望反映率 82% が即時表示される。">
           <div class="bg-slate-50 px-3 py-2 border-b flex items-center justify-between">
             <span class="text-xs font-semibold text-slate-700">② 店長が「🤖 AI 生成」</span>
             <span class="text-[10px] text-slate-500">数秒</span>
@@ -286,7 +288,7 @@
         </div>
 
         <!-- Step 3: スタッフ全員に LINE 通知 -->
-        <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden" aria-hidden="true">
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden" role="img" aria-label="ステップ 3: 確定ボタンを押すと、各スタッフ向けの LINE 通知文が自動生成されクリップボードにコピーされる。LINE グループに貼り付けて送信するだけ。所要 3 秒。">
           <div class="bg-slate-50 px-3 py-2 border-b flex items-center justify-between">
             <span class="text-xs font-semibold text-slate-700">③ LINE 通知文ワンタップ</span>
             <span class="text-[10px] text-slate-500">3 秒</span>
@@ -770,8 +772,14 @@
       <h2 class="text-2xl md:text-4xl font-bold text-center mb-4">他のサービスと比較</h2>
       <p class="text-center text-slate-600 mb-12">既存ツールとの違いを正直に整理しました。</p>
 
-      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden overflow-x-auto">
-        <table class="w-full text-sm">
+      <!-- サイクル 2 #6: モバイルで table が縮みすぎ or はみ出る問題を修正
+           min-w-[720px] で列幅を確保 → overflow-x-auto で横スクロール可能に。
+           モバイル時に左右スワイプ可能なことを視覚的に伝えるヒントも追加。 -->
+      <div class="md:hidden mb-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+        <span>👈</span><span>横にスクロールできます</span><span>👉</span>
+      </div>
+      <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden overflow-x-auto">
+        <table class="w-full min-w-[720px] text-sm">
           <thead class="bg-slate-100">
             <tr>
               <th class="text-left p-4 font-semibold">項目</th>
@@ -1020,13 +1028,28 @@
       btn.disabled = true;
       btn.textContent = '送信中…';
       msg.classList.add('hidden');
+      // サイクル 2 #4: status を切り分けて意味のあるエラーメッセージ + mailto + 再試行
+      let resp;
       try {
-        const r = await fetch('/api/inquiry', {
+        resp = await fetch('/api/inquiry', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data),
         });
-        if (!r.ok) throw new Error('送信失敗');
+      } catch (netErr) {
+        // ネットワーク到達失敗 (CORS / offline / DNS 失敗)
+        msg.innerHTML = '📡 <strong>ネットワーク接続に問題があります</strong><br>'
+          + '<span class="text-xs font-normal text-slate-700 dark:text-slate-300">'
+          + 'Wi-Fi / モバイル回線をご確認のうえ、もう一度お試しください。<br>'
+          + 'それでも繋がらない場合は <a href="mailto:support@in-dx.jp?subject=Shifty%20%E7%84%A1%E6%96%99%E3%83%88%E3%83%A9%E3%82%A4%E3%82%A2%E3%83%AB%E5%B8%8C%E6%9C%9B" class="underline text-brand-600">support@in-dx.jp</a> まで店舗名・お名前を添えてご連絡ください。'
+          + '</span>';
+        msg.className = 'text-sm text-center font-semibold text-amber-700 dark:text-amber-400';
+        msg.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = '🔄 もう一度送信する';
+        return;
+      }
+      if (resp.ok) {
         msg.innerHTML = '✅ 送信ありがとうございます！<br><br>'
           + '<span class="text-slate-700 font-normal">'
           + '<strong class="text-emerald-700">数十秒以内</strong>に <code class="bg-slate-100 px-1 rounded text-xs">support@in-dx.jp</code> から'
@@ -1038,13 +1061,36 @@
         msg.classList.remove('hidden');
         form.reset();
         btn.textContent = '✓ 送信完了';
-      } catch (err) {
-        msg.textContent = '❌ 送信に失敗しました。直接 support@in-dx.jp までご連絡ください。';
-        msg.className = 'text-sm text-center font-semibold text-red-600';
-        msg.classList.remove('hidden');
-        btn.disabled = false;
-        btn.textContent = '無料トライアルを申し込む →';
+        return;
       }
+      // サーバエラー: status 別に切り分け
+      let serverMsg = '';
+      try { const body = await resp.json(); serverMsg = body.error || body.message || ''; } catch (_) {}
+      if (resp.status === 429) {
+        msg.innerHTML = '⏱ <strong>送信回数が多すぎます</strong><br>'
+          + '<span class="text-xs font-normal text-slate-700 dark:text-slate-300">'
+          + '少し時間をおいてからもう一度お試しください（1 時間以内に複数回送信された場合に発生します）。'
+          + '</span>';
+        msg.className = 'text-sm text-center font-semibold text-amber-700 dark:text-amber-400';
+      } else if (resp.status >= 500) {
+        msg.innerHTML = '⚠️ <strong>サーバ側で問題が発生しました</strong><br>'
+          + '<span class="text-xs font-normal text-slate-700 dark:text-slate-300">'
+          + 'お手数ですが <a href="mailto:support@in-dx.jp?subject=Shifty%20%E7%84%A1%E6%96%99%E3%83%88%E3%83%A9%E3%82%A4%E3%82%A2%E3%83%AB%E5%B8%8C%E6%9C%9B%EF%BC%88%E3%83%95%E3%82%A9%E3%83%BC%E3%83%A0%E3%82%A8%E3%83%A9%E3%83%BC%EF%BC%89" class="underline text-brand-600">support@in-dx.jp</a> までメールでご連絡ください。<br>'
+          + 'お名前・店舗名・お問い合わせ内容を直接お書きいただければ手動で対応いたします。'
+          + '</span>';
+        msg.className = 'text-sm text-center font-semibold text-red-600 dark:text-red-400';
+      } else {
+        // 400 / 403 など — 入力ミスの可能性
+        msg.innerHTML = '❌ <strong>送信内容に問題があります</strong><br>'
+          + '<span class="text-xs font-normal text-slate-700 dark:text-slate-300">'
+          + 'メールアドレスの形式が正しいかご確認のうえ、もう一度送信してください。'
+          + (serverMsg ? `<br><span class="text-[10px] text-slate-500">詳細: ${serverMsg}</span>` : '')
+          + '</span>';
+        msg.className = 'text-sm text-center font-semibold text-red-600 dark:text-red-400';
+      }
+      msg.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = '🔄 もう一度送信する';
     });
 
     // ===== サインアップモーダル =====
