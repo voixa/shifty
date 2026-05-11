@@ -429,37 +429,40 @@
   </section>
 
   <!-- Developer Story + Trust Signals -->
-  <section class="py-16 bg-gradient-to-br from-emerald-50 to-amber-50 border-y border-emerald-100">
+  <!-- サイクル 14: dark mode 全面修正 — 旧版は Tailwind gradient (CSS 変数生成) が
+       styles.css の .dark override をすり抜けて「明背景 + 明文字 = 不可視」状態だった。
+       light/dark 両方の gradient を明示し、全 text 色に dark variant を付与。 -->
+  <section class="py-16 bg-gradient-to-br from-emerald-50 to-amber-50 dark:from-emerald-900/30 dark:to-amber-900/20 border-y border-emerald-100 dark:border-emerald-800">
     <div class="max-w-4xl mx-auto px-4">
       <div class="grid md:grid-cols-[120px_1fr] gap-6 md:gap-8 items-start">
-        <!-- Avatar (SVG fallback for now) -->
+        <!-- Avatar -->
         <div class="flex justify-center md:justify-start">
           <div class="w-24 h-24 md:w-28 md:h-28 rounded-full bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white text-3xl font-bold shadow-lg shrink-0">
             柳
           </div>
         </div>
         <div>
-          <div class="text-xs font-semibold text-emerald-700 mb-2">👋 開発者からのメッセージ</div>
-          <h2 class="text-xl md:text-2xl font-bold mb-3">はじめまして、飲DX 代表の<span class="text-brand-700">柳下</span>です。</h2>
-          <p class="text-sm text-slate-700 leading-relaxed mb-4">
-            2025 年 12 月、飲食店向けの電話 AI「<a href="https://voixa.in-dx.jp" target="_blank" rel="noopener" class="text-brand-600 underline font-semibold">VOIXA</a>」を 5 店舗にお届けする中で、店長さんから一番多く聞いた声が
-            <strong class="bg-amber-100 px-1">「シフト作成、毎週 3 時間以上かかる…」</strong>でした。
+          <div class="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mb-2">👋 開発者からのメッセージ</div>
+          <h2 class="text-xl md:text-2xl font-bold mb-3 text-slate-900 dark:text-slate-100">はじめまして、飲DX 代表の<span class="text-brand-700 dark:text-brand-400">柳下</span>です。</h2>
+          <p class="text-sm text-slate-700 dark:text-slate-200 leading-relaxed mb-4">
+            2025 年 12 月、飲食店向けの電話 AI「<a href="https://voixa.in-dx.jp" target="_blank" rel="noopener" class="text-brand-600 dark:text-brand-400 underline font-semibold">VOIXA</a>」を 5 店舗にお届けする中で、店長さんから一番多く聞いた声が
+            <strong class="bg-amber-100 dark:bg-amber-900/40 dark:text-amber-100 px-1">「シフト作成、毎週 3 時間以上かかる…」</strong>でした。
             <br><br>
             この声から生まれたのが Shifty です。AI が希望を聞いて、シフトを 5 分で組む。それだけのシンプルなツールです。<br>
             一人で開発・運用しているため、「<strong>個人飲食店なら無料</strong>」を実現できました。広告で集めるお金もないので、口コミで使ってくださる方を大事にしたいです。
           </p>
 
           <!-- β Partner CTA -->
-          <div class="bg-white rounded-xl border-2 border-emerald-400 p-4 mb-4 shadow">
+          <div class="bg-white dark:bg-slate-800 rounded-xl border-2 border-emerald-400 dark:border-emerald-600 p-4 mb-4 shadow">
             <div class="flex items-center gap-2 mb-2">
               <span class="bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">募集中</span>
-              <h3 class="font-bold text-base">🎯 初期 10 店舗の β パートナー募集</h3>
+              <h3 class="font-bold text-base text-slate-900 dark:text-slate-100">🎯 初期 10 店舗の β パートナー募集</h3>
             </div>
-            <ul class="text-xs text-slate-700 space-y-1 mb-3">
-              <li class="flex gap-2"><span class="text-emerald-600">✓</span><strong>Pro 機能（¥1,980/月相当）も期間中ずっと無料</strong></li>
-              <li class="flex gap-2"><span class="text-emerald-600">✓</span>柳下に直接フィードバックできる窓口（Slack or LINE）</li>
-              <li class="flex gap-2"><span class="text-emerald-600">✓</span>初期セットアップは無料で代行（CSV ファイルをお預かりして取込）</li>
-              <li class="flex gap-2"><span class="text-emerald-600">✓</span>使ってみて合わなければ、いつでも 1 メールで解約 OK</li>
+            <ul class="text-xs text-slate-700 dark:text-slate-200 space-y-1 mb-3">
+              <li class="flex gap-2"><span class="text-emerald-600 dark:text-emerald-400">✓</span><strong>Pro 機能（¥1,980/月相当）も期間中ずっと無料</strong></li>
+              <li class="flex gap-2"><span class="text-emerald-600 dark:text-emerald-400">✓</span>柳下に直接フィードバックできる窓口（Slack or LINE）</li>
+              <li class="flex gap-2"><span class="text-emerald-600 dark:text-emerald-400">✓</span>初期セットアップは無料で代行（CSV ファイルをお預かりして取込）</li>
+              <li class="flex gap-2"><span class="text-emerald-600 dark:text-emerald-400">✓</span>使ってみて合わなければ、いつでも 1 メールで解約 OK</li>
             </ul>
             <a href="#contact" data-plan="free" class="plan-cta-free inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg px-5 py-2.5">
               β パートナーに応募する →
@@ -500,29 +503,29 @@
       <!-- サイクル 4 #11: 自慢の数字 (12 機能, 9 制約) を顧客ベネフィット数字に置換
            時短 (5 分) と労基順守を強調 -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-          <div class="text-3xl md:text-4xl font-bold text-emerald-700">¥0</div>
-          <div class="text-xs text-emerald-900 font-semibold mt-1">永久無料プラン</div>
-          <div class="text-[10px] text-slate-500 mt-1">8 名以下の店舗</div>
+        <div class="bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-xl p-4">
+          <div class="text-3xl md:text-4xl font-bold text-emerald-700 dark:text-emerald-300">¥0</div>
+          <div class="text-xs text-emerald-900 dark:text-emerald-200 font-semibold mt-1">永久無料プラン</div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">8 名以下の店舗</div>
         </div>
-        <div class="bg-brand-50 border border-brand-200 rounded-xl p-4">
-          <div class="text-3xl md:text-4xl font-bold text-brand-700">5<span class="text-xl">分</span></div>
-          <div class="text-xs text-brand-900 font-semibold mt-1">シフト作成時間</div>
-          <div class="text-[10px] text-slate-500 mt-1">従来 3 時間→ 36 倍速</div>
+        <div class="bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700 rounded-xl p-4">
+          <div class="text-3xl md:text-4xl font-bold text-brand-700 dark:text-brand-300">5<span class="text-xl">分</span></div>
+          <div class="text-xs text-brand-900 dark:text-brand-200 font-semibold mt-1">シフト作成時間</div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">従来 3 時間→ 36 倍速</div>
         </div>
-        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <div class="text-3xl md:text-4xl font-bold text-amber-700">9<span class="text-xl">項</span></div>
-          <div class="text-xs text-amber-900 font-semibold mt-1">労基ルール厳守</div>
-          <div class="text-[10px] text-slate-500 mt-1">週上限・連勤・休日違反 0</div>
+        <div class="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-xl p-4">
+          <div class="text-3xl md:text-4xl font-bold text-amber-700 dark:text-amber-300">9<span class="text-xl">項</span></div>
+          <div class="text-xs text-amber-900 dark:text-amber-200 font-semibold mt-1">労基ルール厳守</div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">週上限・連勤・休日違反 0</div>
         </div>
-        <div class="bg-purple-50 border border-purple-200 rounded-xl p-4">
-          <div class="text-3xl md:text-4xl font-bold text-purple-700">5<span class="text-xl">店</span></div>
-          <div class="text-xs text-purple-900 font-semibold mt-1">VOIXA 導入実績</div>
-          <div class="text-[10px] text-slate-500 mt-1">姉妹サービス・運営元同じ</div>
+        <div class="bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-700 rounded-xl p-4">
+          <div class="text-3xl md:text-4xl font-bold text-purple-700 dark:text-purple-300">5<span class="text-xl">店</span></div>
+          <div class="text-xs text-purple-900 dark:text-purple-200 font-semibold mt-1">VOIXA 導入実績</div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">姉妹サービス・運営元同じ</div>
         </div>
       </div>
-      <div class="text-center mt-6 text-xs text-slate-500">
-        Shifty は β リリース中。<a href="#contact" data-plan="free" class="plan-cta-free text-emerald-600 underline font-semibold">β パートナー</a>として 1 号店舗を募集中です
+      <div class="text-center mt-6 text-xs text-slate-500 dark:text-slate-400">
+        Shifty は β リリース中。<a href="#contact" data-plan="free" class="plan-cta-free text-emerald-600 dark:text-emerald-400 underline font-semibold">β パートナー</a>として 1 号店舗を募集中です
       </div>
     </div>
   </section>

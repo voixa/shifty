@@ -189,6 +189,24 @@
 .dark .text-purple-800 { color: #d8b4fe !important; }
 .dark .text-purple-700 { color: #c084fc !important; }
 
+/* サイクル 14: brand color 系 dark mode が完全に欠落していて
+   text-brand-700 (=#4338ca 暗紫) が dark bg 上で不可視だった。全レベル追加。 */
+.dark .text-brand-900 { color: #c7d2fe !important; }
+.dark .text-brand-700 { color: #a5b4fc !important; }
+.dark .text-brand-600 { color: #818cf8 !important; }
+.dark .text-brand-500 { color: #818cf8 !important; }
+.dark .bg-brand-50 { background-color: rgba(67, 56, 202, 0.25) !important; }
+.dark .border-brand-200 { border-color: rgba(67, 56, 202, 0.5) !important; }
+
+/* サイクル 14: 600 レベル text も欠落していた (700+/900+ のみ定義済) */
+.dark .text-emerald-600 { color: #34d399 !important; }
+.dark .text-amber-600 { color: #fcd34d !important; }
+.dark .text-blue-600 { color: #60a5fa !important; }
+.dark .text-red-600 { color: #f87171 !important; }
+.dark .text-purple-600 { color: #c084fc !important; }
+.dark .text-orange-600 { color: #fb923c !important; }
+.dark .text-pink-600 { color: #f472b6 !important; }
+
 /* グラデーションも調整 */
 .dark .from-brand-50 { --tw-gradient-from: rgba(67, 56, 202, 0.25) !important; }
 .dark .to-amber-50 { --tw-gradient-to: rgba(146, 64, 14, 0.25) !important; }
