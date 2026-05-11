@@ -183,10 +183,15 @@
           <span class="text-xs text-slate-500 dark:text-slate-400 font-normal">登録不要</span>
         </a>
       </div>
-      <div class="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs md:text-sm text-slate-600">
+      <div class="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs md:text-sm text-slate-600 dark:text-slate-300">
         <span class="flex items-center gap-1"><span class="text-emerald-600 font-bold">✓</span> クレジットカード登録不要</span>
         <span class="flex items-center gap-1"><span class="text-emerald-600 font-bold">✓</span> 全機能 8 名まで無制限利用</span>
         <span class="flex items-center gap-1"><span class="text-emerald-600 font-bold">✓</span> いつでも解約・違約金なし</span>
+      </div>
+      <!-- サイクル 5 #14: 社会的証明を Hero 直下に bring up (Developer Story まで待たない) -->
+      <div class="mt-5 inline-flex items-center gap-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full px-4 py-1.5 text-xs text-slate-700 dark:text-slate-300">
+        <span class="text-base">🏪</span>
+        <span>姉妹サービス <a href="https://voixa.in-dx.jp" target="_blank" rel="noopener" class="text-brand-600 dark:text-brand-500 font-semibold underline">VOIXA</a> は 5 店舗で運用中。Shifty も同じインフラ・同じサポート体制で運営しています。</span>
       </div>
       <div class="mt-4 text-[11px] text-slate-400">
         ※ Pro プラン (¥1,980/月・スタッフ無制限) は 9 名以上の単店舗 / API 連携が必要な店舗向け。多店舗運営は Business (¥4,980/月・5 店舗) または Enterprise を。
@@ -478,11 +483,21 @@
   <section id="features" class="py-20">
     <div class="max-w-6xl mx-auto px-4">
       <h2 class="text-2xl md:text-4xl font-bold text-center mb-4">Shifty が 6 つの悩みを全部解決</h2>
-      <p class="text-center text-slate-600 mb-12">飲食店のシフト運用をゼロから設計し直しました。</p>
+      <p class="text-center text-slate-600 dark:text-slate-300 mb-8">飲食店のシフト運用をゼロから設計し直しました。</p>
+
+      <!-- サイクル 5 #13: クイックジャンプナビ (6 機能を最初に俯瞰させる) -->
+      <div class="flex flex-wrap justify-center gap-2 mb-12">
+        <a href="#feature-1" class="text-xs px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-brand-400 hover:text-brand-600 transition">⚡ 01 AI 生成</a>
+        <a href="#feature-2" class="text-xs px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-brand-400 hover:text-brand-600 transition">📱 02 スマホ希望収集</a>
+        <a href="#feature-3" class="text-xs px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-brand-400 hover:text-brand-600 transition">📅 03 確定&通知</a>
+        <a href="#feature-4" class="text-xs px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-brand-400 hover:text-brand-600 transition">⚙️ 04 カスタマイズ</a>
+        <a href="#feature-5" class="text-xs px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-brand-400 hover:text-brand-600 transition">📈 05 分析</a>
+        <a href="#feature-6" class="text-xs px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-brand-400 hover:text-brand-600 transition">🆘 06 代打推薦</a>
+      </div>
 
       <div class="space-y-12">
         <!-- Feature 1 -->
-        <div class="grid md:grid-cols-2 gap-8 items-center">
+        <div id="feature-1" class="grid md:grid-cols-2 gap-8 items-center scroll-mt-24">
           <div>
             <div class="text-brand-600 text-sm font-semibold mb-2">⚡ FEATURE 01</div>
             <h3 class="text-2xl font-bold mb-3">ボタン一つで AI シフト自動生成</h3>
@@ -510,7 +525,7 @@
         </div>
 
         <!-- Feature 2 -->
-        <div class="grid md:grid-cols-2 gap-8 items-center">
+        <div id="feature-2" class="grid md:grid-cols-2 gap-8 items-center scroll-mt-24">
           <div class="md:order-2">
             <div class="text-brand-600 text-sm font-semibold mb-2">📱 FEATURE 02</div>
             <h3 class="text-2xl font-bold mb-3">スタッフはスマホで希望提出</h3>
@@ -536,7 +551,7 @@
         </div>
 
         <!-- Feature 3 -->
-        <div class="grid md:grid-cols-2 gap-8 items-center">
+        <div id="feature-3" class="grid md:grid-cols-2 gap-8 items-center scroll-mt-24">
           <div>
             <div class="text-brand-600 text-sm font-semibold mb-2">📅 FEATURE 03</div>
             <h3 class="text-2xl font-bold mb-3">複数週管理 + 確定→通知の運用ループ</h3>
@@ -557,7 +572,7 @@
         </div>
 
         <!-- Feature 4 -->
-        <div class="grid md:grid-cols-2 gap-8 items-center">
+        <div id="feature-4" class="grid md:grid-cols-2 gap-8 items-center scroll-mt-24">
           <div class="md:order-2">
             <div class="text-brand-600 text-sm font-semibold mb-2">⚙️ FEATURE 04</div>
             <h3 class="text-2xl font-bold mb-3">店舗ごとに完全カスタマイズ</h3>
@@ -590,7 +605,7 @@
         </div>
 
         <!-- Feature 5 -->
-        <div class="grid md:grid-cols-2 gap-8 items-center">
+        <div id="feature-5" class="grid md:grid-cols-2 gap-8 items-center scroll-mt-24">
           <div>
             <div class="text-brand-600 text-sm font-semibold mb-2">📈 FEATURE 05</div>
             <h3 class="text-2xl font-bold mb-3">過去週の分析・月間ランキング</h3>
@@ -617,7 +632,7 @@
         </div>
 
         <!-- Feature 6 -->
-        <div class="grid md:grid-cols-2 gap-8 items-center">
+        <div id="feature-6" class="grid md:grid-cols-2 gap-8 items-center scroll-mt-24">
           <div class="md:order-2">
             <div class="text-brand-600 text-sm font-semibold mb-2">🆘 FEATURE 06</div>
             <h3 class="text-2xl font-bold mb-3">急な欠勤に「代打推薦」で即対応</h3>
@@ -880,41 +895,62 @@
   <!-- FAQ -->
   <section id="faq" class="py-20">
     <div class="max-w-3xl mx-auto px-4">
-      <h2 class="text-2xl md:text-4xl font-bold text-center mb-12">よくある質問</h2>
-      <div class="space-y-3">
-        <details class="bg-white border border-slate-200 rounded-xl p-5 group" open>
+      <h2 class="text-2xl md:text-4xl font-bold text-center mb-4">よくある質問</h2>
+      <!-- サイクル 5 #15: FAQ 検索ボックスを追加。クライアントサイドリアルタイムフィルタ -->
+      <div class="max-w-lg mx-auto mb-8">
+        <input id="faq-search" type="search" placeholder="🔍 質問やキーワードで絞り込み (例: 解約 / プラン / データ)"
+          class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-800 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
+          oninput="(function(q){
+            q = (q.value || '').toLowerCase().trim();
+            let hit = 0;
+            document.querySelectorAll('#faq-list details').forEach(d => {
+              const text = d.textContent.toLowerCase();
+              const match = !q || text.includes(q);
+              d.style.display = match ? '' : 'none';
+              if (match) hit++;
+              if (q) d.open = match;  // 検索中はマッチしたものを開く
+              else d.removeAttribute('open');  // 検索 clear で全て閉じる
+            });
+            document.getElementById('faq-nohit').classList.toggle('hidden', hit > 0 || !q);
+          })(this)">
+        <div id="faq-nohit" class="hidden text-center text-sm text-slate-500 mt-3">
+          「<span id="faq-q-echo"></span>」に一致する質問がありません。<a href="mailto:support@in-dx.jp" class="text-brand-600 underline">support@in-dx.jp</a> までお問い合わせください。
+        </div>
+      </div>
+      <div id="faq-list" class="space-y-3">
+        <details class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 group" open>
           <summary class="font-semibold cursor-pointer flex justify-between items-center">本当に Free プランは永久無料ですか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 text-sm mt-3">はい。スタッフ 8 名以下の小規模店なら、AI シフト生成・希望収集・通知文・分析など主要機能をすべて永久に無料でご利用いただけます。クレジットカード登録も不要です。「個人飲食店こそ DX で楽になってほしい」という飲DX の方針です。有料プランが必要なのは、9 名以上のスタッフ規模 (Pro ¥1,980)、または 2 店舗以上の多店舗運営 (Business ¥4,980) を行う方のみです。</p>
         </details>
-        <details class="bg-white border border-slate-200 rounded-xl p-5 group">
+        <details class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">スタッフが 9 名になったら自動で課金されますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 text-sm mt-3">いいえ、勝手には課金されません。Free プランでスタッフを 9 名以上登録しようとすると、画面でお知らせが出るだけです。ご自身で「Pro にアップグレードする」を選択していただいた場合のみ課金が始まります。突然請求が来ることはありません。</p>
         </details>
-        <details class="bg-white border border-slate-200 rounded-xl p-5 group">
+        <details class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">14 日無料トライアル後、自動で課金されますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 text-sm mt-3">いいえ、自動課金されません。トライアル開始時にクレジットカードの登録は<strong>不要</strong>で、14 日後にカード登録がなければ自動的に終了します。継続される場合のみ、ご自身でお手続きいただきます。</p>
         </details>
-        <details class="bg-white border border-slate-200 rounded-xl p-5 group">
+        <details class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">スタッフがスマホ操作に慣れてなくても使えますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 text-sm mt-3">はい。希望入力はタップだけで完結する超シンプル設計です。LINE 経由の URL を開いてタップするだけ。アプリインストール・登録不要です。高校生〜年配の方まで使えます。</p>
         </details>
-        <details class="bg-white border border-slate-200 rounded-xl p-5 group">
+        <details class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">既存のシフトデータ（エクセル等）から移行できますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 text-sm mt-3">CSV 取込でスタッフ情報を一括登録できます。詳細な移行サポートが必要な場合は、Pro プランで初期セットアップ無償サポートを提供しています。</p>
         </details>
-        <details class="bg-white border border-slate-200 rounded-xl p-5 group">
+        <details class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">複数店舗運営なんですが対応してますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 dark:text-slate-400 text-sm mt-3">Business プラン (¥4,980/月) で 5 店舗まで対応、Enterprise (要相談) で店舗数無制限です。全店舗の集計ダッシュボードでスタッフ・人件費を一元管理できます。</p>
         </details>
-        <details class="bg-white border border-slate-200 rounded-xl p-5 group">
+        <details class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">VOIXA（電話 AI）と何が違うんですか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 text-sm mt-3">VOIXA は「予約電話の自動応答」、Shifty は「シフト作成の自動化」です。両方とも飲食店オーナーの工数削減を目的にしていますが、解決する業務が異なります。Shifty の Free プランは VOIXA を契約していなくても使えます。</p>
         </details>
-        <details class="bg-white border border-slate-200 rounded-xl p-5 group">
+        <details class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">データの安全性は？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 text-sm mt-3">Google Cloud Platform 上で運用、データは全て暗号化された Firestore に保存されます。HTTPS 通信、CSP セキュリティヘッダ、ログイン試行制限を実装しています。JSON での全データバックアップもいつでもオーナー側で取得可能です。</p>
         </details>
-        <details class="bg-white border border-slate-200 rounded-xl p-5 group">
+        <details class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 group">
           <summary class="font-semibold cursor-pointer flex justify-between items-center">途中でプラン変更・解約できますか？<span class="text-brand-600 group-open:rotate-180 transition">▾</span></summary>
           <p class="text-slate-600 text-sm mt-3">はい、いつでも変更・解約できます。プラン変更・解約は <code>support@in-dx.jp</code> までメールにてお申し出ください（24 時間以内に処理いたします）。違約金等は一切発生しません。解約後もデータは 30 日間保持し、再開時に復元可能です。</p>
         </details>
