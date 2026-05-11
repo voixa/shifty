@@ -7,7 +7,12 @@
   <meta name="description" content="飲食店オーナーのシフト作成を、AI が 5 分で完了。希望収集→AI生成→通知文生成まで一気通貫。8 名まで永久無料・単店舗 Pro ¥1,980/月・多店舗 Business ¥4,980/月。デモはログイン不要で即体験可能。" />
   <meta name="keywords" content="飲食店,シフト管理,AI,シフト作成,自動化,SaaS,飲DX,Shifty" />
   <meta name="author" content="飲DX" />
+  <!-- サイクル 13 #38: クロール最適化指示 (デフォルトは index, follow だが明示で安心) -->
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+  <meta name="googlebot" content="index, follow" />
   <link rel="canonical" href="__SITE_URL__/" />
+  <link rel="alternate" hreflang="ja" href="__SITE_URL__/" />
+  <link rel="alternate" hreflang="x-default" href="__SITE_URL__/" />
 
   <!-- Open Graph -->
   <meta property="og:title" content="Shifty — 飲食店のシフト作成、AIで5分。" />
@@ -261,12 +266,13 @@
       <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
         <a href="#contact" data-plan="free" onclick="if(window.gtag)gtag('event','signup_free_hero');"
            class="plan-cta-free bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-8 py-4 text-lg font-bold shadow-xl shadow-emerald-600/40 inline-flex items-center gap-2">
-          🎉 無料で始める
-          <span class="text-base">→</span>
+          <span aria-hidden="true">🎉</span>
+          <span>無料で始める</span>
+          <span class="text-base" aria-hidden="true">→</span>
         </a>
         <a href="/demo" onclick="if(window.gtag)gtag('event','demo_click');"
            class="bg-white dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border-2 border-amber-400 dark:border-amber-500 rounded-lg px-8 py-4 text-lg font-semibold inline-flex items-center gap-2 shadow-md">
-          <span class="bg-amber-400 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">⚡ 1 秒</span>
+          <span class="bg-amber-400 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full"><span aria-hidden="true">⚡</span> 1 秒</span>
           <span>デモを試す</span>
           <span class="text-xs text-slate-500 dark:text-slate-400 font-normal">登録不要</span>
         </a>
@@ -1205,7 +1211,7 @@
       </div>
       <a href="#contact" data-plan="free" onclick="if(window.gtag)gtag('event','sticky_cta_click');"
          class="plan-cta-free bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2.5 text-sm font-bold whitespace-nowrap">
-        🎉 無料で始める →
+        <span aria-hidden="true">🎉</span> 無料で始める <span aria-hidden="true">→</span>
       </a>
     </div>
   </div>
@@ -1331,17 +1337,30 @@
         return;
       }
       if (resp.ok) {
-        msg.innerHTML = '✅ 送信ありがとうございます！<br><br>'
-          + '<span class="text-slate-700 font-normal">'
-          + '<strong class="text-emerald-700">数十秒以内</strong>に <code class="bg-slate-100 px-1 rounded text-xs">support@in-dx.jp</code> から'
-          + '<strong>ログインリンク付きメール</strong>が届きます。<br>'
-          + '届いていない場合は <strong>迷惑メールフォルダ</strong> もご確認ください。'
-          + '</span><br>'
-          + '<a href="/demo" class="inline-block mt-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-2.5 text-sm">🎮 メール待ちの間にデモを試す</a>';
-        msg.className = 'text-sm text-center font-semibold text-emerald-600';
+        // サイクル 13 #37: 成功時はフォーム全体を隠してメッセージのみ表示
+        // (旧: form.reset() で空のフォームが残り「再送信?」と混乱を招いた)
+        form.style.display = 'none';
+        msg.innerHTML = '<div class="bg-white text-slate-900 rounded-2xl p-6 md:p-8 max-w-xl mx-auto text-left">'
+          + '<div class="text-center mb-4">'
+          +   '<div class="text-5xl mb-3" aria-hidden="true">📧</div>'
+          +   '<h3 class="text-xl font-bold mb-2 text-slate-900">受信箱をご確認ください</h3>'
+          +   '<p class="text-sm text-slate-600">'
+          +     '<strong class="text-emerald-700">数十秒以内</strong>に <code class="bg-slate-100 px-1 rounded text-xs">support@in-dx.jp</code> から'
+          +     '<strong>ログインリンク付きメール</strong>が届きます。'
+          +   '</p>'
+          + '</div>'
+          + '<div class="bg-slate-50 rounded-lg p-3 text-xs text-slate-700 space-y-1.5 mb-4">'
+          +   '<div class="font-semibold mb-1">📋 次のステップ</div>'
+          +   '<div>① メールを開いてリンクをクリック</div>'
+          +   '<div>② そのままシフト作成画面に入れます</div>'
+          +   '<div class="text-amber-700 pt-1">⚠ 5 分経っても届かない場合は <strong>迷惑メールフォルダ</strong> もご確認ください</div>'
+          + '</div>'
+          + '<a href="/demo" class="block text-center bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-5 py-3 text-sm font-semibold">'
+          +   '🎮 メール待ちの間にデモを試す'
+          + '</a>'
+          + '</div>';
+        msg.className = 'text-sm';
         msg.classList.remove('hidden');
-        form.reset();
-        btn.textContent = '✓ 送信完了';
         return;
       }
       // サーバエラー: status 別に切り分け
