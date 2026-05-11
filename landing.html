@@ -661,6 +661,15 @@
           </div>
         </div>
       </div>
+
+      <!-- サイクル 10 #30: Features セクション後にデモ動線 -->
+      <div class="text-center mt-12">
+        <p class="text-slate-600 dark:text-slate-300 text-sm mb-3">考える前に、まず触ってみる方が早いかもしれません。</p>
+        <a href="/demo" onclick="if(window.gtag)gtag('event','demo_after_features');"
+           class="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-6 py-3 text-base font-semibold shadow-md">
+          🎮 デモを試す（登録不要・1 秒で開始）
+        </a>
+      </div>
     </div>
   </section>
 
@@ -754,8 +763,8 @@
             <li class="flex gap-1.5"><span class="text-emerald-600">✓</span>給与計算 CSV (基本)</li>
             <li class="flex gap-1.5"><span class="text-emerald-600">✓</span>メールサポート</li>
           </ul>
-          <a href="#contact" data-plan="free" class="plan-cta-free block text-center w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg py-2.5 font-semibold text-sm">無料で始める</a>
-          <p class="text-[10px] text-slate-500 mt-2 text-center">クレカ登録不要</p>
+          <a href="#contact" data-plan="free" class="plan-cta-free block text-center w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg py-2.5 font-semibold text-sm">Free で始める</a>
+          <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-2 text-center">クレカ登録不要・永久 ¥0</p>
         </div>
 
         <!-- Pro -->
@@ -777,8 +786,8 @@
             <li class="flex gap-1.5"><span class="text-brand-600">✓</span>自動バックアップ (30日)</li>
             <li class="flex gap-1.5"><span class="text-brand-600">✓</span>業界ベンチマーク</li>
           </ul>
-          <a href="#contact" data-plan="pro" class="plan-cta block text-center w-full bg-slate-700 hover:bg-slate-800 text-white rounded-lg py-2.5 font-semibold text-sm">14 日間 無料で試す</a>
-          <p class="text-[10px] text-slate-500 mt-2 text-center">14 日後に自動終了</p>
+          <a href="#contact" data-plan="pro" class="plan-cta block text-center w-full bg-slate-700 hover:bg-slate-800 text-white rounded-lg py-2.5 font-semibold text-sm">Pro を 14 日間試す</a>
+          <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-2 text-center">クレカ未登録なら 14 日で自動終了</p>
         </div>
 
         <!-- Business (NEW・人気) -->
@@ -801,8 +810,8 @@
             <li class="flex gap-1.5"><span class="text-brand-600">✓</span>自動バックアップ (90日)</li>
             <li class="flex gap-1.5"><span class="text-brand-600">✓</span>給与システム CSV 連携 (弥生/freee)</li>
           </ul>
-          <a href="#contact" data-plan="business" class="plan-cta block text-center w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-2.5 font-semibold text-sm">14 日間 無料で試す</a>
-          <p class="text-[10px] text-slate-500 mt-2 text-center">複数店舗運営者に最適</p>
+          <a href="#contact" data-plan="business" class="plan-cta block text-center w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-2.5 font-semibold text-sm">Business を 14 日間試す</a>
+          <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-2 text-center">5 店舗まで・複数店舗運営者向け</p>
         </div>
 
         <!-- Enterprise -->
@@ -968,25 +977,12 @@
   <section id="faq" class="py-20">
     <div class="max-w-3xl mx-auto px-4">
       <h2 class="text-2xl md:text-4xl font-bold text-center mb-4">よくある質問</h2>
-      <!-- サイクル 5 #15: FAQ 検索ボックスを追加。クライアントサイドリアルタイムフィルタ -->
+      <!-- サイクル 5 #15: FAQ 検索ボックス (サイクル 10 #28 で関数化 = CSP 強化準備) -->
       <div class="max-w-lg mx-auto mb-8">
         <input id="faq-search" type="search" placeholder="🔍 質問やキーワードで絞り込み (例: 解約 / プラン / データ)"
-          class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-800 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none"
-          oninput="(function(q){
-            q = (q.value || '').toLowerCase().trim();
-            let hit = 0;
-            document.querySelectorAll('#faq-list details').forEach(d => {
-              const text = d.textContent.toLowerCase();
-              const match = !q || text.includes(q);
-              d.style.display = match ? '' : 'none';
-              if (match) hit++;
-              if (q) d.open = match;  // 検索中はマッチしたものを開く
-              else d.removeAttribute('open');  // 検索 clear で全て閉じる
-            });
-            document.getElementById('faq-nohit').classList.toggle('hidden', hit > 0 || !q);
-          })(this)">
+          class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-800 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-500 focus:outline-none">
         <div id="faq-nohit" class="hidden text-center text-sm text-slate-500 mt-3">
-          「<span id="faq-q-echo"></span>」に一致する質問がありません。<a href="mailto:support@in-dx.jp" class="text-brand-600 underline">support@in-dx.jp</a> までお問い合わせください。
+          一致する質問がありません。<a href="mailto:support@in-dx.jp" class="text-brand-600 underline">support@in-dx.jp</a> までお問い合わせください。
         </div>
       </div>
       <div id="faq-list" class="space-y-3">
@@ -1288,6 +1284,26 @@
       btn.disabled = false;
       btn.textContent = '🔄 もう一度送信する';
     });
+
+    // サイクル 10 #28: FAQ フィルタ (inline oninput から関数化、CSP 強化準備)
+    (function() {
+      const inp = document.getElementById('faq-search');
+      const noHit = document.getElementById('faq-nohit');
+      if (!inp) return;
+      inp.addEventListener('input', () => {
+        const q = (inp.value || '').toLowerCase().trim();
+        let hit = 0;
+        document.querySelectorAll('#faq-list details').forEach(d => {
+          const text = d.textContent.toLowerCase();
+          const match = !q || text.includes(q);
+          d.style.display = match ? '' : 'none';
+          if (match) hit++;
+          if (q) d.open = match;
+          else d.removeAttribute('open');
+        });
+        if (noHit) noHit.classList.toggle('hidden', hit > 0 || !q);
+      });
+    })();
 
     // ===== サインアップモーダル =====
     // Free プラン:     店舗情報 → /api/inquiry でセットアップ依頼メール (自動 magic link)
