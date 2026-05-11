@@ -510,8 +510,8 @@
             </ul>
             <p class="text-[11px] text-slate-400 mt-3">*1 スタッフ 10 名 / 週 67 枠の弊社内ベンチマーク。実際の所要時間は店舗構成・希望分布により変動します。</p>
           </div>
-          <div class="bg-slate-50 rounded-xl p-6 border border-slate-200">
-            <div class="bg-white rounded-lg p-4 shadow-sm">
+          <div class="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+            <div class="bg-white dark:bg-slate-800 rounded-lg p-4 shadow-sm">
               <div class="text-xs text-slate-500 mb-2">🤖 AIスコア内訳 — 田中 美咲 / ホール / 月曜ランチ</div>
               <div class="space-y-1.5 text-xs">
                 <div class="flex justify-between"><span>希望:必須</span><span class="text-emerald-600">+150</span></div>
@@ -537,7 +537,7 @@
               <li class="flex gap-2"><span class="text-brand-600">✓</span> 提出済 / 未提出の進捗ダッシュボード</li>
             </ul>
           </div>
-          <div class="md:order-1 bg-slate-50 rounded-xl p-6 border border-slate-200">
+          <div class="md:order-1 bg-slate-50 dark:bg-slate-900/50 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
             <div class="max-w-[240px] mx-auto bg-white rounded-2xl p-3 shadow-sm border border-slate-200">
               <div class="text-xs text-slate-500 mb-2">04-28 (火)</div>
               <div class="bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg p-2 text-xs flex justify-between mb-2">
@@ -563,7 +563,7 @@
               <li class="flex gap-2"><span class="text-brand-600">✓</span> 確定→スタッフが自分のシフトをスマホで閲覧</li>
             </ul>
           </div>
-          <div class="bg-slate-50 rounded-xl p-6 border border-slate-200">
+          <div class="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
             <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
               <div class="font-semibold text-emerald-900 text-sm">✓ 確定済 (2026-05-04 16:02)</div>
               <div class="text-xs text-emerald-800 mt-1">スタッフはポータルから自分のシフトを閲覧中</div>
@@ -584,8 +584,8 @@
               <li class="flex gap-2"><span class="text-brand-600">✓</span> 労基順守（週時間・連勤・1日上限）AI が厳守</li>
             </ul>
           </div>
-          <div class="md:order-1 bg-slate-50 rounded-xl p-6 border border-slate-200">
-            <div class="bg-white rounded-lg p-4 shadow-sm">
+          <div class="md:order-1 bg-slate-50 dark:bg-slate-900/50 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+            <div class="bg-white dark:bg-slate-800 rounded-lg p-4 shadow-sm">
               <div class="text-xs font-semibold mb-2">☀️ ランチ (11:00〜15:00)</div>
               <table class="w-full text-[10px]">
                 <tr class="text-slate-500">
@@ -617,8 +617,8 @@
               <li class="flex gap-2"><span class="text-brand-600">✓</span> CSV エクスポートで給与計算ソフトと連携</li>
             </ul>
           </div>
-          <div class="bg-slate-50 rounded-xl p-6 border border-slate-200">
-            <div class="bg-white rounded-lg p-4 shadow-sm">
+          <div class="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+            <div class="bg-white dark:bg-slate-800 rounded-lg p-4 shadow-sm">
               <div class="text-xs text-slate-500 mb-2">📊 2026-05 月間労働時間ランキング</div>
               <div class="space-y-2 text-xs">
                 <div class="flex items-center gap-2"><span class="text-slate-400 w-3">1</span><span class="flex-1 font-medium">中村 直樹</span><span class="text-slate-600">160h</span></div>
@@ -644,8 +644,8 @@
               <li class="flex gap-2"><span class="text-brand-600">✓</span> 既存契約とのMINで労務違反を防止</li>
             </ul>
           </div>
-          <div class="md:order-1 bg-slate-50 rounded-xl p-6 border border-slate-200">
-            <div class="bg-white rounded-lg p-4 shadow-sm">
+          <div class="md:order-1 bg-slate-50 dark:bg-slate-900/50 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+            <div class="bg-white dark:bg-slate-800 rounded-lg p-4 shadow-sm">
               <div class="text-xs font-semibold mb-3">🆘 代打推薦</div>
               <div class="space-y-2 text-xs">
                 <div class="flex items-center justify-between bg-slate-50 rounded p-2">
@@ -997,9 +997,35 @@
 
   <!-- Final CTA / Contact -->
   <section id="contact" class="py-20 gradient-bg text-white">
-    <div class="max-w-3xl mx-auto px-4 text-center">
-      <h2 class="text-2xl md:text-4xl font-bold mb-4">まずは無料で使ってみませんか？</h2>
-      <p class="text-white/90 mb-8">スタッフ 8 名まで永久無料 / クレジットカード登録不要 / 1 営業日以内にセットアップご案内</p>
+    <div class="max-w-3xl mx-auto px-4">
+      <!-- サイクル 7 #20: Hero と差別化 — 「3 つの不安を解消」軸 + 数十秒で開始の即時性 -->
+      <div class="text-center mb-8">
+        <h2 class="text-2xl md:text-4xl font-bold mb-3">まだ迷っていますか？</h2>
+        <p class="text-white/90 text-sm md:text-base">それなら、登録前に <strong>3 つの不安</strong> をクリアにしましょう。</p>
+      </div>
+      <!-- 不安解消 3 枚カード -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
+        <div class="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-4 text-center">
+          <div class="text-2xl mb-2">💸</div>
+          <div class="text-sm font-bold mb-1">「お金がかかる？」</div>
+          <div class="text-xs text-white/80">8 名以下なら<strong>永久 ¥0</strong>。<br>クレカ登録不要。</div>
+        </div>
+        <div class="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-4 text-center">
+          <div class="text-2xl mb-2">🔓</div>
+          <div class="text-sm font-bold mb-1">「縛られない？」</div>
+          <div class="text-xs text-white/80">いつでも <strong>1 メールで解約</strong>。<br>違約金一切なし。</div>
+        </div>
+        <div class="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-4 text-center">
+          <div class="text-2xl mb-2">🛡️</div>
+          <div class="text-sm font-bold mb-1">「データが心配？」</div>
+          <div class="text-xs text-white/80">Google Cloud 暗号化保存。<br>JSON でいつでも全部取り出せます。</div>
+        </div>
+      </div>
+      <div class="text-center mb-6">
+        <p class="text-white/95 text-sm md:text-base">
+          <strong>30 秒で送信 → 数十秒で受信箱にログインリンク</strong> → 即時シフト作成開始
+        </p>
+      </div>
 
       <form id="inquiryForm" class="bg-white text-slate-900 rounded-2xl p-6 md:p-8 text-left space-y-4 max-w-xl mx-auto" aria-label="無料トライアル申込みフォーム">
         <div>
@@ -1078,11 +1104,13 @@
           </ul>
         </div>
         <div>
-          <div class="font-semibold text-white mb-3 text-sm">お問い合わせ</div>
-          <ul class="text-xs space-y-2">
-            <li>support@in-dx.jp</li>
-            <li>飲DX</li>
-            <li>関連サービス: <a href="https://voixa.in-dx.jp" class="hover:text-white underline">VOIXA</a></li>
+          <div class="font-semibold text-white mb-3 text-sm">運営者情報</div>
+          <ul class="text-xs space-y-2 leading-relaxed">
+            <li><strong class="text-slate-200">飲DX</strong></li>
+            <li>代表 柳下 征二郎</li>
+            <li>〒150-0043<br>東京都渋谷区道玄坂1-10-8<br>渋谷道玄坂東急ビル 2F-C</li>
+            <li><a href="mailto:support@in-dx.jp" class="hover:text-white underline">support@in-dx.jp</a></li>
+            <li>関連サービス: <a href="https://voixa.in-dx.jp" target="_blank" rel="noopener" class="hover:text-white underline">VOIXA</a> (電話 AI)</li>
           </ul>
         </div>
       </div>
