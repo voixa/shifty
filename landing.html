@@ -149,7 +149,7 @@
         <a href="/help" class="hover:text-brand-600">ヘルプ</a>
       </nav>
       <div class="flex items-center gap-2">
-        <a href="/app" class="hidden sm:inline-block text-sm text-slate-600 hover:text-brand-600 px-3 py-1.5">ログイン</a>
+        <a href="/login" class="hidden sm:inline-block text-sm text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-500 px-3 py-1.5">ログイン</a>
         <a href="#contact" data-plan="free" class="plan-cta-free text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2 font-semibold">無料で始める</a>
       </div>
     </div>
@@ -161,13 +161,14 @@
       <div class="inline-block bg-emerald-50 text-emerald-700 text-xs font-bold px-3 py-1.5 rounded-full mb-6 border border-emerald-200">
         🟢 永久無料プラン提供中・β パートナー募集
       </div>
-      <h1 class="text-4xl md:text-6xl font-bold leading-tight mb-6">
-        飲食店の AI シフト、<br>
-        <span class="gradient-text">8 名まで永久無料。</span>
+      <h1 class="text-3xl sm:text-4xl md:text-6xl font-bold leading-tight mb-6">
+        毎週 <span class="line-through text-slate-400 text-2xl sm:text-3xl md:text-5xl">3 時間</span>
+        <span class="gradient-text">→ 5 分</span>。<br>
+        飲食店のシフト、AI が組みます。
       </h1>
-      <p class="text-lg md:text-xl text-slate-600 max-w-2xl mx-auto mb-8">
-        AI が希望を聞いて、<strong>5 分でシフト完成</strong>。<br>
-        個人飲食店なら<strong class="text-emerald-600">一円も払わずに</strong>始められます。
+      <p class="text-base sm:text-lg md:text-xl text-slate-600 dark:text-slate-300 max-w-2xl mx-auto mb-8">
+        スタッフから希望を集める → AI が最適配置 → LINE 通知文をワンタップ生成。<br>
+        <strong class="text-emerald-600 dark:text-emerald-400">個人店 (8 名以下) なら永久無料</strong>。中規模店も<strong>¥1,980/月〜</strong>。
       </p>
       <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
         <a href="#contact" data-plan="free" onclick="if(window.gtag)gtag('event','signup_free_hero');"
@@ -176,8 +177,10 @@
           <span class="text-base">→</span>
         </a>
         <a href="/demo" onclick="if(window.gtag)gtag('event','demo_click');"
-           class="bg-white hover:bg-slate-50 text-slate-700 border-2 border-slate-300 rounded-lg px-8 py-4 text-lg font-semibold">
-          🎮 デモを試す（登録不要）
+           class="bg-white dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border-2 border-amber-400 dark:border-amber-500 rounded-lg px-8 py-4 text-lg font-semibold inline-flex items-center gap-2 shadow-md">
+          <span class="bg-amber-400 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">⚡ 1 秒</span>
+          <span>デモを試す</span>
+          <span class="text-xs text-slate-500 dark:text-slate-400 font-normal">登録不要</span>
         </a>
       </div>
       <div class="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs md:text-sm text-slate-600">
@@ -972,7 +975,7 @@
             <li><a href="#features" class="hover:text-white">機能</a></li>
             <li><a href="#pricing" class="hover:text-white">料金</a></li>
             <li><a href="#faq" class="hover:text-white">FAQ</a></li>
-            <li><a href="/app" class="hover:text-white">ログイン</a></li>
+            <li><a href="/login" class="hover:text-white">ログイン</a></li>
           </ul>
         </div>
         <div>
