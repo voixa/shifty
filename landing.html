@@ -432,8 +432,8 @@
     </div>
   </section>
 
-  <!-- Pain Points -->
-  <section class="py-20 bg-slate-50">
+  <!-- Pain Points (サイクル 9 #25: dark mode 時の背景を明示) -->
+  <section class="py-20 bg-slate-50 dark:bg-slate-800/40">
     <div class="max-w-5xl mx-auto px-4">
       <h2 class="text-2xl md:text-4xl font-bold text-center mb-4">こんなお悩み、ありませんか?</h2>
       <p class="text-center text-slate-600 mb-12">毎週シフト作成に時間を取られ、本来の仕事に集中できない店長さん多いです。</p>
@@ -894,43 +894,43 @@
             <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">AI 自動生成</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
-              <td class="p-4 text-center text-slate-400">△</td>
-              <td class="p-4 text-center text-slate-400">×</td>
-              <td class="p-4 text-center text-slate-400">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">△</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
             </tr>
             <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">希望のスマホ収集</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
               <td class="p-4 text-center">○</td>
               <td class="p-4 text-center">○</td>
-              <td class="p-4 text-center text-slate-400">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
             </tr>
             <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">スコア説明</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
-              <td class="p-4 text-center text-slate-400">×</td>
-              <td class="p-4 text-center text-slate-400">×</td>
-              <td class="p-4 text-center text-slate-400">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
             </tr>
             <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">代打推薦</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
-              <td class="p-4 text-center text-slate-400">×</td>
-              <td class="p-4 text-center text-slate-400">×</td>
-              <td class="p-4 text-center text-slate-400">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
             </tr>
             <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">労務ルール厳守</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
               <td class="p-4 text-center">○</td>
-              <td class="p-4 text-center text-slate-400">△</td>
-              <td class="p-4 text-center text-slate-400">×</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">△</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">×</td>
             </tr>
             <tr class="border-t border-slate-200 dark:border-slate-700">
               <td class="p-4 font-medium">テンプレート機能</td>
               <td class="p-4 text-center text-brand-600 font-bold">◎</td>
               <td class="p-4 text-center">○</td>
-              <td class="p-4 text-center text-slate-400">△</td>
+              <td class="p-4 text-center text-slate-400 dark:text-slate-500">△</td>
               <td class="p-4 text-center">○</td>
             </tr>
             <tr class="border-t border-slate-200 dark:border-slate-700">
@@ -1125,23 +1125,27 @@
     </div>
   </div>
   <script>
-    // Hero を過ぎたら sticky CTA を表示、Footer に近づいたら隠す
+    // サイクル 9 #27: scroll イベント (getBoundingClientRect) →
+    // IntersectionObserver に変更でモバイルスクロールパフォーマンス改善
     (function() {
+      if (!('IntersectionObserver' in window)) return;
       const bar = document.getElementById('stickyCta');
+      const hero = document.querySelector('section.grid-bg');  // Hero セクション
       const contact = document.getElementById('contact');
+      let heroVisible = true, contactVisible = false;
       function update() {
-        const scrolled = window.scrollY;
-        const heroPassed = scrolled > 500;  // Hero ヒーロー過ぎ
-        const contactRect = contact && contact.getBoundingClientRect();
-        const contactVisible = contactRect && contactRect.top < window.innerHeight + 100;
-        if (heroPassed && !contactVisible) {
-          bar.classList.remove('hidden');
-        } else {
-          bar.classList.add('hidden');
-        }
+        // Hero が見えていない + Contact もまだ見えていない時のみ表示
+        if (!heroVisible && !contactVisible) bar.classList.remove('hidden');
+        else bar.classList.add('hidden');
       }
-      window.addEventListener('scroll', update, { passive: true });
-      update();
+      new IntersectionObserver(entries => {
+        for (const e of entries) heroVisible = e.isIntersecting;
+        update();
+      }, { rootMargin: '-100px 0px 0px 0px' }).observe(hero);
+      new IntersectionObserver(entries => {
+        for (const e of entries) contactVisible = e.isIntersecting;
+        update();
+      }, { rootMargin: '0px 0px -50px 0px' }).observe(contact);
     })();
   </script>
 
