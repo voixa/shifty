@@ -60,6 +60,80 @@
   }
   </script>
 
+  <!-- サイクル 12 #36: FAQPage schema (Google リッチスニペット対応) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "本当に Free プランは永久無料ですか？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "はい。スタッフ 8 名以下の小規模店なら、AI シフト生成・希望収集・通知文・分析など主要機能をすべて永久に無料でご利用いただけます。クレジットカード登録も不要です。有料プランが必要なのは、9 名以上のスタッフ規模 (Pro ¥1,980)、または 2 店舗以上の多店舗運営 (Business ¥4,980) を行う方のみです。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "スタッフが 9 名になったら自動で課金されますか？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "いいえ、勝手には課金されません。Free プランでスタッフを 9 名以上登録しようとすると、画面でお知らせが出るだけです。ご自身で Pro にアップグレードする選択をいただいた場合のみ課金が始まります。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "14 日無料トライアル後、自動で課金されますか？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "いいえ、自動課金されません。トライアル開始時にクレジットカードの登録は不要で、14 日後にカード登録がなければ自動的に終了します。継続される場合のみ、ご自身でお手続きいただきます。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "スタッフがスマホ操作に慣れてなくても使えますか？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "はい。希望入力はタップだけで完結する超シンプル設計です。LINE 経由の URL を開いてタップするだけ。アプリインストール・登録不要です。高校生から年配の方まで使えます。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "既存のシフトデータから移行できますか？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "CSV 取込でスタッフ情報を一括登録できます。詳細な移行サポートが必要な場合は、Pro プランで初期セットアップ無償サポートを提供しています。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "複数店舗運営なんですが対応してますか？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Business プラン (¥4,980/月) で 5 店舗まで対応、Enterprise (要相談) で店舗数無制限です。全店舗の集計ダッシュボードでスタッフ・人件費を一元管理できます。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "データの安全性は？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Google Cloud Platform 上で運用、データは全て暗号化された Firestore に保存されます。HTTPS 通信、CSP セキュリティヘッダ、ログイン試行制限を実装しています。JSON での全データバックアップもいつでもオーナー側で取得可能です。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "途中でプラン変更・解約できますか？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "はい、いつでも変更・解約できます。プラン変更・解約は support@in-dx.jp までメールにてお申し出ください (24 時間以内に処理いたします)。違約金等は一切発生しません。解約後もデータは 30 日間保持し、再開時に復元可能です。"
+        }
+      }
+    ]
+  }
+  </script>
+
   <!-- DNS preconnect / dns-prefetch — 体感速度の向上 -->
   <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.tailwindcss.com">
@@ -119,6 +193,12 @@
   </script>
   <link rel="stylesheet" href="/styles.css" />
   <style>
+    /* サイクル 12 #34: スムーズスクロール。reduced-motion ユーザは除外 */
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .fade-up { animation: none; }
+    }
     .gradient-bg { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
     .gradient-text { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
     @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
@@ -129,6 +209,14 @@
         linear-gradient(90deg, rgba(99,102,241,0.06) 1px, transparent 1px);
       background-size: 32px 32px;
     }
+    /* サイクル 12 #35: 必須項目の * を太く目立たせる + dark mode 対応
+       (元案の :focus + sibling アニメーションは HTML 構造的に効かないのでシンプル化) */
+    .required-asterisk {
+      font-weight: 700;
+      font-size: 1.05em;
+      margin-left: 0.15em;
+    }
+    .dark .required-asterisk { color: #f87171; }  /* dark mode で red-400 相当に明るく */
   </style>
 </head>
 <body class="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans">
@@ -1061,15 +1149,15 @@
 
       <form id="inquiryForm" class="bg-white text-slate-900 rounded-2xl p-6 md:p-8 text-left space-y-4 max-w-xl mx-auto" aria-label="無料トライアル申込みフォーム">
         <div>
-          <label for="iform-restaurant" class="block text-sm font-semibold mb-1">店舗名 <span class="text-red-500" aria-hidden="true">*</span><span class="sr-only">必須</span></label>
+          <label for="iform-restaurant" class="block text-sm font-semibold mb-1">店舗名 <span class="text-red-500 required-asterisk inline-block" aria-hidden="true">*</span><span class="sr-only">必須</span></label>
           <input id="iform-restaurant" name="restaurantName" required autocomplete="organization" class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="例: いざかや 縁">
         </div>
         <div>
-          <label for="iform-name" class="block text-sm font-semibold mb-1">お名前 <span class="text-red-500" aria-hidden="true">*</span><span class="sr-only">必須</span></label>
+          <label for="iform-name" class="block text-sm font-semibold mb-1">お名前 <span class="text-red-500 required-asterisk inline-block" aria-hidden="true">*</span><span class="sr-only">必須</span></label>
           <input id="iform-name" name="contactName" required autocomplete="name" class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="例: 山田 太郎">
         </div>
         <div>
-          <label for="iform-email" class="block text-sm font-semibold mb-1">メールアドレス <span class="text-red-500" aria-hidden="true">*</span><span class="sr-only">必須</span></label>
+          <label for="iform-email" class="block text-sm font-semibold mb-1">メールアドレス <span class="text-red-500 required-asterisk inline-block" aria-hidden="true">*</span><span class="sr-only">必須</span></label>
           <input id="iform-email" name="email" type="email" required autocomplete="email" class="w-full border border-slate-300 rounded-lg px-4 py-2.5" placeholder="example@example.com">
         </div>
         <div class="grid grid-cols-2 gap-3">
@@ -1098,7 +1186,7 @@
             <a href="/tos" target="_blank" class="text-brand-600 underline">利用規約</a> および
             <a href="/privacy" target="_blank" class="text-brand-600 underline">プライバシーポリシー</a>
             に同意します
-            <span class="text-red-500" aria-hidden="true">*</span>
+            <span class="text-red-500 required-asterisk inline-block" aria-hidden="true">*</span>
           </span>
         </label>
         <button type="submit" id="submitBtn" class="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-3 font-semibold">無料トライアルを申し込む →</button>
