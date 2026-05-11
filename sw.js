@@ -1,8 +1,8 @@
-// Shifty Service Worker v7 — HTML はキャッシュせず常に network、静的アセットのみキャッシュ
+// Shifty Service Worker v8 — HTML はキャッシュせず常に network、静的アセットのみキャッシュ
 // + Round 34: Web Push 通知サポート
-// + Round 42 (SameSite fix): キャッシュをまるごと bump して古い app.js を一掃する
+// + Round 42: CRITICAL bug fix (seedState → migrate) と dark mode 包括対応で再 bump
 // CACHE 名を bump すると activate 時に旧キャッシュを削除する
-const CACHE = "shifty-v7";
+const CACHE = "shifty-v8";
 const STATIC_ASSETS = [
   "/styles.css",
   "/manifest.json",
@@ -42,9 +42,16 @@ self.addEventListener("fetch", (e) => {
   }
 
   // HTML ドキュメントは常に network から（キャッシュしない）
+  // Round 42 fix: caches.match("/app") は STATIC_ASSETS に含まれていないので必ず undefined を返し、
+  // respondWith(undefined) で NetworkError になっていた。fallback で最低限の HTML を返す。
   if (e.request.destination === "document" || url.pathname === "/" || url.pathname === "/app" || url.pathname === "/staff" ||
       url.pathname === "/tos" || url.pathname === "/privacy" || url.pathname === "/tokushoho") {
-    e.respondWith(fetch(e.request).catch(() => caches.match("/app")));
+    e.respondWith(fetch(e.request).catch(() => new Response(
+      '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<style>body{font-family:system-ui;max-width:480px;margin:60px auto;padding:24px;text-align:center;background:#0f172a;color:#f1f5f9}.box{background:#1e293b;border-radius:12px;padding:32px}h1{font-size:18px;margin-bottom:12px}p{font-size:13px;line-height:1.6;color:#cbd5e1}button{background:#4f46e5;color:white;border:0;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:600;margin-top:16px;cursor:pointer}</style>' +
+      '<div class="box"><div style="font-size:48px">📡</div><h1>オフラインです</h1><p>ネットワーク接続を確認して再読み込みしてください。</p><button onclick="location.reload()">🔄 再読み込み</button></div>',
+      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
+    )));
     return;
   }
 

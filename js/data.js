@@ -354,7 +354,12 @@
         console.warn("localStorage parse failed", e);
       }
     }
-    const fresh = seedFn();
+    // 重要: seedState / seedSampleData は meta の一部しか設定しないため、
+    // migrate() を必ず経由して algorithmWeights / templates / taskChecklist /
+    // dashboardWidgets / payrollSettings 等の不足フィールドを補完する。
+    // (これを怠ると新規 tenant が Settings タブを開いた瞬間に
+    //  TypeError: aw[f.id] (algorithmWeights が undefined) で render が中断する)
+    const fresh = migrate(seedFn());
     try { await window.ShiftyAPI.saveState(fresh); } catch (_) {}
     return fresh;
   }
@@ -391,7 +396,8 @@
     const useSample = withSample === undefined
       ? (window.__SHIFTY_DEMO_MODE__ === true)
       : !!withSample;
-    const fresh = useSample ? seedSampleData() : seedState();
+    // loadState と同じ理由で migrate を必ず通す (Round 42 fix)
+    const fresh = migrate(useSample ? seedSampleData() : seedState());
     await saveState(fresh);
     return fresh;
   }

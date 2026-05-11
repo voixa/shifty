@@ -183,7 +183,7 @@ function renderVacationRequestsCard() {
   if (reqs.length === 0) return null;
   const pending = reqs.filter(r => r.status === "pending");
   const recent = reqs.slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, 10);
-  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
   card.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
     el("div", { class: "font-semibold text-sm" }, [
       el("span", {}, "🏖 長期休暇申請"),
@@ -397,7 +397,7 @@ function renderStaffInsights() {
 
   // ソート (働いた時間が多い順)
   const sorted = Object.values(insights).sort((a, b) => b.totalHours - a.totalHours);
-  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
   card.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
     el("div", { class: "font-semibold text-sm" }, `📊 スタッフ・インサイト (直近 ${weeksConsidered} 週)`),
     el("div", { class: "text-[10px] text-slate-500" }, "希望提出率 / 必須充足率 / 燃え尽きリスク"),
@@ -491,7 +491,7 @@ function renderSwapRequestsCard() {
   const open = swaps.filter(s => s.status === "open");
   const recent = swaps.slice().sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, 10);
 
-  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
   card.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
     el("div", { class: "font-semibold text-sm" }, [
       el("span", {}, "🔄 シフト交換"),
@@ -2193,7 +2193,11 @@ function openHelpGuide(initialTab) {
     mb.innerHTML = "";
     mb.appendChild(renderGuide());
     const m = $("#modal");
-    if (m) m.classList.remove("hidden");
+    if (m) {
+      m.classList.remove("hidden");
+      // Round 42 fix: backdrop クリックで閉じる (modal() ヘルパと同じ動作)
+      m.onclick = (e) => { if (e.target === m) closeModal(); };
+    }
   }
 
   redraw();
@@ -2238,7 +2242,7 @@ function renderAuditLogViewer() {
   if (log.length === 0) {
     return null;
   }
-  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3" });
   card.appendChild(el("details", {}, [
     el("summary", { class: "cursor-pointer font-semibold" },
       `🔍 全体監査ログ (${log.length} 件)`),
@@ -2665,7 +2669,7 @@ function renderLaborCostRatio() {
   const weekSales = days.reduce((s, d) => s + (Number(sales[d]) || 0), 0);
   const ratio = weekSales > 0 ? weekCost / weekSales : null;
 
-  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
   const headerRow = el("div", { class: "flex items-center justify-between mb-2 flex-wrap gap-1" }, [
     el("div", { class: "font-semibold text-sm" }, "💰 今週の人件費率"),
     el("div", { class: "flex gap-2" }, [
@@ -2896,7 +2900,7 @@ function renderMonthlyLaborRisk() {
   const warnThreshold = (state.meta.laborWarnThreshold || 0.7);  // 70%
   const dangerThreshold = (state.meta.laborDangerThreshold || 0.85); // 85%
 
-  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
   const monthLabel = monthKey.replace("-", "年") + "月";
   const totalCost = Object.values(perStaff).reduce((s, r) => s + r.cost, 0);
   const monthBudget = (state.meta.weeklyBudget || 0) * 4.33;
@@ -3544,7 +3548,7 @@ function viewHome() {
       { num: "2", title: "希望収集", desc: "📝 スタッフが自分のスマホから入力" },
       { num: "3", title: "AI でシフト生成", desc: "🤖 5 秒で最適化" },
     ].forEach(s => {
-      steps.appendChild(el("div", { class: "bg-white border border-slate-200 rounded-md p-3 text-left" }, [
+      steps.appendChild(el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md p-3 text-left" }, [
         el("div", { class: "text-2xl font-bold text-brand-600" }, s.num),
         el("div", { class: "font-semibold text-sm" }, s.title),
         el("div", { class: "text-xs text-slate-500 mt-1" }, s.desc),
@@ -4108,7 +4112,7 @@ function viewDashboard() {
 
   // 人件費推移グラフ (Round 11) — 過去 8 週分の確定済シフト人件費
   if (state.staff.length > 0 && typeof Chart !== "undefined" && dashboardWidgetOn("costChart")) {
-    const chartCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+    const chartCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
     chartCard.appendChild(el("div", { class: "flex items-center justify-between mb-2" }, [
       el("div", { class: "font-semibold text-sm" }, "📈 人件費推移 (直近 8 週)"),
       el("div", { class: "text-xs text-slate-500" }, `予算: ${fmtYen(state.meta.weeklyBudget)}/週`),
@@ -4274,7 +4278,7 @@ function viewDashboard() {
   }
 
   if (alerts.length > 0 && dashboardWidgetOn("alerts")) {
-    const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3" });
+    const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3" });
     card.appendChild(el("div", { class: "font-semibold text-sm text-slate-700 mb-2" }, `⚠️ 注意事項 ${alerts.length} 件`));
     const list = el("div", { class: "space-y-1.5" });
     for (const a of alerts) {
@@ -4314,7 +4318,7 @@ function viewDashboard() {
   const budget = state.meta.weeklyBudget;
   const ratio = budget > 0 ? Math.min(2, cost / budget) : 0;
   const gaugeColor = ratio >= 1 ? "#dc2626" : ratio >= 0.85 ? "#f59e0b" : "#10b981";
-  wrap.appendChild(el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" }, [
+  wrap.appendChild(el("div", { class: "bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700" }, [
     el("div", { class: "flex items-center justify-between mb-2" }, [
       el("div", { class: "text-sm font-semibold text-slate-700" }, "今週予算"),
       el("div", { class: "text-sm text-slate-600" }, `${fmtYen(cost)} / ${fmtYen(budget)}`),
@@ -4365,7 +4369,7 @@ function viewDashboard() {
   // Past weeks analytics
   const trends = computeTrends();
   if (trends.length >= 2) {
-    const chartCard = el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" });
+    const chartCard = el("div", { class: "bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700" });
     chartCard.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
       el("div", { class: "font-semibold" }, "📈 過去週推移"),
       el("div", { class: "text-xs text-slate-500" }, `直近 ${trends.length} 週`),
@@ -4383,7 +4387,7 @@ function viewDashboard() {
   // 月間労働時間ランキング
   wrap.appendChild(renderMonthlyHoursRanking());
 
-  wrap.appendChild(el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" }, [
+  wrap.appendChild(el("div", { class: "bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700" }, [
     el("div", { class: "font-semibold mb-3" }, "クイックアクション"),
     el("div", { class: "grid grid-cols-2 md:grid-cols-3 gap-2" }, [
       quickAction("🤖 AIシフト自動生成", () => { setTab("schedule"); setTimeout(autoGenerate, 300); }),
@@ -4439,7 +4443,7 @@ function renderMonthlyHoursRanking() {
   }
   const ranked = Object.values(totals).filter(s => s.hours > 0).sort((a, b) => b.hours - a.hours);
 
-  const card = el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700" });
   card.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
     el("div", { class: "font-semibold" }, `📊 ${yearMonth} 月間労働時間ランキング`),
     el("div", { class: "text-xs text-slate-500" }, `${ranked.length} 名出勤`),
@@ -4608,7 +4612,7 @@ function renderTomorrowPanel() {
   const list = tomorrowWeek ? state.weeks[tomorrowWeek].assignments.filter(a => a.date === tomorrow) : [];
   list.sort((a, b) => a.startTime.localeCompare(b.startTime));
 
-  const card = el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700" });
   card.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
     el("div", { class: "font-semibold flex items-center gap-2" }, [
       el("span", {}, "🌅 明日の出勤"),
@@ -4648,7 +4652,7 @@ function renderTodayPanel() {
   const todayAssignments = todayWeek ? state.weeks[todayWeek].assignments.filter(a => a.date === today) : [];
   todayAssignments.sort((a, b) => a.startTime.localeCompare(b.startTime));
 
-  const card = el("div", { class: "bg-white rounded-xl p-4 border border-slate-200" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700" });
   card.appendChild(el("div", { class: "flex items-center justify-between mb-3" }, [
     el("div", { class: "font-semibold flex items-center gap-2" }, [
       el("span", {}, "📅 今日の出勤"),
@@ -4892,7 +4896,7 @@ function viewStaff() {
     wrap.appendChild(el("div", { class: "text-xs text-slate-500" },
       "💡 行の左端 ⋮⋮ をドラッグでスタッフの並び順を変更できます (シフト編成・ランキングにも反映)"));
   }
-  const table = el("div", { class: "bg-white rounded-xl border border-slate-200 overflow-x-auto" });
+  const table = el("div", { class: "bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-x-auto" });
   table.innerHTML = `
     <table class="w-full text-sm">
       <thead class="bg-slate-50 text-slate-600 text-xs">
@@ -5723,7 +5727,7 @@ function viewPreferences() {
   const w0 = state.meta.currentWeekStart;
   const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
 
-  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4" });
   card.appendChild(el("div", { class: "font-semibold mb-1" }, "希望入力（管理側で代理入力）"));
   card.appendChild(el("div", { class: "text-xs text-slate-500 mb-3" },
     "通常はスタッフ自身がモバイルで入力します（上の「LINE用 全員リンク生成」ボタンを使用）"));
@@ -5974,7 +5978,7 @@ function viewSchedule() {
 
   // スタッフ別フィルタ (Round 8) — シフトが生成済みのとき
   if (curAssignments().length > 0 && state.staff.length > 1) {
-    const filterRow = el("div", { class: "bg-white border border-slate-200 rounded-lg p-2 flex items-center gap-2 flex-wrap text-sm" });
+    const filterRow = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 flex items-center gap-2 flex-wrap text-sm" });
     filterRow.appendChild(el("span", { class: "text-xs text-slate-600 font-semibold" }, "🔍 表示フィルタ:"));
     const sel = el("select", {
       class: "border rounded px-2 py-1 text-sm",
@@ -6012,7 +6016,7 @@ function viewSchedule() {
   }
 
   // 今週の店長お知らせ (Round 9) — 確定通知 / iCal / 印刷に反映
-  const noticeCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3 no-print" });
+  const noticeCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 no-print" });
   noticeCard.appendChild(el("details", {}, [
     el("summary", { class: "text-sm font-semibold cursor-pointer select-none" },
       "📢 今週のお知らせ" + (curWeek().ownerNotice ? " ✓" : " (店長 → 全スタッフ)")),
@@ -6074,7 +6078,7 @@ function viewSchedule() {
     const cost = m.totalCost;
     const ratio = state.meta.weeklyBudget > 0 ? cost / state.meta.weeklyBudget : 0;
     const gaugeColor = ratio >= 1 ? "#dc2626" : ratio >= 0.85 ? "#f59e0b" : "#10b981";
-    const ms = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm" });
+    const ms = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm" });
     ms.innerHTML = `
       <div><div class="text-slate-500 text-xs">カバー率</div><div class="text-lg font-bold ${m.coverageRate < 1 ? "text-amber-600" : "text-emerald-600"}">${fmtPct(m.coverageRate)}</div></div>
       <div><div class="text-slate-500 text-xs">希望充足</div><div class="text-lg font-bold">${fmtPct(m.preferenceSatisfaction)}</div></div>
@@ -6104,7 +6108,7 @@ function viewSchedule() {
   // 変更履歴 (Round 11) — このタブで一覧表示
   const changeLog = curWeek().changeLog || [];
   if (changeLog.length > 0) {
-    const logCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-3 no-print" });
+    const logCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 no-print" });
     logCard.appendChild(el("details", {}, [
       el("summary", { class: "text-sm font-semibold cursor-pointer select-none" },
         `📜 変更履歴 (${changeLog.length} 件)`),
@@ -6131,7 +6135,7 @@ function viewSchedule() {
 function renderChangeLog() {
   const log = curWeek().changeLog || [];
   const sorted = [...log].reverse(); // 新しい順
-  const card = el("details", { class: "bg-white border border-slate-200 rounded-xl p-4" });
+  const card = el("details", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4" });
   const summary = el("summary", { class: "font-semibold cursor-pointer flex items-center justify-between" });
   summary.innerHTML = `<span>📜 変更履歴 <span class="text-xs text-slate-500 font-normal">(${log.length}件)</span></span><span class="text-xs text-slate-400">クリックで開閉 ▾</span>`;
   card.appendChild(summary);
@@ -7311,7 +7315,7 @@ function renderCalendarMobile(days) {
   for (const d of days) {
     const dow = dayOfWeek(d);
     const holidayName = window.ShiftyData.getHoliday(d);
-    const dayCard = el("div", { class: "bg-white border border-slate-200 rounded-lg p-3" });
+    const dayCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3" });
     const dowColor = holidayName ? "text-red-600" : (dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "text-slate-700");
     const header = el("div", { class: "flex items-center justify-between mb-2" });
     header.appendChild(el("div", { class: `font-bold text-sm ${dowColor}` }, `${d.slice(5)} (${DAY_LABELS[dow]})`));
@@ -7780,7 +7784,7 @@ function getUnfilled() {
 }
 
 function renderStaffSummary() {
-  const card = el("div", { class: "bg-white border border-slate-200 rounded-xl overflow-x-auto" });
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-x-auto" });
   card.innerHTML = `<div class="font-semibold p-3 border-b flex items-center justify-between">
     <span>スタッフ別サマリ</span>
     <span class="text-xs font-normal text-slate-500" id="summary-total"></span>
@@ -8413,7 +8417,7 @@ function viewExport() {
 
   const w0 = state.meta.currentWeekStart;
   const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
-  const tbl = el("div", { class: "bg-white border border-slate-200 rounded-xl overflow-x-auto" });
+  const tbl = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-x-auto" });
   let html = `<div class="p-3 font-semibold">${escapeHtml(state.meta.restaurantName)} シフト表 / ${w0}〜</div>
     <table class="w-full text-xs"><thead class="bg-slate-50">
       <tr><th class="text-left px-2 py-1">名前</th>`;
@@ -8810,7 +8814,7 @@ function viewSettings() {
   wrap.appendChild(navCard);
 
   // Basic
-  const basic = el("div", { id: "set-basic", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  const basic = el("div", { id: "set-basic", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
   basic.appendChild(el("div", { class: "font-semibold" }, "1. 基本情報"));
   const grid1 = el("div", { class: "grid grid-cols-1 md:grid-cols-3 gap-3 text-sm" });
   grid1.innerHTML = `
@@ -8835,7 +8839,7 @@ function viewSettings() {
   wrap.appendChild(basic);
 
   // Password
-  const passCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const passCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3" });
   passCard.appendChild(el("div", { class: "font-semibold" }, "2. オーナーパスワード変更"));
   const passGrid = el("div", { class: "grid grid-cols-1 md:grid-cols-3 gap-3 text-sm" });
   passGrid.innerHTML = `
@@ -8865,7 +8869,7 @@ function viewSettings() {
   wrap.appendChild(passCard);
 
   // Positions
-  const posCard = el("div", { id: "set-positions", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  const posCard = el("div", { id: "set-positions", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
   posCard.appendChild(el("div", { class: "flex items-center justify-between" }, [
     el("div", { class: "font-semibold" }, "3. ポジション"),
     el("button", { class: "text-sm bg-brand-600 text-white rounded-md px-3 py-1.5",
@@ -8899,7 +8903,7 @@ function viewSettings() {
   wrap.appendChild(posCard);
 
   // Sessions
-  const sessCard = el("div", { id: "set-sessions", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  const sessCard = el("div", { id: "set-sessions", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
   sessCard.appendChild(el("div", { class: "flex items-center justify-between flex-wrap gap-2" }, [
     el("div", { class: "font-semibold" }, "4. 営業セッション（時間帯）"),
     el("div", { class: "flex gap-2" }, [
@@ -8939,7 +8943,7 @@ function viewSettings() {
   wrap.appendChild(sessCard);
 
   // Staffing matrix
-  const matrixCard = el("div", { id: "set-staffing", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  const matrixCard = el("div", { id: "set-staffing", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
   const matrixHeader = el("div", { class: "flex items-center justify-between flex-wrap gap-2" });
   matrixHeader.innerHTML = `<div class="font-semibold">5. 必要人数マトリクス${helpIcon("staffing-matrix")}</div>`;
   matrixHeader.appendChild(el("button", {
@@ -9001,7 +9005,7 @@ function viewSettings() {
   wrap.appendChild(matrixCard);
 
   // Labor rules
-  const laborCard = el("div", { id: "set-labor", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  const laborCard = el("div", { id: "set-labor", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
   const laborHeader = el("div", { class: "font-semibold" });
   laborHeader.innerHTML = `6. 労務ルール（労基順守）${helpIcon("labor-rules")}`;
   laborCard.appendChild(laborHeader);
@@ -9053,7 +9057,7 @@ function viewSettings() {
   wrap.appendChild(laborCard);
 
   // 給与計算オプション (Round 14)
-  const payCard = el("div", { id: "set-payroll", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  const payCard = el("div", { id: "set-payroll", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
   payCard.appendChild(el("div", { class: "font-semibold" }, "給与計算オプション"));
   payCard.appendChild(el("div", { class: "text-xs text-slate-500" },
     "深夜手当 (22時以降の時給割増) を給与計算 CSV に反映します。労働基準法では 22:00〜翌5:00 の労働は通常時給の 25% 増し以上が必要です。"));
@@ -9089,7 +9093,7 @@ function viewSettings() {
   wrap.appendChild(payCard);
 
   // 希望提出締切設定 (Round 4)
-  const dlCard = el("div", { id: "set-deadline", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  const dlCard = el("div", { id: "set-deadline", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
   dlCard.appendChild(el("div", { class: "font-semibold" }, "7. 希望提出締切"));
   dlCard.appendChild(el("div", { class: "text-xs text-slate-500" },
     "スタッフポータルにカウントダウン表示されます。シフト編成の前日設定が一般的です。"));
@@ -9122,7 +9126,7 @@ function viewSettings() {
   wrap.appendChild(dlCard);
 
   // Algorithm weights
-  const algoCard = el("div", { id: "set-algo", class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  const algoCard = el("div", { id: "set-algo", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
   const algoHeader = el("div", { class: "flex items-center justify-between flex-wrap gap-2" });
   const algoTitle = el("div", { class: "font-semibold" });
   algoTitle.innerHTML = `7. アルゴリズム重み調整${helpIcon("algo-weights")}`;
@@ -9230,7 +9234,7 @@ function viewSettings() {
   wrap.appendChild(algoCard);
 
   // Staff Messages inbox
-  const msgCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-3" });
+  const msgCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3" });
   const msgHeader = el("div", { class: "flex items-center justify-between" });
   msgHeader.innerHTML = `<div class="font-semibold">📥 スタッフからの連絡</div>`;
   msgHeader.appendChild(el("button", { id: "refreshMsgBtn", class: "text-xs text-brand-600 underline", onclick: () => loadStaffMessages() }, "↻ 更新"));
@@ -9258,7 +9262,7 @@ function viewSettings() {
   wrap.appendChild(backupCard);
 
   // テーマ設定 (Round 25 TOP 3)
-  const themeCard = el("div", { class: "bg-white border border-slate-200 rounded-xl p-4 space-y-2" });
+  const themeCard = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-2" });
   themeCard.appendChild(el("div", { class: "font-semibold" }, "🎨 表示テーマ"));
   const curTheme = state.meta.theme || "auto";
   const themeOpts = [
@@ -9694,7 +9698,11 @@ function openHistoryDialog(initialTab) {
     mb.innerHTML = "";
     mb.appendChild(renderRoot());
     const m = $("#modal");
-    if (m) m.classList.remove("hidden");
+    if (m) {
+      m.classList.remove("hidden");
+      // Round 42 fix: backdrop クリックで閉じる
+      m.onclick = (e) => { if (e.target === m) closeModal(); };
+    }
   }
 
   redraw();
