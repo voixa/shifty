@@ -264,7 +264,11 @@
   function buildSlots(meta, weekStart) {
     const slots = [];
     const plan = meta.staffingPlan || {};
-    for (let i = 0; i < 7; i++) {
+    // ユーザ要望: シフト作成期間を店舗側で決められるように。
+    // meta.scheduleHorizonDays (7 / 14 / 21 / 28) を読み、そのN日分の枠を生成。
+    // デフォルトは 7 日 = 1 週間 (従来挙動と互換)。
+    const horizon = Math.max(1, Math.min(31, Number(meta.scheduleHorizonDays) || 7));
+    for (let i = 0; i < horizon; i++) {
       const date = addDays(weekStart, i);
       // 祝日対応: 設定により祝日を日曜扱い
       const dow = effectiveDayOfWeek(date, meta);
@@ -477,6 +481,8 @@
     };
     if (!state.meta.randomStarts) state.meta.randomStarts = 5;
     if (state.meta.onboardingCompleted === undefined) state.meta.onboardingCompleted = false;
+    // ユーザ要望: シフト作成期間 (7 / 14 / 21 / 28 日) を店舗ごとに選べる
+    if (state.meta.scheduleHorizonDays === undefined) state.meta.scheduleHorizonDays = 7;
     // 祝日扱い: as_sunday (デフォルト) | ignore (無視) | manual
     if (!state.meta.holidayHandling) state.meta.holidayHandling = "as_sunday";
     // 希望提出の締切設定 (週開始の何日前 / 何時)

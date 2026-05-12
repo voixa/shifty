@@ -277,11 +277,6 @@
         <span class="flex items-center gap-1"><span class="text-emerald-600 font-bold">✓</span> 全機能 8 名まで無制限利用</span>
         <span class="flex items-center gap-1"><span class="text-emerald-600 font-bold">✓</span> いつでも解約・違約金なし</span>
       </div>
-      <!-- サイクル 5 #14: 社会的証明を Hero 直下に bring up (Developer Story まで待たない) -->
-      <div class="mt-5 inline-flex items-center gap-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full px-4 py-1.5 text-xs text-slate-700 dark:text-slate-300">
-        <span class="text-base">🏪</span>
-        <span>姉妹サービス <a href="https://voixa.in-dx.jp" target="_blank" rel="noopener" class="text-brand-600 dark:text-brand-500 font-semibold underline">VOIXA</a> は 5 店舗で運用中。Shifty も同じインフラ・同じサポート体制で運営しています。</span>
-      </div>
       <div class="mt-4 text-[11px] text-slate-400">
         ※ Pro プラン (¥1,980/月・スタッフ無制限) は 9 名以上の単店舗 / API 連携が必要な店舗向け。多店舗運営は Business (¥4,980/月・5 店舗) または Enterprise を。
       </div>
@@ -423,66 +418,28 @@
     </div>
   </section>
 
-  <!-- Developer Story + Trust Signals -->
-  <!-- サイクル 14: dark mode 全面修正 — 旧版は Tailwind gradient (CSS 変数生成) が
-       styles.css の .dark override をすり抜けて「明背景 + 明文字 = 不可視」状態だった。
-       light/dark 両方の gradient を明示し、全 text 色に dark variant を付与。 -->
-  <section class="py-16 bg-gradient-to-br from-emerald-50 to-amber-50 dark:from-emerald-900/30 dark:to-amber-900/20 border-y border-emerald-100 dark:border-emerald-800">
+  <!-- Trust Signals (Developer Story + パートナー募集は削除済 — ユーザ要望反映) -->
+  <section class="py-12 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800/30 dark:to-slate-900 border-y border-slate-100 dark:border-slate-700">
     <div class="max-w-4xl mx-auto px-4">
-      <div class="grid md:grid-cols-[120px_1fr] gap-6 md:gap-8 items-start">
-        <!-- Avatar -->
-        <div class="flex justify-center md:justify-start">
-          <div class="w-24 h-24 md:w-28 md:h-28 rounded-full bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white text-3xl font-bold shadow-lg shrink-0">
-            柳
-          </div>
+      <div class="text-center mb-6">
+        <h2 class="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100 mb-1">🛡️ 安心の運用基盤</h2>
+        <p class="text-xs text-slate-500 dark:text-slate-400">エンタープライズ水準のセキュリティでデータをお預かりします</p>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-3xl mx-auto">
+        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4 text-center">
+          <div class="text-2xl mb-2">☁️</div>
+          <div class="font-semibold text-sm text-slate-900 dark:text-slate-100">Google Cloud</div>
+          <div class="text-xs text-slate-600 dark:text-slate-400 mt-1">Firestore 暗号化保存・自動バックアップ</div>
         </div>
-        <div>
-          <div class="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mb-2">👋 開発者からのメッセージ</div>
-          <h2 class="text-xl md:text-2xl font-bold mb-3 text-slate-900 dark:text-slate-100">はじめまして、飲DX 代表の<span class="text-brand-700 dark:text-brand-400">柳下</span>です。</h2>
-          <p class="text-sm text-slate-700 dark:text-slate-200 leading-relaxed mb-4">
-            2025 年 12 月、飲食店向けの電話 AI「<a href="https://voixa.in-dx.jp" target="_blank" rel="noopener" class="text-brand-600 dark:text-brand-400 underline font-semibold">VOIXA</a>」を 5 店舗にお届けする中で、店長さんから一番多く聞いた声が
-            <strong class="bg-amber-100 dark:bg-amber-900/40 dark:text-amber-100 px-1">「シフト作成、毎週 3 時間以上かかる…」</strong>でした。
-            <br><br>
-            この声から生まれたのが Shifty です。AI が希望を聞いて、シフトを 5 分で組む。それだけのシンプルなツールです。<br>
-            一人で開発・運用しているため、「<strong>個人飲食店なら無料</strong>」を実現できました。広告で集めるお金もないので、口コミで使ってくださる方を大事にしたいです。
-          </p>
-
-          <!-- β Partner CTA -->
-          <div class="bg-white dark:bg-slate-800 rounded-xl border-2 border-emerald-400 dark:border-emerald-600 p-4 mb-4 shadow">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">募集中</span>
-              <h3 class="font-bold text-base text-slate-900 dark:text-slate-100">🎯 初期 10 店舗の β パートナー募集</h3>
-            </div>
-            <ul class="text-xs text-slate-700 dark:text-slate-200 space-y-1 mb-3">
-              <li class="flex gap-2"><span class="text-emerald-600 dark:text-emerald-400">✓</span><strong>Pro 機能（¥1,980/月相当）も期間中ずっと無料</strong></li>
-              <li class="flex gap-2"><span class="text-emerald-600 dark:text-emerald-400">✓</span>柳下に直接フィードバックできる窓口（Slack or LINE）</li>
-              <li class="flex gap-2"><span class="text-emerald-600 dark:text-emerald-400">✓</span>初期セットアップは無料で代行（CSV ファイルをお預かりして取込）</li>
-              <li class="flex gap-2"><span class="text-emerald-600 dark:text-emerald-400">✓</span>使ってみて合わなければ、いつでも 1 メールで解約 OK</li>
-            </ul>
-            <a href="#contact" data-plan="free" class="plan-cta-free inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg px-5 py-2.5">
-              β パートナーに応募する →
-            </a>
-          </div>
-
-          <!-- Trust badges (サイクル 6 #18: SVG 廃止、テキスト + テキスト型ロゴで明瞭化) -->
-          <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
-            <span class="font-semibold text-slate-700 dark:text-slate-200 w-full mb-1">🛡️ 安心の運用基盤</span>
-            <span class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 flex items-center gap-1.5">
-              <span class="text-base">☁️</span>
-              <span><strong class="text-slate-900 dark:text-slate-100">Google Cloud</strong> 上で運用 / Firestore 暗号化保存</span>
-            </span>
-            <span class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 flex items-center gap-1.5">
-              <span class="font-bold text-[#635BFF] dark:text-[#7c79ff]">Stripe</span>
-              <span>決済 / <strong>PCI DSS</strong> 準拠</span>
-            </span>
-            <span class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2.5 py-1.5 flex items-center gap-1.5">
-              <span class="text-base">🔒</span>
-              <span>HTTPS / CSP / 監査ログ / 日次バックアップ</span>
-            </span>
-          </div>
-          <div class="mt-3 text-[10px] text-slate-500">
-            飲DX は <a href="https://voixa.in-dx.jp" target="_blank" rel="noopener" class="underline">VOIXA</a>（電話 AI・5 店舗導入実績）の運営元です。
-          </div>
+        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4 text-center">
+          <div class="text-2xl mb-2 font-bold text-[#635BFF] dark:text-[#7c79ff]">Stripe</div>
+          <div class="font-semibold text-sm text-slate-900 dark:text-slate-100">決済処理</div>
+          <div class="text-xs text-slate-600 dark:text-slate-400 mt-1">PCI DSS 準拠・カード情報は当社で保持しません</div>
+        </div>
+        <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4 text-center">
+          <div class="text-2xl mb-2">🔒</div>
+          <div class="font-semibold text-sm text-slate-900 dark:text-slate-100">セキュリティ</div>
+          <div class="text-xs text-slate-600 dark:text-slate-400 mt-1">HTTPS / CSP / 監査ログ / JSON 全データ取出</div>
         </div>
       </div>
     </div>

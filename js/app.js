@@ -1334,12 +1334,22 @@ function showPostGenFeedback(result) {
 
 // ===== クイックセットアップウィザード (Round 32 TOP 1) =====
 function openQuickSetupWizard() {
+  // ユーザ要望: AI がシフトを組む上で不足がないよう、設定項目を網羅的に聞く
+  // 旧: 3 ステップ (業態 / 時間 / 規模) のみ
+  // 新: 6 ステップ + 確認画面 (定休日・予算・期間も追加)
   const BUSINESS_TYPES = (window.ShiftyData || {}).BUSINESS_TYPES || {};
   const SESSION_PRESETS = (window.ShiftyData || {}).SESSION_PRESETS || {};
+  const TOTAL_STEPS = 6;
   let step = 0;
-  let selectedType = null;
+
+  // 既存設定を初期値として読み込む (再実行時に前回値が見える)
+  let selectedType = state.meta.businessType || null;
   let selectedHours = null;
   let staffCountTier = null;
+  let closedDays = new Set();  // 0=日, 1=月, ... 6=土
+  let weeklyBudget = state.meta.weeklyBudget || 380000;
+  let laborCostRatioTarget = state.meta.laborCostRatioTarget || 0.28;
+  let scheduleHorizonDays = state.meta.scheduleHorizonDays || 7;
 
   const HOUR_PRESETS = [
     { id: "lunch_dinner", label: "ランチ + ディナー", desc: "11:00〜15:00 + 17:00〜22:00 (典型的な飲食店)" },
@@ -1354,14 +1364,44 @@ function openQuickSetupWizard() {
     { id: "large", label: "大規模 (16+ 名)", desc: "ファミレス、チェーン店" },
   ];
 
+  const HORIZON_OPTS = [
+    { val: 7,  label: "1 週間 (7 日)" },
+    { val: 14, label: "2 週間 (14 日)" },
+    { val: 21, label: "3 週間 (21 日)" },
+    { val: 28, label: "4 週間 (28 日)" },
+  ];
+
+  const DOW_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+
+  // ステップタイトル
+  const STEP_TITLES = [
+    "1. お店の業態",
+    "2. 営業時間",
+    "3. 定休日",
+    "4. スタッフ規模",
+    "5. 人件費目標",
+    "6. シフト作成期間",
+  ];
+
+  // 現在ステップが有効か (次へ ボタンを活性化できるか)
+  function canProceed() {
+    if (step === 0) return !!selectedType;
+    if (step === 1) return !!selectedHours;
+    if (step === 2) return true;  // 定休日はゼロでも OK
+    if (step === 3) return !!staffCountTier;
+    if (step === 4) return weeklyBudget > 0 && laborCostRatioTarget > 0;
+    if (step === 5) return scheduleHorizonDays > 0;
+    return false;
+  }
+
   function render() {
     const body = el("div", { class: "p-6 space-y-4" });
     body.appendChild(el("div", { class: "flex items-center gap-3 mb-2" }, [
       el("div", { class: "text-3xl" }, "🚀"),
       el("div", { class: "flex-1" }, [
-        el("div", { class: "text-xs text-slate-500" }, `ステップ ${step + 1} / 3`),
+        el("div", { class: "text-xs text-slate-500 dark:text-slate-400" }, `ステップ ${step + 1} / ${TOTAL_STEPS}`),
         el("h3", { class: "font-bold text-lg" }, [
-          "クイックセットアップ",
+          STEP_TITLES[step] || "確認",
           el("span", { class: "ml-2 text-xs font-normal text-slate-500" }, "(後から変更可)"),
         ]),
       ]),
@@ -1369,7 +1409,7 @@ function openQuickSetupWizard() {
 
     // 進捗ドット
     const dots = el("div", { class: "flex gap-1.5 mb-3" });
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < TOTAL_STEPS; i++) {
       dots.appendChild(el("div", {
         class: `flex-1 h-1.5 rounded-full ${i <= step ? "bg-brand-600" : "bg-slate-200 dark:bg-slate-700"}`,
       }));
@@ -1377,7 +1417,9 @@ function openQuickSetupWizard() {
     body.appendChild(dots);
 
     if (step === 0) {
-      body.appendChild(el("div", { class: "font-semibold text-sm" }, "1. お店の業態を選んでください"));
+      // ステップ 1: 業態
+      body.appendChild(el("div", { class: "text-sm text-slate-600 dark:text-slate-400 mb-2" },
+        "AI がシフトを組む際の業態テンプレを選択します"));
       const list = el("div", { class: "space-y-2 max-h-64 overflow-y-auto" });
       for (const [key, bt] of Object.entries(BUSINESS_TYPES)) {
         const isSelected = key === selectedType;
@@ -1392,9 +1434,9 @@ function openQuickSetupWizard() {
       }
       body.appendChild(list);
     } else if (step === 1) {
-      body.appendChild(el("div", { class: "font-semibold text-sm" }, "2. 営業時間のパターンを選んでください"));
-      body.appendChild(el("div", { class: "text-xs text-slate-500" },
-        "業態に応じて推奨パターンを表示しています。詳細時間は後で営業時間タブから個別調整できます。"));
+      // ステップ 2: 営業時間
+      body.appendChild(el("div", { class: "text-sm text-slate-600 dark:text-slate-400 mb-2" },
+        "営業時間のパターンを選択。詳細時間は後から個別調整できます。"));
       const list = el("div", { class: "space-y-2" });
       for (const opt of HOUR_PRESETS) {
         const isSelected = opt.id === selectedHours;
@@ -1409,9 +1451,38 @@ function openQuickSetupWizard() {
       }
       body.appendChild(list);
     } else if (step === 2) {
-      body.appendChild(el("div", { class: "font-semibold text-sm" }, "3. 概ねのスタッフ人数は？"));
-      body.appendChild(el("div", { class: "text-xs text-slate-500" },
-        "必要人数の目安を自動設定します。後から「必要人数マトリクス」で個別調整可能です。"));
+      // ステップ 3: 定休日
+      body.appendChild(el("div", { class: "text-sm text-slate-600 dark:text-slate-400 mb-2" },
+        "定休日があれば選んでください (なければ何も選ばずに「次へ」)。"));
+      body.appendChild(el("div", { class: "text-xs text-slate-500 dark:text-slate-400 bg-blue-50 dark:bg-blue-900/30 rounded p-2.5 mb-3" },
+        "💡 定休日は AI 上で「全シフト 0 枠」として扱われ、誰もアサインされません。"));
+      const grid = el("div", { class: "grid grid-cols-7 gap-1.5" });
+      for (let dow = 0; dow < 7; dow++) {
+        const isClosed = closedDays.has(dow);
+        const isWeekendColor = dow === 0 ? "text-red-600" : dow === 6 ? "text-blue-600" : "";
+        const btn = el("button", {
+          class: `aspect-square rounded-md border-2 font-semibold text-sm transition ${isClosed
+            ? "bg-red-100 border-red-500 text-red-800 dark:bg-red-900/40"
+            : "bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 hover:border-slate-400 " + isWeekendColor}`,
+          onclick: () => {
+            if (closedDays.has(dow)) closedDays.delete(dow);
+            else closedDays.add(dow);
+            renderModal();
+          },
+        });
+        btn.innerHTML = `${DOW_LABELS[dow]}${isClosed ? '<div class="text-[10px] font-normal mt-0.5">休</div>' : ""}`;
+        grid.appendChild(btn);
+      }
+      body.appendChild(grid);
+      if (closedDays.size > 0) {
+        const labels = Array.from(closedDays).sort().map(d => DOW_LABELS[d] + "曜日").join("・");
+        body.appendChild(el("div", { class: "text-xs text-red-700 dark:text-red-400 pt-2" },
+          `📅 定休日: ${labels}`));
+      }
+    } else if (step === 3) {
+      // ステップ 4: スタッフ規模
+      body.appendChild(el("div", { class: "text-sm text-slate-600 dark:text-slate-400 mb-2" },
+        "必要人数の目安を自動設定します。後から個別調整可能。"));
       const list = el("div", { class: "space-y-2" });
       for (const opt of STAFF_COUNT_TIERS) {
         const isSelected = opt.id === staffCountTier;
@@ -1425,23 +1496,86 @@ function openQuickSetupWizard() {
         list.appendChild(card);
       }
       body.appendChild(list);
+    } else if (step === 4) {
+      // ステップ 5: 人件費目標
+      body.appendChild(el("div", { class: "text-sm text-slate-600 dark:text-slate-400 mb-2" },
+        "週間の人件費予算と、売上に対する目標人件費率を設定します。AI がコスト最適化の参考にします。"));
+
+      body.appendChild(el("label", { class: "block" }, [
+        el("span", { class: "text-sm font-semibold text-slate-700 dark:text-slate-200" }, "週次人件費予算 (円)"),
+        (() => {
+          const inp = el("input", {
+            type: "number",
+            min: "0", step: "10000",
+            class: "mt-1 w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 rounded-md px-3 py-2",
+          });
+          inp.value = weeklyBudget;
+          inp.oninput = () => { weeklyBudget = Number(inp.value) || 0; };
+          return inp;
+        })(),
+        el("div", { class: "text-xs text-slate-500 mt-1" },
+          "目安: 個人店 30〜50 万、中規模店 50〜100 万、大規模店 100 万以上"),
+      ]));
+
+      body.appendChild(el("label", { class: "block mt-3" }, [
+        el("span", { class: "text-sm font-semibold text-slate-700 dark:text-slate-200" }, "目標人件費率 (%)"),
+        (() => {
+          const inp = el("input", {
+            type: "number", min: "10", max: "60", step: "1",
+            class: "mt-1 w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 rounded-md px-3 py-2",
+          });
+          inp.value = Math.round(laborCostRatioTarget * 100);
+          inp.oninput = () => { laborCostRatioTarget = (Number(inp.value) || 28) / 100; };
+          return inp;
+        })(),
+        el("div", { class: "text-xs text-slate-500 mt-1" },
+          "業界平均は 25〜30%。客単価が高い店は 30〜35%、低単価業態は 20〜25% が目安"),
+      ]));
+    } else if (step === 5) {
+      // ステップ 6: シフト作成期間
+      body.appendChild(el("div", { class: "text-sm text-slate-600 dark:text-slate-400 mb-2" },
+        "一度に作成するシフトの日数。1 週間ごとに組むのが標準ですが、月単位でまとめて組みたい店舗も対応します。"));
+      const list = el("div", { class: "grid grid-cols-2 gap-2" });
+      for (const opt of HORIZON_OPTS) {
+        const isSelected = scheduleHorizonDays === opt.val;
+        const card = el("button", {
+          class: `text-left border-2 rounded-md p-3 transition ${isSelected ? "border-brand-600 bg-brand-50 dark:bg-brand-900/30" : "border-slate-200 dark:border-slate-700 hover:border-slate-400"}`,
+          onclick: () => { scheduleHorizonDays = opt.val; renderModal(); },
+        });
+        card.innerHTML = `<div class="font-semibold text-sm">${escapeHtml(opt.label)}</div>`;
+        list.appendChild(card);
+      }
+      body.appendChild(list);
+
+      // 確認サマリ (最終ステップなのでまとめて表示)
+      body.appendChild(el("div", { class: "mt-4 pt-3 border-t border-slate-200 dark:border-slate-700" }, [
+        el("div", { class: "font-semibold text-sm text-slate-700 dark:text-slate-200 mb-2" }, "📋 設定内容の確認"),
+        el("div", { class: "bg-slate-50 dark:bg-slate-700 rounded p-3 space-y-1 text-xs" }, [
+          el("div", {}, `業態: ${BUSINESS_TYPES[selectedType]?.label || "—"}`),
+          el("div", {}, `営業時間: ${HOUR_PRESETS.find(o => o.id === selectedHours)?.label || "—"}`),
+          el("div", {}, `定休日: ${closedDays.size === 0 ? "なし" : Array.from(closedDays).sort().map(d => DOW_LABELS[d]).join("・") + "曜日"}`),
+          el("div", {}, `スタッフ規模: ${STAFF_COUNT_TIERS.find(o => o.id === staffCountTier)?.label || "—"}`),
+          el("div", {}, `週予算: ¥${weeklyBudget.toLocaleString()} / 目標人件費率 ${Math.round(laborCostRatioTarget * 100)}%`),
+          el("div", {}, `シフト作成期間: ${HORIZON_OPTS.find(o => o.val === scheduleHorizonDays)?.label}`),
+        ]),
+      ]));
     }
 
     // ナビボタン
-    body.appendChild(el("div", { class: "flex justify-between gap-2 pt-3 border-t" }, [
+    body.appendChild(el("div", { class: "flex justify-between gap-2 pt-3 border-t border-slate-200 dark:border-slate-700" }, [
       el("button", {
         class: "px-3 py-1.5 text-sm bg-slate-200 dark:bg-slate-700 rounded-md",
         onclick: () => step === 0 ? closeModal() : (step--, renderModal()),
       }, step === 0 ? "キャンセル" : "← 戻る"),
       el("button", {
         class: `px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-md font-semibold ${
-          (step === 0 && !selectedType) || (step === 1 && !selectedHours) || (step === 2 && !staffCountTier) ? "opacity-50 pointer-events-none" : ""
+          !canProceed() ? "opacity-50 pointer-events-none" : ""
         }`,
         onclick: () => {
-          if (step < 2) { step++; renderModal(); }
+          if (step < TOTAL_STEPS - 1) { step++; renderModal(); }
           else applyQuickSetup();
         },
-      }, step < 2 ? "次へ →" : "✓ 適用"),
+      }, step < TOTAL_STEPS - 1 ? "次へ →" : "✓ すべて適用"),
     ]));
     return body;
   }
@@ -1476,16 +1610,21 @@ function openQuickSetupWizard() {
       state.meta.sessions = JSON.parse(JSON.stringify(sessionPreset.sessions));
     }
 
-    // スタッフ規模に応じた必要人数調整
+    // スタッフ規模に応じた必要人数調整 + 定休日対応
     const tierMultiplier = staffCountTier === "small" ? 0.8 : staffCountTier === "large" ? 1.5 : 1.0;
     const newPlan = {};
     for (const sess of state.meta.sessions) {
       newPlan[sess.id] = {};
       for (let dow = 0; dow < 7; dow++) {
         newPlan[sess.id][dow] = {};
+        const isClosed = closedDays.has(dow);  // 定休日は全ポジション 0
         const isWeekend = dow === 0 || dow === 6;
         const isPeak = sess.id.includes("peak") || sess.id.includes("lunch") || sess.id.includes("dinner");
         for (const pos of state.meta.positions) {
+          if (isClosed) {
+            newPlan[sess.id][dow][pos.id] = 0;  // 定休日は誰もアサインしない
+            continue;
+          }
           let base = bt.defaultStaffCount[pos.id] != null ? bt.defaultStaffCount[pos.id] : 1;
           if (isWeekend && isPeak) base += 1;
           base = Math.round(base * tierMultiplier);
@@ -1498,7 +1637,11 @@ function openQuickSetupWizard() {
     state.meta.laborRules = { ...bt.laborRules };
     state.meta.algorithmWeights = { ...bt.weights };
     state.meta.payrollSettings = { ...bt.payrollSettings };
-    state.meta.laborCostRatioTarget = bt.laborCostRatioTarget;
+    // ユーザ入力した予算・人件費目標・期間を反映 (旧: business type のデフォルト値で上書き)
+    state.meta.weeklyBudget = weeklyBudget;
+    state.meta.laborCostRatioTarget = laborCostRatioTarget;
+    state.meta.scheduleHorizonDays = scheduleHorizonDays;
+    state.meta.onboardingCompleted = true;  // 詳細セットアップ完了マーク
     regenerateCurSlots();
     persist();
     closeModal();
@@ -5128,23 +5271,108 @@ async function regenerateStaffLink(s) {
 }
 
 async function copyAllStaffLinks() {
+  // ユーザ要望対応: 「店のLINEに送るには 1 メッセージで全員分が読めて、各自が
+  // 自分のリンクだけタップして記入する」形式が現場に最適化されている。
+  // 旧: 【名前】URL 1 行のみで生成 → 期限や指示文がない素っ気ない出力
+  // 新: 挨拶 + 期限 + 全員リンク + フッタ をテンプレ化、編集可能、ワンクリックコピー
   try {
-    const lines = [];
-    for (const s of state.staff) {
-      const { token } = await window.ShiftyAPI.genStaffToken(s.id);
-      const url = _staffPortalUrl(token);
-      lines.push(`【${s.name}】${url}`);
+    const activeStaff = state.staff.filter(s => !s.archived);
+    if (activeStaff.length === 0) {
+      toast("スタッフが登録されていません", "error");
+      return;
     }
-    const txt = lines.join("\n");
-    await navigator.clipboard.writeText(txt);
-    toast(`${state.staff.length}名分のリンクをコピー`, "success");
-    const body = el("div", { class: "p-6 space-y-2" });
-    body.appendChild(el("h3", { class: "font-bold text-lg" }, "全スタッフの希望入力リンク"));
-    body.appendChild(el("p", { class: "text-xs text-slate-500" }, "下記をコピーしてLINEで一斉送信してください"));
-    body.appendChild(el("textarea", { class: "w-full border rounded-md p-2 text-xs font-mono h-64", readonly: "" }, txt));
-    body.appendChild(el("div", { class: "flex justify-end" }, [
-      el("button", { class: "px-3 py-1.5 text-sm bg-slate-200 rounded-md", onclick: closeModal }, "閉じる"),
+    // 全員分の token を取得
+    const staffWithUrls = [];
+    for (const s of activeStaff) {
+      const { token } = await window.ShiftyAPI.genStaffToken(s.id);
+      staffWithUrls.push({ name: s.name, url: _staffPortalUrl(token) });
+    }
+
+    // 期間情報を取得 (現在の週 + 締切設定)
+    const wkStart = state.meta.currentWeekStart;
+    const deadline = state.meta.preferenceDeadline;
+    const restaurantName = state.meta.restaurantName || "店舗";
+
+    // 締切日時を計算
+    let deadlineStr = "";
+    if (deadline && typeof deadline === "object" && deadline.daysBefore != null && deadline.hour != null) {
+      const wkDate = new Date(wkStart + "T00:00:00");
+      const dlDate = new Date(wkDate.getTime() - deadline.daysBefore * 86400000);
+      const m = dlDate.getMonth() + 1, d = dlDate.getDate();
+      const dow = ["日","月","火","水","木","金","土"][dlDate.getDay()];
+      deadlineStr = `📅 提出期限: ${m}/${d} (${dow}) ${deadline.hour}:00 まで`;
+    }
+
+    // 期間表示 (週開始 + 7 日)
+    const wkEnd = new Date(new Date(wkStart + "T00:00:00").getTime() + 6 * 86400000);
+    const ws = wkStart.slice(5).replace("-", "/");
+    const we = `${wkEnd.getMonth() + 1}/${wkEnd.getDate()}`;
+    const periodStr = `${ws} 〜 ${we}`;
+
+    // テンプレート組立
+    const defaultGreeting = `お疲れさまです、${restaurantName}です。`;
+    const defaultIntro = `${periodStr} 週分のシフト希望入力をお願いします 🙏\n\n下のリンクは各自の専用 URL です。自分の名前のリンクをタップして提出してください。\n（アプリインストール・ログイン不要、3 分で完了します）`;
+
+    let header = defaultGreeting + "\n\n" + defaultIntro;
+    if (deadlineStr) header += "\n\n" + deadlineStr;
+
+    const linkLines = staffWithUrls.map(s => `👤 ${s.name}\n${s.url}`).join("\n\n");
+    const footer = "わからないことがあれば LINE で返信してください！";
+    const fullText = header + "\n\n━━━━━━━━━━\n\n" + linkLines + "\n\n━━━━━━━━━━\n\n" + footer;
+
+    // モーダル UI 構築
+    const body = el("div", { class: "p-5 space-y-3" });
+    body.appendChild(el("div", { class: "flex items-center gap-3" }, [
+      el("div", { class: "text-3xl" }, "💬"),
+      el("div", { class: "flex-1" }, [
+        el("h3", { class: "font-bold text-lg text-slate-900 dark:text-slate-100" }, "全員のリンクを LINE で配布"),
+        el("p", { class: "text-xs text-slate-500 dark:text-slate-400" },
+          `${activeStaff.length} 名分の希望入力リンク + 案内文を作成しました`),
+      ]),
+      el("button", {
+        class: "text-slate-400 hover:text-slate-700 text-2xl leading-none",
+        onclick: closeModal,
+        "aria-label": "閉じる",
+      }, "×"),
     ]));
+
+    body.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded p-2.5" },
+      "💡 下のテキストを編集 → 「コピー」 → LINE グループに貼り付けて送信。各スタッフは自分の名前の下のリンクだけタップすればポータルに直行します。"));
+
+    const textarea = el("textarea", {
+      class: "w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 rounded-md p-3 text-sm font-mono",
+      rows: "16",
+      style: { resize: "vertical", minHeight: "300px" },
+    });
+    textarea.value = fullText;
+    body.appendChild(textarea);
+
+    // アクションボタン
+    const actionRow = el("div", { class: "flex flex-wrap gap-2 justify-end pt-3 border-t border-slate-200 dark:border-slate-700" });
+    actionRow.appendChild(el("button", {
+      class: "px-3 py-2 text-sm bg-slate-200 dark:bg-slate-700 dark:text-slate-100 hover:bg-slate-300 rounded-md",
+      onclick: () => {
+        textarea.value = fullText;
+        toast("初期テンプレに戻しました", "success");
+      },
+    }, "↺ テンプレに戻す"));
+    actionRow.appendChild(el("button", {
+      class: "px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-bold",
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(textarea.value);
+          toast("✓ クリップボードにコピーしました。LINE に貼り付けてください", "success", 5000);
+        } catch (e) {
+          // clipboard API が使えない場合は textarea を選択させる
+          textarea.select();
+          toast("textarea を選択しました。⌘C / Ctrl+C で手動コピーしてください", "error", 5000);
+        }
+      },
+    }, "📋 コピーして LINE に貼る"));
+    body.appendChild(actionRow);
+
+    // 試しに先頭で 1 度コピーしておく
+    try { await navigator.clipboard.writeText(fullText); } catch (_) {}
     modal(body);
   } catch (e) { toast("リンク生成失敗: " + e.message, "error"); }
 }
@@ -5727,32 +5955,73 @@ function viewPreferences() {
   const w0 = state.meta.currentWeekStart;
   const days = Array.from({ length: 7 }, (_, i) => addDays(w0, i));
 
-  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4" });
-  card.appendChild(el("div", { class: "font-semibold mb-1" }, "希望入力（管理側で代理入力）"));
-  card.appendChild(el("div", { class: "text-xs text-slate-500 mb-3" },
-    "通常はスタッフ自身がモバイルで入力します（上の「LINE用 全員リンク生成」ボタンを使用）"));
+  // 代理希望入力 UI — ユーザフィードバックを受けて全面リニューアル
+  // 旧: 7 行 × N セッションを密集グリッドで小さいボタン → スマホで誤タップ・色だけで意味不明
+  // 新: スタッフ選択 + 凡例 + ボタン拡大 + アイコン併用 + 提出状況サマリ
+  const card = el("div", { class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3" });
 
-  const select = el("select", { class: "border rounded-md px-3 py-2 text-sm w-full mb-3" });
-  state.staff.forEach(s => select.appendChild(el("option", { value: s.id }, s.name)));
-  card.appendChild(select);
+  // ヘッダー
+  card.appendChild(el("div", {}, [
+    el("div", { class: "font-bold text-base text-slate-900 dark:text-slate-100" }, "✍️ 希望入力 (店長による代理入力)"),
+    el("div", { class: "text-xs text-slate-500 dark:text-slate-400 mt-1" },
+      "通常はスタッフ自身が LINE 経由の URL で入力します。スマホを使えないスタッフがいる場合のみ、ここから代理入力してください。"),
+  ]));
 
-  const grid = el("div", { class: "space-y-2" });
+  // 凡例 (色とアイコンの意味を明示)
+  const legend = el("div", { class: "flex flex-wrap gap-2 text-xs bg-slate-50 dark:bg-slate-700 rounded-md p-2.5" });
+  legend.innerHTML = `
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-5 h-5 bg-emerald-100 border-2 border-emerald-500 rounded text-center leading-4">✓</span><span class="text-slate-700 dark:text-slate-200">希望 (入りたい)</span></span>
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-5 h-5 bg-red-100 border-2 border-red-500 rounded text-center leading-4">🔥</span><span class="text-slate-700 dark:text-slate-200">必須 (絶対入る)</span></span>
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-5 h-5 bg-slate-200 dark:bg-slate-600 border-2 border-slate-400 rounded text-center leading-4">✕</span><span class="text-slate-700 dark:text-slate-200">不可 (入れない)</span></span>
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-5 h-5 bg-white dark:bg-slate-800 border-2 border-dashed border-slate-300 dark:border-slate-500 rounded"></span><span class="text-slate-700 dark:text-slate-200">未入力</span></span>
+  `;
+  card.appendChild(legend);
+
+  // スタッフ選択 (提出状況も併記)
+  const staffSelectWrap = el("div", { class: "flex items-center gap-2" });
+  staffSelectWrap.appendChild(el("label", { class: "text-sm font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap" }, "対象スタッフ:"));
+  const select = el("select", { class: "flex-1 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 rounded-md px-3 py-2 text-sm" });
+  state.staff.filter(s => !s.archived).forEach(s => {
+    const hasPrefs = curPrefs().some(p => p.staffId === s.id);
+    const marker = hasPrefs ? "✓ " : "○ ";
+    select.appendChild(el("option", { value: s.id }, marker + s.name));
+  });
+  staffSelectWrap.appendChild(select);
+  card.appendChild(staffSelectWrap);
+
+  // ヒント
+  card.appendChild(el("div", { class: "text-[11px] text-slate-500 dark:text-slate-400 -mt-1" },
+    "💡 「✓」=希望提出済 / 「○」=未提出"));
+
+  // グリッド本体
+  const grid = el("div", { class: "space-y-1.5" });
   function refreshGrid(staffId) {
     grid.innerHTML = "";
     days.forEach(d => {
       const dow = dayOfWeek(d);
       const dayLabel = `${d.slice(5)} (${DAY_LABELS[dow]})`;
-      const row = el("div", { class: "flex items-center gap-2 text-sm bg-slate-50 rounded-md p-2 flex-wrap" });
-      row.appendChild(el("div", { class: "w-20 font-medium text-slate-700" }, dayLabel));
+      const isWeekend = dow === 0 || dow === 6;
+      const labelColor = dow === 0 ? "text-red-600 dark:text-red-400"
+                       : dow === 6 ? "text-blue-600 dark:text-blue-400"
+                       : "text-slate-700 dark:text-slate-200";
+      // 1 日分のカード
+      const dayCard = el("div", {
+        class: `border ${isWeekend ? "border-slate-300 bg-slate-50 dark:bg-slate-700/50" : "border-slate-200 dark:border-slate-700"} rounded-lg p-2.5`,
+      });
+      dayCard.appendChild(el("div", { class: `font-semibold text-sm mb-2 ${labelColor}` }, dayLabel));
+      const btnRow = el("div", { class: "flex flex-wrap gap-1.5" });
       for (const sess of state.meta.sessions) {
         const cur = curPrefs().find(p => p.staffId === staffId && p.date === d && p.startTime === sess.startTime && p.endTime === sess.endTime);
-        const cls = cur
-          ? (cur.priority === "must"  ? "bg-red-100 border-red-300 text-red-800"
-            : cur.priority === "avoid" ? "bg-slate-200 border-slate-300 text-slate-600 line-through"
-            : "bg-emerald-100 border-emerald-300 text-emerald-800")
-          : "bg-white border-slate-300 text-slate-500";
+        const priority = cur ? cur.priority : "none";
+        const config = {
+          want:  { cls: "bg-emerald-100 border-emerald-500 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200", icon: "✓", label: "希望" },
+          must:  { cls: "bg-red-100 border-red-500 text-red-900 dark:bg-red-900/40 dark:text-red-200", icon: "🔥", label: "必須" },
+          avoid: { cls: "bg-slate-200 border-slate-400 text-slate-700 dark:bg-slate-600 dark:text-slate-200 line-through", icon: "✕", label: "不可" },
+          none:  { cls: "bg-white dark:bg-slate-800 border-dashed border-slate-300 dark:border-slate-500 text-slate-500 dark:text-slate-400", icon: "", label: "" },
+        }[priority];
         const btn = el("button", {
-          class: `text-xs px-2.5 py-1 rounded-md border ${cls}`,
+          class: `flex-1 min-w-[88px] text-sm px-3 py-2 rounded-md border-2 transition active:scale-95 hover:shadow-sm ${config.cls}`,
+          "aria-label": `${dayLabel} ${sess.label} ${config.label || "未入力"}`,
           onclick: () => {
             const order = ["want", "must", "avoid", "none"];
             const cur2 = curPrefs().find(p => p.staffId === staffId && p.date === d && p.startTime === sess.startTime && p.endTime === sess.endTime);
@@ -5764,16 +6033,27 @@ function viewPreferences() {
             }
             persist(); refreshGrid(staffId);
           }
-        }, sess.label);
-        row.appendChild(btn);
+        });
+        // ボタン内: アイコン + セッションラベル
+        btn.innerHTML = `
+          <div class="flex items-center justify-center gap-1.5">
+            ${config.icon ? `<span class="text-base">${config.icon}</span>` : ""}
+            <span class="font-semibold">${escapeHtml(sess.label)}</span>
+          </div>
+          <div class="text-[10px] mt-0.5 opacity-80">${escapeHtml(sess.startTime)}〜${escapeHtml(sess.endTime)}</div>
+        `;
+        btnRow.appendChild(btn);
       }
-      grid.appendChild(row);
+      dayCard.appendChild(btnRow);
+      grid.appendChild(dayCard);
     });
-    grid.appendChild(el("div", { class: "text-xs text-slate-500 pt-2" },
-      "タップで [未入力 → 希望 → 必須 → 入りたくない] を切替"));
+    grid.appendChild(el("div", { class: "text-xs text-slate-500 dark:text-slate-400 pt-2 italic" },
+      "💡 ボタンを繰り返しタップで [未入力 → 希望 → 必須 → 不可 → 未入力] と切替"));
   }
   select.onchange = () => refreshGrid(select.value);
-  refreshGrid(state.staff[0]?.id);
+  if (state.staff.filter(s => !s.archived)[0]) {
+    refreshGrid(state.staff.filter(s => !s.archived)[0].id);
+  }
   card.appendChild(grid);
   wrap.appendChild(card);
   return wrap;
@@ -8195,6 +8475,21 @@ function autoGenerate() {
   }
   if (curStatus() === "published") { toast("確定済の週は再生成できません。先に「下書きに戻す」してください。", "error"); return; }
   if (curSlots().length === 0) { toast("シフト枠がありません。設定タブの「必要人数」で定義してください。", "error"); return; }
+
+  // ユーザ要望: 希望未提出スタッフがいる場合は AI 生成前に警告ダイアログ
+  // 未提出者を AI が「希望ゼロ」とみなして配置してしまうトラブルを防ぐ
+  const activeStaff = state.staff.filter(s => !s.archived);
+  const submittedIds = new Set(curPrefs().map(p => p.staffId));
+  const unsubmitted = activeStaff.filter(s => !submittedIds.has(s.id));
+  if (unsubmitted.length > 0) {
+    openUnsubmittedWarningDialog(unsubmitted, () => {
+      // 続行
+      if (curAssignments().length > 0) openAutoGeneratePreviewDialog();
+      else runAutoGenerate();
+    });
+    return;
+  }
+
   // Round 31 TOP 1: 既存アサインがある場合はプレビュー → 確認モーダル
   if (curAssignments().length > 0) {
     openAutoGeneratePreviewDialog();
@@ -8202,6 +8497,70 @@ function autoGenerate() {
   }
   // 初回生成は即実行
   runAutoGenerate();
+}
+
+// 希望未提出スタッフがいる時の警告 + 続行/促し選択ダイアログ
+function openUnsubmittedWarningDialog(unsubmitted, onContinue) {
+  const activeN = state.staff.filter(s => !s.archived).length;
+  const submittedN = activeN - unsubmitted.length;
+  const body = el("div", { class: "p-5 space-y-3" });
+  body.appendChild(el("div", { class: "flex items-start gap-3" }, [
+    el("div", { class: "text-4xl" }, "⚠️"),
+    el("div", { class: "flex-1" }, [
+      el("h3", { class: "font-bold text-lg text-amber-900 dark:text-amber-200" },
+        `希望未提出のスタッフが ${unsubmitted.length} 名います`),
+      el("p", { class: "text-sm text-slate-700 dark:text-slate-300 mt-1" },
+        "未提出スタッフは AI 上では「全シフト不在」として扱われるため、配置されません。本当にこのまま生成しますか？"),
+    ]),
+  ]));
+
+  // 提出状況サマリ
+  body.appendChild(el("div", { class: "bg-slate-50 dark:bg-slate-700 rounded p-3 text-sm" }, [
+    el("div", { class: "flex justify-between mb-2" }, [
+      el("span", { class: "font-semibold" }, "希望提出状況"),
+      el("span", {}, `${submittedN} / ${activeN} 名 (${Math.round(submittedN / activeN * 100)}%)`),
+    ]),
+    (() => {
+      const bar = el("div", { class: "w-full h-2 bg-slate-200 dark:bg-slate-600 rounded-full overflow-hidden" });
+      const fill = el("div", { class: "h-full bg-emerald-500", style: { width: (submittedN / activeN * 100) + "%" } });
+      bar.appendChild(fill);
+      return bar;
+    })(),
+  ]));
+
+  // 未提出者リスト
+  const unsubCard = el("div", { class: "bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded p-3 max-h-48 overflow-y-auto" });
+  unsubCard.appendChild(el("div", { class: "text-xs font-semibold text-amber-900 dark:text-amber-200 mb-2" }, "未提出のスタッフ:"));
+  const list = el("ul", { class: "text-xs text-amber-900 dark:text-amber-200 space-y-1" });
+  for (const s of unsubmitted) {
+    list.appendChild(el("li", { class: "flex items-center gap-1" }, [
+      el("span", { class: "text-amber-600" }, "•"),
+      el("span", { class: "font-medium" }, s.name),
+    ]));
+  }
+  unsubCard.appendChild(list);
+  body.appendChild(unsubCard);
+
+  body.appendChild(el("div", { class: "text-xs text-slate-600 dark:text-slate-400 bg-blue-50 dark:bg-blue-900/30 rounded p-2.5" },
+    "💡 おすすめ: 「📨 募集メッセージを送信」で未提出者にリマインドしてから生成すると、希望が反映された質の高いシフトになります。"));
+
+  // アクション
+  const actions = el("div", { class: "flex flex-col sm:flex-row gap-2 pt-3 border-t border-slate-200 dark:border-slate-700" });
+  actions.appendChild(el("button", {
+    class: "flex-1 px-3 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-bold",
+    onclick: () => { closeModal(); setTab("staff"); setTimeout(() => { if (typeof openRecruitDialog === "function") openRecruitDialog(); }, 200); },
+  }, "📨 未提出者にリマインド (推奨)"));
+  actions.appendChild(el("button", {
+    class: "flex-1 px-3 py-2 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded-md font-semibold",
+    onclick: () => { closeModal(); onContinue(); },
+  }, "⚠️ このまま AI 生成"));
+  actions.appendChild(el("button", {
+    class: "px-3 py-2 text-sm bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 rounded-md",
+    onclick: closeModal,
+  }, "キャンセル"));
+  body.appendChild(actions);
+
+  modal(body);
 }
 
 // Round 31 TOP 1: AI 生成プレビュー
@@ -9091,6 +9450,44 @@ function viewSettings() {
       persist(); render(); toast("給与計算オプションを保存", "success");
     } }, "保存"));
   wrap.appendChild(payCard);
+
+  // ユーザ要望: シフト作成期間カスタマイズ
+  const horizonCard = el("div", { id: "set-horizon", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  horizonCard.appendChild(el("div", { class: "font-semibold" }, "6.5 シフト作成期間"));
+  horizonCard.appendChild(el("div", { class: "text-xs text-slate-500 dark:text-slate-400" },
+    "一度に作成するシフトの日数を選択できます。1 週間ごとに組むのが一般的ですが、2 週間〜1 ヶ月先までまとめて組みたい店舗も選べます。"));
+  const curHorizon = Number(state.meta.scheduleHorizonDays) || 7;
+  const horizonOpts = [
+    { val: 7,  label: "1 週間 (7 日)",   desc: "標準・毎週シフトを組む", recommended: true },
+    { val: 14, label: "2 週間 (14 日)",  desc: "隔週でシフトを組む" },
+    { val: 21, label: "3 週間 (21 日)",  desc: "" },
+    { val: 28, label: "4 週間 (28 日)",  desc: "ほぼ 1 ヶ月先まで一度に組む" },
+  ];
+  const horizonGrid = el("div", { class: "grid grid-cols-2 md:grid-cols-4 gap-2" });
+  for (const opt of horizonOpts) {
+    const isSel = curHorizon === opt.val;
+    const btn = el("button", {
+      class: `text-left rounded-md p-3 border-2 transition ${isSel ? "border-brand-600 bg-brand-50 dark:bg-brand-900/30" : "border-slate-200 dark:border-slate-600 hover:border-slate-400"}`,
+      onclick: () => {
+        if (!confirm(`シフト作成期間を「${opt.label}」に変更しますか?\n\n既存の確定済シフトはそのまま残ります。次回 AI 生成時から新しい期間が反映されます。`)) return;
+        state.meta.scheduleHorizonDays = opt.val;
+        // 現在の週のシフト枠を再生成
+        regenerateCurSlots();
+        persist();
+        render();
+        toast(`✓ シフト作成期間を ${opt.label} に変更`, "success");
+      },
+    });
+    btn.innerHTML = `
+      <div class="font-semibold text-sm">${opt.label}${opt.recommended ? ' <span class="text-[10px] bg-emerald-500 text-white px-1 rounded ml-1">推奨</span>' : ''}</div>
+      ${opt.desc ? `<div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${opt.desc}</div>` : ""}
+    `;
+    horizonGrid.appendChild(btn);
+  }
+  horizonCard.appendChild(horizonGrid);
+  horizonCard.appendChild(el("div", { class: "text-[11px] text-slate-500 dark:text-slate-400 bg-blue-50 dark:bg-blue-900/30 rounded p-2" },
+    "💡 期間を変更すると、ナビゲーションの「◀ ▶」ボタンも同じ日数ステップで動くようになります。 (例: 2 週間設定 → ▶ で 14 日進む)"));
+  wrap.appendChild(horizonCard);
 
   // 希望提出締切設定 (Round 4)
   const dlCard = el("div", { id: "set-deadline", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
@@ -10449,8 +10846,15 @@ document.addEventListener("DOMContentLoaded", () => {
   $$(".tab-btn").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
 
   // Week nav
-  $("#prevWeekBtn").addEventListener("click", () => goToWeek(addDays(state.meta.currentWeekStart, -7)));
-  $("#nextWeekBtn").addEventListener("click", () => goToWeek(addDays(state.meta.currentWeekStart, 7)));
+  // ユーザ要望: 期間カスタマイズ (7/14/21/28日) に応じて nav も同じ刻みでステップ
+  $("#prevWeekBtn").addEventListener("click", () => {
+    const h = Math.max(1, Number(state.meta.scheduleHorizonDays) || 7);
+    goToWeek(addDays(state.meta.currentWeekStart, -h));
+  });
+  $("#nextWeekBtn").addEventListener("click", () => {
+    const h = Math.max(1, Number(state.meta.scheduleHorizonDays) || 7);
+    goToWeek(addDays(state.meta.currentWeekStart, h));
+  });
   $("#weekJumpBtn").addEventListener("click", () => {
     const body = el("div", { class: "p-6" });
     body.appendChild(el("h3", { class: "font-bold text-lg mb-3" }, "週ジャンプ"));

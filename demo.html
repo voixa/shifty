@@ -5,7 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Shifty デモ — 触って確かめる</title>
   <meta name="robots" content="noindex,nofollow" />
-  <script>window.__SHIFTY_DEMO_MODE__ = true;</script>
+  <script>
+    window.__SHIFTY_DEMO_MODE__ = true;
+    // ユーザ要望: デモは毎回サンプルデータで最初から始まる
+    // 旧: localStorage.shifty.demo.state に永続化 → 前回触った内容が残り続けた
+    // 新: ページロードごとに demo state をクリア → 常にフレッシュなサンプル状態
+    try { localStorage.removeItem("shifty.demo.state"); } catch (_) {}
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
