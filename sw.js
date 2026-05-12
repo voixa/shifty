@@ -1,8 +1,8 @@
-// Shifty Service Worker v8 — HTML はキャッシュせず常に network、静的アセットのみキャッシュ
+// Shifty Service Worker v9 — JS は network-first に変更 (iOS Safari の cache 滞留対策)
 // + Round 34: Web Push 通知サポート
-// + Round 42: CRITICAL bug fix (seedState → migrate) と dark mode 包括対応で再 bump
+// + Round 42: 旧 cache-first だと古い app.js が固着 → 新規ユーザの空白画面の主因
 // CACHE 名を bump すると activate 時に旧キャッシュを削除する
-const CACHE = "shifty-v8";
+const CACHE = "shifty-v9";
 const STATIC_ASSETS = [
   "/styles.css",
   "/manifest.json",
@@ -55,7 +55,25 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // 静的アセットは cache-first
+  // JS ファイルは network-first (iOS Safari で古いキャッシュが固着するのを防ぐ)
+  // 旧 cache-first だと: SW v8 にアップグレード後も v6 時代の app.js が
+  // localStorage cache に残り続け、新規ユーザに空白画面を返していた。
+  if (url.pathname.startsWith("/js/") && e.request.method === "GET") {
+    e.respondWith(
+      fetch(e.request).then((r) => {
+        if (r.ok && r.type === "basic") {
+          const clone = r.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, clone));
+        }
+        return r;
+      }).catch(() => caches.match(e.request).then(c => c || new Response(
+        '// SW offline fallback', { status: 503, headers: { "Content-Type": "application/javascript" } }
+      )))
+    );
+    return;
+  }
+
+  // その他静的アセット (CSS, manifest) は cache-first で OK
   if (e.request.method === "GET") {
     e.respondWith(
       caches.match(e.request).then((cached) =>

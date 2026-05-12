@@ -43,20 +43,22 @@
   <!-- Round 28 TOP 3: Skip link (アクセシビリティ) -->
   <a href="#main" class="skip-link">メインコンテンツへスキップ</a>
 
-  <!-- Round 35 TOP 1: オフライン検知バナー -->
+  <!-- Round 35 TOP 1: オフライン検知バナー
+       Round 42 fix: navigator.onLine は iOS Safari 初期ロード時に false を返すバグがあり、
+       false positive で「ネットワーク切断」表示が固着していた。
+       offline イベントが発火した時のみ表示 = 実際に切断された時だけ反応。 -->
   <div id="offlineBanner" class="offline-banner" role="status" aria-live="polite">
     📡 ネットワークが切れています。再接続を待っています…
   </div>
   <script>
     (function() {
       const b = document.getElementById("offlineBanner");
-      function update() {
-        if (navigator.onLine) b.classList.remove("visible");
-        else b.classList.add("visible");
-      }
-      window.addEventListener("online", update);
-      window.addEventListener("offline", update);
-      update();
+      // 起動時 navigator.onLine が false でも信用しない (iOS Safari バグ対策)
+      // 実際に offline イベントが発火 → 表示、online で消す
+      window.addEventListener("offline", () => b.classList.add("visible"));
+      window.addEventListener("online",  () => b.classList.remove("visible"));
+      // 初期状態は明確に hidden
+      b.classList.remove("visible");
     })();
   </script>
 
@@ -145,6 +147,34 @@
   <script src="js/data.js"></script>
   <script src="js/algorithm.js"></script>
   <script src="js/app.js"></script>
+  <script>
+    // Round 42 fix: JS が 8 秒経っても render() を完了しなかった場合の最終保険。
+    // 古い SW キャッシュで app.js が固着している iOS Safari 等を救う。
+    setTimeout(function () {
+      var main = document.getElementById('main');
+      if (!main) return;
+      // 何かしらレンダリングされているか? skeleton 以外の子要素があれば OK
+      var hasRealContent = main.children.length > 0 && !main.querySelector('.skeleton');
+      var hasAuthOverlay = !document.getElementById('authOverlay').classList.contains('hidden');
+      if (hasRealContent || hasAuthOverlay) return;  // 正常レンダリング済 or auth 中
+      // ここまで来たら JS が固まっている可能性大 → 復旧画面を出す
+      main.innerHTML =
+        '<div style="max-width:480px;margin:60px auto;padding:24px;text-align:center;background:#fff;border:1px solid #e2e8f0;border-radius:12px;color:#0f172a">' +
+          '<div style="font-size:48px">⚠️</div>' +
+          '<h2 style="font-size:18px;font-weight:700;margin:12px 0">読み込みに時間がかかっています</h2>' +
+          '<p style="font-size:13px;color:#475569;line-height:1.6;margin-bottom:16px">' +
+            '古いキャッシュが残っている可能性があります。下のボタンでキャッシュをクリアして再読み込みしてください。' +
+          '</p>' +
+          '<button onclick="(async()=>{try{if(\'serviceWorker\' in navigator){var rs=await navigator.serviceWorker.getRegistrations();for(var r of rs){await r.unregister();}}if(window.caches){var ks=await caches.keys();for(var k of ks){await caches.delete(k);}}}catch(e){}location.reload();})()" ' +
+            'style="background:#4f46e5;color:white;border:0;border-radius:8px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer">' +
+            '🔄 キャッシュをクリアして再読み込み' +
+          '</button>' +
+          '<p style="font-size:11px;color:#94a3b8;margin-top:16px">' +
+            'それでも直らない場合は <a href="mailto:support@in-dx.jp" style="color:#4f46e5">support@in-dx.jp</a> までご連絡ください。' +
+          '</p>' +
+        '</div>';
+    }, 8000);
+  </script>
   <script>
     // Sentry フロントエンド (DSN 設定時のみ)
     (function () {
