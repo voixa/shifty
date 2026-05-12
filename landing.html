@@ -178,6 +178,9 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='44' font-size='38' text-anchor='middle' fill='white' font-family='system-ui,sans-serif' font-weight='700'%3ES%3C/text%3E%3C/svg%3E" />
   <script>
     tailwind.config = {
+      // LP は常にライトモードで配信する (マーケティングページは白基調で一貫)
+      // darkMode: 'class' → .dark が html に付かない限り dark: クラスは発火しない
+      // (デフォルトの 'media' だと OS の prefers-color-scheme: dark で勝手に発火する)
       darkMode: 'class',
       theme: {
         extend: {
@@ -186,17 +189,9 @@
         }
       }
     }
-    // Round 42 fix: ダークモード FOUC 防止 (他ページと同じ IIFE)
-    (function () {
-      try {
-        const saved = localStorage.getItem("shifty.theme") || "auto";
-        if (saved === "dark" || (saved === "auto" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
-          document.documentElement.classList.add("dark");
-        }
-      } catch (_) {}
-    })();
+    // 念のため: 別ページで dark 保存していても LP では強制 light
+    try { document.documentElement.classList.remove('dark'); } catch (_) {}
   </script>
-  <link rel="stylesheet" href="/styles.css" />
   <style>
     /* サイクル 12 #34: スムーズスクロール。reduced-motion ユーザは除外 */
     html { scroll-behavior: smooth; }
