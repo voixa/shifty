@@ -3430,9 +3430,13 @@ async function fetchAndRenderPlanInfo() {
   }
 }
 
-// Round 40: 4 段階プラン構造
+// ユーザ要望: 永久無料を廃止 → 30 日無料トライアル + Lite ¥980/月 新設
 const PLAN_INFO = {
-  free:       { label: "Free",       icon: "🆓", price: 0,    description: "8 名まで永久無料" },
+  // free は legacy 互換用 (古い tenant が plan="free" のままなのを表示)
+  // 新規申込みは 30 日 trial 後に lite / pro / business のいずれかへ自動移行
+  free:       { label: "トライアル中", icon: "🎁", price: 0,    description: "30 日無料トライアル" },
+  trial:      { label: "トライアル中", icon: "🎁", price: 0,    description: "30 日無料トライアル" },
+  lite:       { label: "Lite",       icon: "🪶", price: 980,  description: "個人店・8 名まで" },
   pro:        { label: "Pro",        icon: "💎", price: 1980, description: "1 店舗・スタッフ無制限" },
   business:   { label: "Business",   icon: "🏪", price: 4980, description: "5 店舗まで・全店舗集計" },
   enterprise: { label: "Enterprise", icon: "🏢", price: null, description: "6 店舗以上・カスタム" },
@@ -8710,6 +8714,7 @@ function runAutoGenerate() {
         laborRules: state.meta.laborRules,
         weights: state.meta.algorithmWeights,
         randomStarts: state.meta.randomStarts || 5,
+        strictAvoid: state.meta.strictAvoid !== false, // デフォルト true: 「×」を絶対遵守
       });
       clearInterval(progressTimer);
       // 100% に
@@ -9488,6 +9493,39 @@ function viewSettings() {
   horizonCard.appendChild(el("div", { class: "text-[11px] text-slate-500 dark:text-slate-400 bg-blue-50 dark:bg-blue-900/30 rounded p-2" },
     "💡 期間を変更すると、ナビゲーションの「◀ ▶」ボタンも同じ日数ステップで動くようになります。 (例: 2 週間設定 → ▶ で 14 日進む)"));
   wrap.appendChild(horizonCard);
+
+  // ユーザ要望: avoid (×) 希望の扱いを切替
+  const strictCard = el("div", { id: "set-strict-avoid", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });
+  strictCard.appendChild(el("div", { class: "font-semibold" }, "6.6 「×」希望の扱い"));
+  strictCard.appendChild(el("div", { class: "text-xs text-slate-500 dark:text-slate-400" },
+    "スタッフが「不可 (×)」を提出した日にシフトを入れるかどうか"));
+  const strictAvoidNow = state.meta.strictAvoid !== false;
+  const strictOpts = [
+    { val: true,  label: "🔒 絶対遵守 (推奨)",   desc: "× の日には絶対アサインしない。候補不足なら slot が未充足になる。" },
+    { val: false, label: "🔓 柔軟運用",          desc: "他に候補がない場合のみ × を緩和してアサイン (slot を埋める優先)" },
+  ];
+  const strictGrid = el("div", { class: "grid grid-cols-1 md:grid-cols-2 gap-2" });
+  for (const opt of strictOpts) {
+    const isSel = strictAvoidNow === opt.val;
+    const btn = el("button", {
+      class: `text-left rounded-md p-3 border-2 transition ${isSel ? "border-brand-600 bg-brand-50 dark:bg-brand-900/30" : "border-slate-200 dark:border-slate-600 hover:border-slate-400"}`,
+      onclick: () => {
+        state.meta.strictAvoid = opt.val;
+        persist();
+        render();
+        toast(`✓ 「×」希望の扱いを「${opt.label}」に設定`, "success");
+      },
+    });
+    btn.innerHTML = `
+      <div class="font-semibold text-sm">${opt.label}</div>
+      <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${opt.desc}</div>
+    `;
+    strictGrid.appendChild(btn);
+  }
+  strictCard.appendChild(strictGrid);
+  strictCard.appendChild(el("div", { class: "text-[11px] text-slate-500 dark:text-slate-400 bg-amber-50 dark:bg-amber-900/30 rounded p-2" },
+    "💡 「絶対遵守」推奨: スタッフ希望を尊重したシフトに。未充足が出たら「📨 募集メッセージ」でリマインド or 必要人数の調整で対応"));
+  wrap.appendChild(strictCard);
 
   // 希望提出締切設定 (Round 4)
   const dlCard = el("div", { id: "set-deadline", class: "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 scroll-mt-4" });

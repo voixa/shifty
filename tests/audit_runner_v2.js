@@ -121,13 +121,14 @@ console.log('\n=== T3: avoid 2-pass フィルタ ===');
 }
 
 // =====================================================================
-// TEST 4: avoid 2-pass — relaxed when sole option
+// TEST 4: avoid モード両方をテスト
+//  - strictAvoid: true (デフォルト) → avoid 該当者しかいなければ slot は unfilled
+//  - strictAvoid: false (旧 soft 挙動) → avoid 緩和して強制アサイン
 // =====================================================================
-console.log('\n=== T4: avoid relax (候補が他にいない) ===');
+console.log('\n=== T4a: strictAvoid (デフォルト) — 候補が他にいなければ unfilled ===');
 {
   const staffList = [
     staff('a', 'Alice', 'hall', { maxHoursPerWeek: 40, hourlyWage: 1100 }),
-    // Bob is kitchen, can't cover hall
     staff('b', 'Bob', 'kitchen', { maxHoursPerWeek: 40, hourlyWage: 1500 }),
   ];
   const slots = [{ id: 'sl1', date: addDays(WK, 0), position: 'hall', startTime: '11:00', endTime: '15:00', requiredCount: 1 }];
@@ -135,10 +136,26 @@ console.log('\n=== T4: avoid relax (候補が他にいない) ===');
     { id: 'p1', staffId: 'a', date: addDays(WK, 0), startTime: '11:00', endTime: '15:00', priority: 'avoid' },
   ];
   let r = generateShift({ staff: staffList, slots, preferences: prefs, laborRules: { maxHoursPerWeek: 40 }, randomStarts: 3 });
-  ok('no alt → Alice forced (avoid relaxed)', r.assignments[0].staffId === 'a');
-  ok('avoidRelaxed flag set on assignment', r.assignments[0].avoidRelaxed === true);
-  // metrics.avoidViolations counts this too (correct: it IS a violation)
-  ok('metrics tracks the violation', r.metrics.avoidViolations === 1);
+  // 期待: Alice は avoid なので除外、Bob は職種違いで eligible にならず → slot は unfilled
+  ok('strictAvoid: assignments 0 件 (Alice 除外で候補なし)', r.assignments.length === 0);
+  ok('strictAvoid: unfilled に slot が記録される', r.unfilled.length === 1);
+  ok('strictAvoid: avoidViolations === 0 (×日に配置されていない)', r.metrics.avoidViolations === 0);
+}
+
+console.log('\n=== T4b: strictAvoid: false (旧 soft 挙動・後方互換) ===');
+{
+  const staffList = [
+    staff('a', 'Alice', 'hall', { maxHoursPerWeek: 40, hourlyWage: 1100 }),
+    staff('b', 'Bob', 'kitchen', { maxHoursPerWeek: 40, hourlyWage: 1500 }),
+  ];
+  const slots = [{ id: 'sl1', date: addDays(WK, 0), position: 'hall', startTime: '11:00', endTime: '15:00', requiredCount: 1 }];
+  const prefs = [
+    { id: 'p1', staffId: 'a', date: addDays(WK, 0), startTime: '11:00', endTime: '15:00', priority: 'avoid' },
+  ];
+  let r = generateShift({ staff: staffList, slots, preferences: prefs, laborRules: { maxHoursPerWeek: 40 }, randomStarts: 3, strictAvoid: false });
+  ok('soft mode: Alice forced despite avoid', r.assignments[0]?.staffId === 'a');
+  ok('soft mode: avoidRelaxed flag set', r.assignments[0]?.avoidRelaxed === true);
+  ok('soft mode: metrics tracks violation', r.metrics.avoidViolations === 1);
 }
 
 // =====================================================================

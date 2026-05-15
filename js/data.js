@@ -483,6 +483,10 @@
     if (state.meta.onboardingCompleted === undefined) state.meta.onboardingCompleted = false;
     // ユーザ要望: シフト作成期間 (7 / 14 / 21 / 28 日) を店舗ごとに選べる
     if (state.meta.scheduleHorizonDays === undefined) state.meta.scheduleHorizonDays = 7;
+    // ユーザ要望: 「×」(avoid) 希望を絶対遵守 (旧 soft 挙動を廃止)
+    //   true: 候補が他にいなければ slot を unfilled に → ×日にシフトが入らない
+    //   false: 旧 soft 挙動 (avoid 緩和して埋める・既存テスト互換用)
+    if (state.meta.strictAvoid === undefined) state.meta.strictAvoid = true;
     // 祝日扱い: as_sunday (デフォルト) | ignore (無視) | manual
     if (!state.meta.holidayHandling) state.meta.holidayHandling = "as_sunday";
     // 希望提出の締切設定 (週開始の何日前 / 何時)

@@ -101,7 +101,7 @@ console.log('\n=== T17: 同日通し勤務 (店長一人, 朝→夜) ===');
 // =====================================================================
 // T18: All staff submit avoid for same slot — what happens?
 // =====================================================================
-console.log('\n=== T18: 全員が avoid (誰かが入らざるをえない) ===');
+console.log('\n=== T18: 全員が avoid (strictAvoid デフォルトでは slot 未充足) ===');
 {
   const staffList = [
     staff('a','Alice','hall',{maxHoursPerWeek:40}),
@@ -114,10 +114,16 @@ console.log('\n=== T18: 全員が avoid (誰かが入らざるをえない) ==='
     {id:'p2',staffId:'b',date:addDays(WK,0),startTime:'11:00',endTime:'15:00',priority:'avoid'},
     {id:'p3',staffId:'c',date:addDays(WK,0),startTime:'11:00',endTime:'15:00',priority:'avoid'},
   ];
+  // strictAvoid デフォルト (true): 全員 avoid なら slot は unfilled
   const r = generateShift({staff:staffList,slots,preferences:prefs,laborRules:{maxHoursPerWeek:40},randomStarts:3});
-  ok('slot still filled (relaxed)', r.assignments.length === 1);
-  ok('avoidRelaxed flag set', r.assignments[0].avoidRelaxed === true);
-  ok('metrics.avoidViolations == 1 (1 slot)', r.metrics.avoidViolations === 1);
+  ok('strictAvoid: slot 未充足', r.assignments.length === 0);
+  ok('strictAvoid: unfilled に記録', r.unfilled.length === 1);
+  ok('strictAvoid: avoidViolations === 0', r.metrics.avoidViolations === 0);
+  // strictAvoid: false で旧挙動も確認
+  const r2 = generateShift({staff:staffList,slots,preferences:prefs,laborRules:{maxHoursPerWeek:40},randomStarts:3, strictAvoid:false});
+  ok('soft mode: slot filled (relaxed)', r2.assignments.length === 1);
+  ok('soft mode: avoidRelaxed flag set', r2.assignments[0].avoidRelaxed === true);
+  ok('soft mode: avoidViolations == 1', r2.metrics.avoidViolations === 1);
 }
 
 // =====================================================================

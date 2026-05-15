@@ -402,7 +402,7 @@
   // =====================================================================
   // Phase 1: Coverage（困難スロット優先で必要人数を埋める）
   // =====================================================================
-  function phase1Coverage({ staff, slots, preferences, laborRules, weights, seed }) {
+  function phase1Coverage({ staff, slots, preferences, laborRules, weights, seed, strictAvoid = true }) {
     const rand = mulberry32(seed);
     const state = {
       hours: Object.fromEntries(staff.map((s) => [s.id, 0])),
@@ -448,10 +448,21 @@
         });
         continue;
       }
-      // avoid 希望者を可能なら除外（候補が残るなら強制ハード化、残らないならソフト扱い）
+      // avoid 希望者を除外
+      // strictAvoid=true (デフォルト): avoid は hard 制約 → 該当者は絶対アサインしない
+      //   候補ゼロなら slot を unfilled に → ユーザに見える形で「埋まらなかった」と通知
+      //   ユーザ要望: 「×にしてる日にシフト入る」事象を完全排除
+      // strictAvoid=false: 旧 soft 挙動 (候補が他にいないと avoid を緩和)
       const eligibleStrict = eligibleAll.filter(
         (s) => !hasAvoidPreference(s, slot, preferences)
       );
+      if (strictAvoid && eligibleStrict.length === 0) {
+        state.unfilled.push({
+          ...slot,
+          reasons: explainUnfilled(slot, staff, state, laborRules, preferences),
+        });
+        continue;
+      }
       const eligible = eligibleStrict.length > 0 ? eligibleStrict : eligibleAll;
       const isAvoidRelaxed = eligibleStrict.length === 0 && eligibleAll.length > 0;
 
@@ -497,7 +508,7 @@
   //  Step A: 単方向置換 — 各 assignment を別スタッフに置き換えで改善
   //  Step B: 2-opt スワップ — 2 つの assignment を相互に入れ替えて両者改善
   // =====================================================================
-  function phase2Optimize(state, { staff, preferences, laborRules, weights }) {
+  function phase2Optimize(state, { staff, preferences, laborRules, weights, strictAvoid = true }) {
     let improved = true;
     let rounds = 0;
     const MAX_ROUNDS = 8;
@@ -522,6 +533,8 @@
         if (eligibleAll.length === 0) continue;
         // avoid 2-pass フィルタを Phase 1 と同じく適用 (Phase 2 で巻き戻されるバグ防止)
         const eligibleStrict = eligibleAll.filter((s) => !hasAvoidPreference(s, slotLike, preferences));
+        // strictAvoid モード: avoid 候補のみなら置換せず現状維持 (新しく違反を作らない)
+        if (strictAvoid && eligibleStrict.length === 0) continue;
         const eligible = eligibleStrict.length > 0 ? eligibleStrict : eligibleAll;
         const stepAvoidRelaxed = eligibleStrict.length === 0 && eligibleAll.length > 0;
         const scored = eligible
@@ -919,6 +932,8 @@
     weights: rawWeights,
     randomStarts = 5,
     decompose = true, // Round 18 TOP 3: 希望ベース slot 細分化を有効化
+    strictAvoid = true, // ユーザ要望: avoid(×) を hard 制約として扱う (デフォルト true)
+                         // false にすると旧 soft 挙動 (候補が他にいないと avoid を緩和)
   }) {
     const weights = normalizeWeights(rawWeights);
 
@@ -961,12 +976,14 @@
         laborRules,
         weights,
         seed,
+        strictAvoid,
       });
       state = phase2Optimize(state, {
         staff: staffWithCost,
         preferences,
         laborRules,
         weights,
+        strictAvoid,
       });
       const m = calcMetrics(state, { staff: staffWithCost, slots: workingSlots, preferences });
       const obj = objectiveValue(m, weights);

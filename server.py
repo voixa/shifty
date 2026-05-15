@@ -1306,11 +1306,15 @@ def api_list_staff_messages():
 # ============================================================
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
-# Round 40: Free + Pro + Business + Enterprise (Enterprise は Stripe ではなく要相談)
+# プラン (永久無料を廃止 → 30 日無料トライアル + Lite ¥980/月 を新設)
+# Enterprise は Stripe ではなく要相談で個別対応
 STRIPE_PRICES = {
+    "lite":     os.environ.get("STRIPE_PRICE_LITE",     ""),  # ¥980/月 (新設・個人店向け)
     "pro":      os.environ.get("STRIPE_PRICE_PRO",      ""),  # ¥1,980/月
     "business": os.environ.get("STRIPE_PRICE_BUSINESS", ""),  # ¥4,980/月
 }
+# トライアル期間 (旧 14 日 → 30 日に延長、ユーザ要望)
+STRIPE_TRIAL_DAYS = int(os.environ.get("STRIPE_TRIAL_DAYS", "30"))
 
 
 def _stripe_client():
@@ -1358,7 +1362,7 @@ def api_checkout_session():
             "payment_method_types": ["card"],
             "line_items": [{"price": price_id, "quantity": 1}],
             "subscription_data": {
-                "trial_period_days": 14,
+                "trial_period_days": STRIPE_TRIAL_DAYS,
                 "trial_settings": {
                     "end_behavior": {"missing_payment_method": "cancel"}
                 },
@@ -3424,7 +3428,18 @@ def api_inquiry():
     )
 
     # Free プランからの直接申込みかどうか判定
-    is_free_signup = "Free" in (record.get("message") or "") or "8 名以下" in (record.get("staffCount") or "") or "8名以下" in (record.get("staffCount") or "")
+    # ユーザ要望: LP からの申込みは即時 magic link を送る (旧: 「Free」「8 名以下」だけ
+    # マッチさせていたが、ボトムフォームの dropdown 値「1-5」「6-15」「16-30」「30+」が
+    # 全て手動対応扱いになり、ユーザに magic link が届かない事象が発生していた)
+    # LP の全 staffCount 値を Free signup として扱う + 後方互換で旧値もキープ
+    sc = (record.get("staffCount") or "").strip()
+    msg = record.get("message") or ""
+    is_free_signup = (
+        "Free" in msg
+        or sc in {"1-5", "6-15", "16-30", "30+", "8名以下（Free）", "9-15", "16-30", "31+"}
+        or "8 名以下" in sc
+        or "8名以下" in sc
+    )
     site = os.environ.get("SITE_URL", "https://shifty.in-dx.jp")
 
     if is_free_signup and STORAGE_BACKEND == "firestore":
@@ -3438,12 +3453,14 @@ def api_inquiry():
                     break
             slug = existing["slug"] if existing else _generate_slug(record["restaurantName"])
             if not existing:
+                # 新規 tenant: 30 日トライアル開始 (plan="trial")
+                # トライアル終了日を created_at + 30 日とする (Stripe 連携時に再計算)
                 tm.create(
                     slug=slug,
                     email=record["email"],
                     contact_name=record["contactName"],
                     restaurant_name=record["restaurantName"],
-                    plan="free",
+                    plan="trial",  # 旧: "free" (永久無料) → "trial" (30 日)
                 )
             magic_token = tm.issue_magic_link(slug)
             magic_link = f"{site}/auth/verify?token={magic_token}"
@@ -3457,11 +3474,17 @@ def api_inquiry():
                 f"━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"以後のログインは下記より行ってください:\n"
                 f"  {site}/login\n\n"
+                f"【30 日間 無料トライアル】\n"
+                f"・全機能を 30 日間お試しいただけます\n"
+                f"・クレジットカード登録は不要です\n"
+                f"・継続される場合のみ Lite (¥980/月) / Pro (¥1,980/月) / Business (¥4,980/月) のいずれかへ移行\n"
+                f"・期間内のキャンセルは料金が発生しません\n\n"
                 f"【次のステップ】\n"
                 f"1. 上記リンクをクリックしてログイン\n"
-                f"2. スタッフ情報を登録（CSV 取込もできます）\n"
-                f"3. 「希望リンク全員生成」で LINE 配布\n"
-                f"4. 希望が集まったら「AI 自動生成」\n\n"
+                f"2. セットアップウィザード (業態・営業時間など 6 ステップ) を完了\n"
+                f"3. スタッフ情報を登録（CSV 取込もできます）\n"
+                f"4. 「希望リンク全員生成」で LINE 配布\n"
+                f"5. 希望が集まったら「AI 自動生成」\n\n"
                 f"分からないことがあれば、このメールに返信してご質問ください。\n"
                 f"飲DX サポートチームより 24 時間以内にお返事いたします。\n\n"
                 f"---\n飲DX Shifty\nsupport@in-dx.jp\n{site}/help\n"
